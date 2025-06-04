@@ -20,7 +20,11 @@ app = FastAPI(title="DeenBridge AI API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend domain
+    allow_origins=[
+        "http://localhost:3000",  # Local development
+        "https://deenbridge.vercel.app",  # Production frontend
+        "https://*.vercel.app",  # Vercel preview deployments
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
