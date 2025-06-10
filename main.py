@@ -24,6 +24,9 @@ app.add_middleware(
         "http://localhost:3000",  # Local development
         "https://deenbridge.vercel.app",  # Production frontend
         "https://*.vercel.app",  # Vercel preview deployments
+        "https://dnb-frontend.vercel.app",  # Your frontend domain
+        "http://localhost:8000",  # Local API
+        "https://dnb-ai.onrender.com",  # Render deployment
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -109,10 +112,8 @@ async def chat(request: ChatRequest):
                 'gemini-2.5-flash-preview-05-20',
                 safety_settings=get_safety_settings()
             )
-            # Initialize chat with Islamic context
+            # Initialize chat without sending context message
             active_chats[chat_id] = model.start_chat(history=[])
-            # Send initial context message
-            active_chats[chat_id].send_message(ISLAMIC_CONTEXT)
         
         chat = active_chats[chat_id]
         
@@ -137,13 +138,22 @@ async def chat(request: ChatRequest):
             logger.error("Empty response received from model")
             raise HTTPException(status_code=500, detail="Empty response from AI model")
         
-        # Get chat history (excluding the initial context message)
+        # Get chat history
         history = []
-        for message in chat.history[1:]:  # Skip the initial context message
-            history.append(Message(
-                role="user" if message.role == "user" else "model",
-                content=message.parts[0].text
-            ))
+        for message in chat.history:
+            try:
+                if hasattr(message, 'parts') and message.parts:
+                    content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
+                else:
+                    content = str(message)
+                
+                history.append(Message(
+                    role="user" if message.role == "user" else "model",
+                    content=content
+                ))
+            except Exception as e:
+                logger.warning(f"Error processing message in history: {str(e)}")
+                continue
         
         logger.info("Chat response generated successfully")
         return ChatResponse(
