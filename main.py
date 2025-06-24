@@ -23,7 +23,6 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # Local development
         "https://deenbridge.vercel.app",  # Production frontend
-        "https://*.vercel.app",  # Vercel preview deployments
         "https://dnb-frontend.vercel.app",  # Your frontend domain
         "http://localhost:8000",  # Local API
         "https://dnb-ai.onrender.com",  # Render deployment
@@ -99,6 +98,13 @@ def get_safety_settings():
         }
     ]
 
+
+@app.get("/ping")
+async  def  ping():
+ logger.info("************** Ping pong ping pong *************");
+ return {"************** Ping pong ping pong *************"}
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     try:
@@ -120,7 +126,7 @@ async def chat(request: ChatRequest):
         # Prepare the prompt with context if provided
         full_prompt = request.prompt
         if request.context:
-            full_prompt = f"Context: {request.context}\n\nQuestion: {request.prompt}"
+            full_prompt = f"Context: {request.context}\n\nQuestion: {ISLAMIC_CONTEXT,request.prompt}"
         
         # Send message and get response
         logger.info("Sending message to chat...")
