@@ -8,6 +8,8 @@ import logging
 from typing import List, Optional
 import uuid
 
+from stellar import router as stellar_router
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,6 +18,10 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 app = FastAPI(title="DeenBridge AI API")
+
+# Stellar integration: read-only zakat/balance features on the network
+# the rest of the Deen Bridge platform settles on
+app.include_router(stellar_router)
 
 # Configure CORS
 app.add_middleware(
