@@ -51,11 +51,21 @@ echo "GOOGLE_AI_API_KEY=your_api_key_here" > .env
 uvicorn main:app --reload
 ```
 
+## Branching Strategy
+
+| Branch | Purpose                                                        |
+|--------|----------------------------------------------------------------|
+| `main` | Stable, production-ready code — releases only                  |
+| `dev`  | Active development — **all pull requests must target `dev`**   |
+
+Maintainers periodically merge `dev` into `main` for releases. Pull requests opened against `main` will be asked to retarget `dev`.
+
 ### Making Changes
 
-1. Create a branch from `main`:
+1. Create a branch from the latest `dev`:
    ```bash
-   git checkout -b feature/your-feature-name
+   git fetch origin
+   git checkout -b feature/your-feature-name origin/dev
    ```
 
 2. Make your changes following our coding standards
@@ -67,7 +77,7 @@ uvicorn main:app --reload
    git commit -m "feat: improve response caching"
    ```
 
-5. Push and create a PR:
+5. Push and create a PR **with `dev` as the base branch**:
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -100,10 +110,11 @@ We follow Conventional Commits:
 
 ## Pull Request Guidelines
 
-1. **Title**: Use conventional commit format
-2. **Description**: Explain what and why
-3. **Link Issue**: Reference the issue number (`Closes #123`)
-4. **Testing**: Describe how you tested the changes
+1. **Base Branch**: open the PR against `dev`, never `main`
+2. **Title**: Use conventional commit format
+3. **Description**: Explain what and why
+4. **Link Issue**: Reference the issue number (`Closes #123`)
+5. **Testing**: Describe how you tested the changes
 
 ## Code of Conduct
 
