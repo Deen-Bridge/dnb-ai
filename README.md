@@ -17,7 +17,9 @@
 
 ## About
 
-This service powers the AI assistant inside **Deen Bridge**, a platform for authentic Islamic education. It wraps Google's Gemini model with an Islamic-knowledge system prompt, content safety filters, and per-session conversation history, exposing a simple chat API consumed by the web app.
+This service powers the AI assistant inside **Deen Bridge**, a platform for authentic Islamic education built on the **Stellar network** — courses and books are purchased with USDC, and creators are paid directly to their own Stellar wallets. The assistant wraps Google's Gemini model with an Islamic-knowledge system prompt, content safety filters, and per-session conversation history, exposing a simple chat API consumed by the web app.
+
+On the roadmap: Stellar-aware assistance — zakat calculation from a wallet's on-chain USDC balance via Horizon, and answering questions about the user's on-chain purchases (see the open `wave:*` issues).
 
 The platform is composed of three services:
 
