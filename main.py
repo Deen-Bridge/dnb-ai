@@ -48,7 +48,7 @@ except Exception as e:
 active_chats = {}
 
 # Islamic context and safety instructions
-ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic knowledge and guidance. 
+ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic knowledge and guidance.
 Your responses should:
 1. Be based on authentic Islamic sources (Quran and Hadith)
 2. Be respectful and appropriate
@@ -64,19 +64,23 @@ Remember to:
 - Promote positive Islamic values and character
 """
 
+
 class Message(BaseModel):
     role: str
     content: str
+
 
 class ChatRequest(BaseModel):
     prompt: str
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
 
+
 class ChatResponse(BaseModel):
     response: str
     chat_id: str
     history: List[Message]
+
 
 def get_safety_settings():
     return [
@@ -100,16 +104,16 @@ def get_safety_settings():
 
 
 @app.get("/ping")
-async  def  ping():
- logger.info("************** Ping pong ping pong *************");
- return {"************** Ping pong ping pong *************"}
+async def ping():
+    logger.info("************** Ping pong ping pong *************")
+    return {"************** Ping pong ping pong *************"}
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
-        
+
         # Get or create chat session
         chat_id = request.chat_id or str(uuid.uuid4())
         if chat_id not in active_chats:
@@ -120,14 +124,14 @@ async def chat(request: ChatRequest):
             )
             # Initialize chat without sending context message
             active_chats[chat_id] = model.start_chat(history=[])
-        
+
         chat = active_chats[chat_id]
-        
+
         # Prepare the prompt with context if provided
         full_prompt = request.prompt
         if request.context:
-            full_prompt = f"Context: {request.context}\n\nQuestion: {ISLAMIC_CONTEXT,request.prompt}"
-        
+            full_prompt = f"Context: {request.context}\n\nQuestion: {ISLAMIC_CONTEXT, request.prompt}"
+
         # Send message and get response
         logger.info("Sending message to chat...")
         response = chat.send_message(
@@ -139,11 +143,11 @@ async def chat(request: ChatRequest):
                 "max_output_tokens": 2048,
             }
         )
-        
+
         if not response.text:
             logger.error("Empty response received from model")
             raise HTTPException(status_code=500, detail="Empty response from AI model")
-        
+
         # Get chat history
         history = []
         for message in chat.history:
@@ -152,7 +156,7 @@ async def chat(request: ChatRequest):
                     content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
                 else:
                     content = str(message)
-                
+
                 history.append(Message(
                     role="user" if message.role == "user" else "model",
                     content=content
@@ -160,18 +164,19 @@ async def chat(request: ChatRequest):
             except Exception as e:
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
-        
+
         logger.info("Chat response generated successfully")
         return ChatResponse(
             response=response.text,
             chat_id=chat_id,
             history=history
         )
-        
+
     except Exception as e:
         error_msg = f"❌ Chat API Error: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
 
 @app.delete("/chat/{chat_id}")
 async def delete_chat(chat_id: str):
@@ -190,4 +195,3 @@ if __name__ == "__main__":
     import uvicorn
     logger.info("Starting server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
