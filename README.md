@@ -81,7 +81,7 @@ Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI ru
 
 ## 🌊 Contributing & Drips Wave
 
-This repository participates in the **[Stellar Drips Wave](https://www.drips.network/wave/stellar)** bounty program — contributors earn real rewards for completing issues labeled `wave:1` through `wave:4`.
+This repository participates in the **[Stellar Drips Wave](https://www.drips.network/wave/stellar)** bounty program — contributors earn Points (and real rewards) for resolving this repo's issues during a Wave, with complexity tiers set in the Drips Wave app.
 
 - All pull requests target the **`dev`** branch (`main` is releases only)
 - CI must pass before review
