@@ -1,0 +1,34 @@
+# CodeRabbit configuration — https://docs.coderabbit.ai/reference/configuration
+language: "en-US"
+tone_instructions: "Be welcoming and constructive with contributors, many of whom are first-time open-source contributors. Be strict about correctness, security, async hygiene, and CI health. Explain the why behind every requested change."
+reviews:
+  profile: "chill"
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+      - "dev"
+  path_instructions:
+    - path: "**/*.py"
+      instructions: >-
+        This is a FastAPI service; CI enforces flake8, so style violations fail the build.
+        Flag blocking calls inside async endpoints (network calls should be awaited or
+        offloaded), missing Pydantic validation on request bodies, bare excepts that
+        leak stack traces to clients, and new dependencies not pinned in requirements.txt.
+    - path: "stellar.py"
+      instructions: >-
+        Stellar integration is read-only and non-custodial: only public keys are accepted
+        and only Horizon lookups are performed. Flag anything that accepts, stores, or
+        logs a secret key, and any endpoint that would submit transactions.
+    - path: "**/*.py"
+      instructions: >-
+        Flag hardcoded API keys or secrets; configuration belongs in environment
+        variables. GEMINI_API_KEY must never appear in code, tests, or fixtures.
+chat:
+  auto_reply: true
