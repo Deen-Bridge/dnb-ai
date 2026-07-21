@@ -42,6 +42,7 @@ The platform is composed of three services:
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
+| `POST` | `/study/generate` | Generate schema-validated quizzes and flashcards |
 | `GET` | `/ping` | Health check |
 
 ## 🚀 Getting Started
