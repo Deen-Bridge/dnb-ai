@@ -11,6 +11,7 @@ import uuid
 
 from stellar import router as stellar_router
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
+from study import router as study_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +25,7 @@ app = FastAPI(title="DeenBridge AI API")
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(study_router)
 
 # Configure CORS
 app.add_middleware(
