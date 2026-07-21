@@ -2,16 +2,19 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
+from google.generativeai import protos
 import json
 import os
 from dotenv import load_dotenv
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 import uuid
 
 from stellar import router as stellar_router
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 from study import router as study_router
+from tools import MAX_TOOL_ROUNDS, ToolCallRecord, get_registry
+from tools.registry import run_tool_handler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -96,6 +99,7 @@ class ChatResponse(BaseModel):
     chat_id: str
     history: List[Message]
     moderation: Optional[Moderation] = None
+    tool_calls: Optional[List[ToolCallRecord]] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -127,6 +131,10 @@ safety_pipeline = SafetyPipeline(
     InputGate(safety_policy, classify_for_safety), OutputCheck(safety_policy)
 )
 
+# Tool registry for Gemini function-calling
+tool_registry = get_registry()
+tool_declarations = tool_registry.declarations()
+
 
 def get_safety_settings():
     return [
@@ -155,8 +163,75 @@ async def ping():
     return {"************** Ping pong ping pong *************"}
 
 
+def _run_with_tools(chat_session, prompt: str) -> tuple[str, list[ToolCallRecord]]:
+    """Run a prompt through the model with function-calling loop.
+
+    Returns (final_text, tool_calls_list). Sync — the tool handlers use
+    a thread-pool executor for per-tool timeouts.
+    """
+    tool_calls: list[ToolCallRecord] = []
+    content: Any = prompt
+
+    for _round in range(MAX_TOOL_ROUNDS):
+        response = chat_session.send_message(
+            content,
+            generation_config={
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 2048,
+            },
+        )
+        candidate = response.candidates[0]
+        part = candidate.content.parts[0]
+
+        if part.text:
+            return part.text, tool_calls
+
+        if part.function_call:
+            fc = part.function_call
+            args_dict = dict(fc.args) if fc.args else {}
+
+            tool = tool_registry.get(fc.name)
+            if tool is None:
+                result = {"error": f"Unknown tool: {fc.name}"}
+            else:
+                result = run_tool_handler(tool, args_dict)
+
+            tool_calls.append(ToolCallRecord(
+                tool_name=fc.name,
+                args=args_dict,
+                result=json.dumps(result),
+            ))
+
+            content = protos.Content(
+                parts=[protos.Part(
+                    function_response=protos.FunctionResponse(
+                        name=fc.name,
+                        response=result,
+                    )
+                )],
+                role="user",
+            )
+
+    # Exhausted rounds — force a final text answer
+    response = chat_session.send_message(
+        "Please provide your best final answer based on the information available.",
+        generation_config={
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 40,
+            "max_output_tokens": 2048,
+        },
+    )
+    final_text = response.candidates[0].content.parts[0].text or ""
+    return final_text, tool_calls
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+    tool_calls_recorded: list[ToolCallRecord] = []
+
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
@@ -167,6 +242,7 @@ async def chat(request: ChatRequest):
                 logger.info(f"Creating new chat session: {chat_id}")
                 model = genai.GenerativeModel(
                     'gemini-2.5-flash-preview-05-20',
+                    tools=tool_declarations if tool_declarations else None,
                     safety_settings=get_safety_settings()
                 )
                 active_chats[chat_id] = model.start_chat(history=[])
@@ -174,18 +250,28 @@ async def chat(request: ChatRequest):
             context = f"Additional context: {request.context}\n\n" if request.context else ""
             full_prompt = f"{ISLAMIC_CONTEXT}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
-            response = active_chats[chat_id].send_message(
-                full_prompt,
-                generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                    "max_output_tokens": 2048,
-                }
-            )
-            if not response.text:
+
+            chat_session = active_chats[chat_id]
+            if tool_declarations:
+                final_text, calls = _run_with_tools(chat_session, full_prompt)
+                tool_calls_recorded.extend(calls)
+            else:
+                response = chat_session.send_message(
+                    full_prompt,
+                    generation_config={
+                        "temperature": 0.7,
+                        "top_p": 0.8,
+                        "top_k": 40,
+                        "max_output_tokens": 2048,
+                    }
+                )
+                if not response.text:
+                    raise HTTPException(status_code=500, detail="Empty response from AI model")
+                final_text = response.text
+
+            if not final_text:
                 raise HTTPException(status_code=500, detail="Empty response from AI model")
-            return response.text
+            return final_text
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
         if enabled:
@@ -222,15 +308,18 @@ async def chat(request: ChatRequest):
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
 
+        response_text = safety_result.text if safety_result else generated_text
+
         logger.info("Chat response generated successfully")
         return ChatResponse(
-            response=safety_result.text if safety_result else generated_text,
+            response=response_text,
             chat_id=chat_id,
             history=history,
             moderation=Moderation(
                 category_id=safety_result.category_id,
                 action=safety_result.action,
             ) if safety_result and safety_result.category_id else None,
+            tool_calls=tool_calls_recorded or None,
         )
 
     except Exception as e:
