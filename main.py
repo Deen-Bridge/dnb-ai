@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
+import json
 import os
 from dotenv import load_dotenv
 import logging
@@ -9,6 +10,7 @@ from typing import List, Optional
 import uuid
 
 from stellar import router as stellar_router
+from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,10 +84,42 @@ class ChatRequest(BaseModel):
     context: Optional[str] = None  # Additional context for specific queries
 
 
+class Moderation(BaseModel):
+    category_id: Optional[str]
+    action: str
+
+
 class ChatResponse(BaseModel):
     response: str
     chat_id: str
     history: List[Message]
+    moderation: Optional[Moderation] = None
+
+
+def classify_for_safety(prompt: str, candidate_ids: List[str]):
+    """Gemini classifier seam; offline tests replace this with a fixture."""
+    model = genai.GenerativeModel("gemini-2.5-flash-preview-05-20")
+    classifier_prompt = (
+        "Classify the user text for the Deen Bridge safety policy. Return only "
+        "strict JSON with exactly category_id, confidence, and action. "
+        "category_id must be one of the candidates or 'none'; action must be "
+        "allow, allow_with_guidance, or refuse. Candidates: "
+        f"{candidate_ids}\n\nUser text: {prompt}"
+    )
+    response = model.generate_content(
+        classifier_prompt,
+        generation_config={
+            "temperature": 0,
+            "response_mime_type": "application/json",
+        },
+    )
+    return json.loads(response.text)
+
+
+safety_policy = load_policy()
+safety_pipeline = SafetyPipeline(
+    InputGate(safety_policy, classify_for_safety), OutputCheck(safety_policy)
+)
 
 
 def get_safety_settings():
@@ -120,43 +154,54 @@ async def chat(request: ChatRequest):
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
-        # Get or create chat session
         chat_id = request.chat_id or str(uuid.uuid4())
-        if chat_id not in active_chats:
-            logger.info(f"Creating new chat session: {chat_id}")
-            model = genai.GenerativeModel(
-                'gemini-2.5-flash-preview-05-20',
-                safety_settings=get_safety_settings()
+
+        def generate(safety_prompt: str) -> str:
+            if chat_id not in active_chats:
+                logger.info(f"Creating new chat session: {chat_id}")
+                model = genai.GenerativeModel(
+                    'gemini-2.5-flash-preview-05-20',
+                    safety_settings=get_safety_settings()
+                )
+                active_chats[chat_id] = model.start_chat(history=[])
+
+            context = f"Additional context: {request.context}\n\n" if request.context else ""
+            full_prompt = f"{ISLAMIC_CONTEXT}\n{context}User question: {safety_prompt}"
+            logger.info("Sending message to chat...")
+            response = active_chats[chat_id].send_message(
+                full_prompt,
+                generation_config={
+                    "temperature": 0.7,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                    "max_output_tokens": 2048,
+                }
             )
-            # Initialize chat without sending context message
-            active_chats[chat_id] = model.start_chat(history=[])
+            if not response.text:
+                raise HTTPException(status_code=500, detail="Empty response from AI model")
+            return response.text
 
-        chat = active_chats[chat_id]
+        enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
+        if enabled:
+            safety_result = safety_pipeline.run(request.prompt, generate)
+        else:
+            safety_result = None
+            generated_text = generate(request.prompt)
 
-        # Prepare the prompt with context if provided
-        full_prompt = request.prompt
-        if request.context:
-            full_prompt = f"Context: {request.context}\n\nQuestion: {ISLAMIC_CONTEXT, request.prompt}"
-
-        # Send message and get response
-        logger.info("Sending message to chat...")
-        response = chat.send_message(
-            full_prompt,
-            generation_config={
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 2048,
-            }
+        logger.info(
+            "safety=%s",
+            {
+                "policy_id": safety_result.category_id if safety_result else None,
+                "action": safety_result.action if safety_result else "disabled",
+                "stages_fired": safety_result.stages_fired if safety_result else [],
+                "latency_ms": safety_result.latency_ms if safety_result else 0,
+            },
         )
-
-        if not response.text:
-            logger.error("Empty response received from model")
-            raise HTTPException(status_code=500, detail="Empty response from AI model")
 
         # Get chat history
         history = []
-        for message in chat.history:
+        chat_session = active_chats.get(chat_id)
+        for message in chat_session.history if chat_session else []:
             try:
                 if hasattr(message, 'parts') and message.parts:
                     content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
@@ -173,9 +218,13 @@ async def chat(request: ChatRequest):
 
         logger.info("Chat response generated successfully")
         return ChatResponse(
-            response=response.text,
+            response=safety_result.text if safety_result else generated_text,
             chat_id=chat_id,
-            history=history
+            history=history,
+            moderation=Moderation(
+                category_id=safety_result.category_id,
+                action=safety_result.action,
+            ) if safety_result and safety_result.category_id else None,
         )
 
     except Exception as e:
