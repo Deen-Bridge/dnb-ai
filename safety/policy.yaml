@@ -45,11 +45,11 @@ categories:
       I can’t help inflame sectarian hostility or declare people outside Islam.
       I can offer a respectful, educational overview of differing traditions instead.
     keywords:
-      - "\\b(?:takfir|kafir|kaffir|unbeliever|apostate).{0,55}\\b(?:sect|sunni|shia|sufi|muslim|everyone|all)\\b"
-      - "\\b(?:attack|insult|humiliate|destroy|hate).{0,40}\\b(?:sect|sunni|shia|sufi|muslims?)\\b"
-      - "\\b(?:sect|sunni|shia|sufi).{0,40}\\b(?:kafir|unbeliever|apostate|evil)\\b"
+      - "\\b(?:takfir|kafirs?|kaffirs?|unbelievers?|apostates?).{0,55}\\b(?:sect|sunnis?|shias?|sufis?|muslims?|everyone|all)\\b"
+      - "\\b(?:attack|insult|humiliate|destroy|hate).{0,40}\\b(?:sect|sunnis?|shias?|sufis?|muslims?)\\b"
+      - "\\b(?:sect|sunnis?|shias?|sufis?).{0,40}\\b(?:kafirs?|unbelievers?|apostates?|evil)\\b"
     output_patterns:
-      - "\\b(?:all|every) (?:sunnis?|shias?|sufis?).{0,25}\\b(?:kafir|unbeliever|apostate)\\b"
+      - "\\b(?:all|every) (?:sunnis?|shias?|sufis?).{0,25}\\b(?:kafirs?|unbelievers?|apostates?)\\b"
 
   - id: DB-SAFE-003
     name: scholar_impersonation

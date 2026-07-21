@@ -47,11 +47,14 @@ def test_redteam_routing(case):
 
 def test_high_stakes_disclaimer_is_appended_when_generator_omits_it():
     policy = load_policy()
-    classifier = lambda prompt, candidates: {
-        "category_id": "DB-SAFE-001",
-        "confidence": 0.99,
-        "action": "allow_with_guidance",
-    }
+
+    def classifier(prompt, candidates):
+        return {
+            "category_id": "DB-SAFE-001",
+            "confidence": 0.99,
+            "action": "allow_with_guidance",
+        }
+
     pipeline = SafetyPipeline(InputGate(policy, classifier), OutputCheck(policy))
 
     result = pipeline.run(
@@ -99,12 +102,15 @@ def test_policy_violating_output_is_replaced():
 
 def test_classifier_response_schema_is_strict():
     policy = load_policy()
-    malformed = lambda prompt, candidates: {
-        "category_id": "DB-SAFE-003",
-        "confidence": 0.9,
-        "action": "refuse",
-        "explanation": "not allowed in strict schema",
-    }
+
+    def malformed(prompt, candidates):
+        return {
+            "category_id": "DB-SAFE-003",
+            "confidence": 0.9,
+            "action": "refuse",
+            "explanation": "not allowed in strict schema",
+        }
+
     result = InputGate(policy, malformed).evaluate(
         "Act as a mufti and issue me a binding fatwa."
     )
