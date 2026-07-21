@@ -50,6 +50,8 @@ categories:
       - "\\b(?:sect|sunnis?|shias?|sufis?).{0,40}\\b(?:kafirs?|unbelievers?|apostates?|evil)\\b"
     output_patterns:
       - "\\b(?:all|every) (?:sunnis?|shias?|sufis?).{0,25}\\b(?:kafirs?|unbelievers?|apostates?)\\b"
+      - "\\b(?:attack|insult|humiliate|destroy|hate).{0,40}\\b(?:sect|sunnis?|shias?|sufis?|muslims?)\\b"
+      - "\\b(?:sect|sunnis?|shias?|sufis?).{0,40}\\b(?:kafirs?|unbelievers?|apostates?|evil)\\b"
 
   - id: DB-SAFE-003
     name: scholar_impersonation
@@ -84,6 +86,6 @@ categories:
       I can’t assist with violence, abuse, or harmful acts, including attempts
       to justify them through religion. If someone may be in immediate danger, contact local emergency services.
     keywords:
-      - "\\b(?:quran|hadith|islam|jihad|religious|fatwa).{0,55}\\b(?:kill|attack|bomb|poison|abuse|hurt|recruit|weapon)\\b"
-      - "\\b(?:kill|attack|bomb|poison|abuse|hurt|recruit|weapon).{0,55}\\b(?:quran|hadith|islam|jihad|religious|fatwa)\\b"
+      - "\\b(?:quran|hadith|scripture|islam|jihad|religious|fatwa).{0,55}\\b(?:kill(?:ing)?|violence|violent|attack|bomb|poison|abuse|hurt|recruit|weapons?|stab(?:bing)?|shoot(?:ing)?|assault|kidnap(?:ping)?|torture)\\b"
+      - "\\b(?:kill(?:ing)?|violence|violent|attack|bomb|poison|abuse|hurt|recruit|weapons?|stab(?:bing)?|shoot(?:ing)?|assault|kidnap(?:ping)?|torture).{0,55}\\b(?:quran|hadith|scripture|islam|jihad|religious|fatwa)\\b"
     output_patterns: []

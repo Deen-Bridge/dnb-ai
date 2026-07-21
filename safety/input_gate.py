@@ -1,5 +1,6 @@
 """Pre-generation classification and policy routing."""
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -30,14 +31,13 @@ class InputGate:
         return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
     def evaluate(self, prompt: str) -> InputDecision:
-        if self._matches(prompt, self.policy.benign_near_miss_patterns):
-            return InputDecision(None, 1.0, "allow", stages_fired=["prefilter_benign"])
-
         candidates = [
             category
             for category in self.policy.categories.values()
             if self._matches(prompt, category.keywords)
         ]
+        if not candidates and self._matches(prompt, self.policy.benign_near_miss_patterns):
+            return InputDecision(None, 1.0, "allow", stages_fired=["prefilter_benign"])
         if not candidates:
             return InputDecision(None, 1.0, "allow", stages_fired=["prefilter_clear"])
 
@@ -69,6 +69,10 @@ class InputGate:
                 0.0,
                 ["prefilter_match", "classifier_failed", "policy_fallback"],
             )
+
+    async def evaluate_async(self, prompt: str) -> InputDecision:
+        """Evaluate without running the synchronous classifier on the event loop."""
+        return await asyncio.to_thread(self.evaluate, prompt)
 
     def _validated_category(
         self, result: Dict[str, object], candidates: List[PolicyCategory]

@@ -27,6 +27,17 @@ class SafetyPipeline:
     def run(self, prompt: str, generator: Callable[[str], str]) -> SafetyResult:
         started = perf_counter()
         decision = self.input_gate.evaluate(prompt)
+        return self._complete(prompt, generator, decision, started)
+
+    async def run_async(
+        self, prompt: str, generator: Callable[[str], str]
+    ) -> SafetyResult:
+        """Run the pipeline while keeping classification off the event loop."""
+        started = perf_counter()
+        decision = await self.input_gate.evaluate_async(prompt)
+        return self._complete(prompt, generator, decision, started)
+
+    def _complete(self, prompt, generator, decision, started):
         stages = list(decision.stages_fired)
 
         if decision.action == "refuse":
@@ -40,14 +51,30 @@ class SafetyPipeline:
         generated = generator(generation_prompt)
         checked = self.output_check.enforce(generated, decision)
         stages.extend(checked.stages_fired)
-        return self._result(checked.text, decision, stages, started, True)
+        return self._result(
+            checked.text,
+            decision,
+            stages,
+            started,
+            True,
+            category_id=checked.category_id,
+            action=checked.action,
+        )
 
     @staticmethod
-    def _result(text, decision, stages, started, generator_called):
+    def _result(
+        text,
+        decision,
+        stages,
+        started,
+        generator_called,
+        category_id=None,
+        action=None,
+    ):
         return SafetyResult(
             text=text,
-            category_id=decision.category_id,
-            action=decision.action,
+            category_id=category_id or decision.category_id,
+            action=action or decision.action,
             confidence=decision.confidence,
             stages_fired=stages,
             latency_ms=round((perf_counter() - started) * 1000, 2),

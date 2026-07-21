@@ -85,7 +85,7 @@ class ChatRequest(BaseModel):
 
 
 class Moderation(BaseModel):
-    category_id: Optional[str]
+    category_id: Optional[str] = None
     action: str
 
 
@@ -98,20 +98,24 @@ class ChatResponse(BaseModel):
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
     """Gemini classifier seam; offline tests replace this with a fixture."""
-    model = genai.GenerativeModel("gemini-2.5-flash-preview-05-20")
-    classifier_prompt = (
+    classifier_instruction = (
         "Classify the user text for the Deen Bridge safety policy. Return only "
         "strict JSON with exactly category_id, confidence, and action. "
         "category_id must be one of the candidates or 'none'; action must be "
         "allow, allow_with_guidance, or refuse. Candidates: "
-        f"{candidate_ids}\n\nUser text: {prompt}"
+        f"{candidate_ids}"
+    )
+    model = genai.GenerativeModel(
+        "gemini-2.5-flash-preview-05-20",
+        system_instruction=classifier_instruction,
     )
     response = model.generate_content(
-        classifier_prompt,
+        prompt,
         generation_config={
             "temperature": 0,
             "response_mime_type": "application/json",
         },
+        request_options={"timeout": 30},
     )
     return json.loads(response.text)
 
@@ -183,7 +187,7 @@ async def chat(request: ChatRequest):
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
         if enabled:
-            safety_result = safety_pipeline.run(request.prompt, generate)
+            safety_result = await safety_pipeline.run_async(request.prompt, generate)
         else:
             safety_result = None
             generated_text = generate(request.prompt)

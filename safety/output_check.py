@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from .input_gate import InputDecision
 from .policy import Policy
@@ -12,6 +12,8 @@ from .policy import Policy
 class OutputDecision:
     text: str
     stages_fired: List[str]
+    category_id: Optional[str] = None
+    action: Optional[str] = None
 
 
 class OutputCheck:
@@ -26,7 +28,12 @@ class OutputCheck:
             for pattern in violating_category.output_patterns:
                 if re.search(pattern, text, re.IGNORECASE):
                     stages.append("policy_violation_replaced")
-                    return OutputDecision(violating_category.refusal, stages)
+                    return OutputDecision(
+                        violating_category.refusal,
+                        stages,
+                        category_id=violating_category.id,
+                        action=violating_category.action,
+                    )
 
         if decision.category_id == "DB-SAFE-001" and not self._has_scholar_referral(text):
             text = f"{text.rstrip()}\n\n{self.policy.scholar_referral_disclaimer}"

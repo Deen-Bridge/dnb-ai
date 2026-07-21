@@ -39,3 +39,11 @@ classification candidates; a strict-JSON classifier makes the policy decision.
 `pytest -q tests/redteam` is fully offline and is required in CI. Set
 `SAFETY_LIVE_TESTS=1` with `GEMINI_API_KEY` to opt into a manual live audit;
 live results are intentionally not a merge gate because model behavior can vary.
+
+## Known limitations
+
+Output enforcement is deliberately conservative: regex matches cannot yet
+distinguish an endorsed sectarian claim from the same words quoted in order to
+refute or study them. A response quoting a prohibited claim may therefore be
+replaced with a refusal. This false positive is documented by an offline test;
+context-aware output classification is deferred to a follow-up issue.
