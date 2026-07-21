@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from pathlib import Path
 
 import pytest
@@ -98,6 +100,65 @@ def test_policy_violating_output_is_replaced():
 
     assert checked.text == policy.categories["DB-SAFE-002"].refusal
     assert checked.stages_fired == ["policy_violation_replaced"]
+    assert checked.category_id == "DB-SAFE-002"
+    assert checked.action == "refuse"
+
+
+@pytest.mark.parametrize(
+    "generated",
+    [
+        "Attack Sunnis and humiliate them.",
+        "Sufis are evil.",
+    ],
+)
+def test_output_hostility_forms_replace_and_override_moderation(generated):
+    policy = load_policy()
+    pipeline = SafetyPipeline(
+        InputGate(policy, lambda prompt, candidates: {}), OutputCheck(policy)
+    )
+
+    result = pipeline.run("Explain good manners.", lambda prompt: generated)
+
+    assert result.category_id == "DB-SAFE-002"
+    assert result.action == "refuse"
+    assert result.text == policy.categories["DB-SAFE-002"].refusal
+
+
+def test_quoted_refutation_false_positive_is_documented_current_behavior():
+    policy = load_policy()
+    quoted_refutation = 'The claim "All Sunnis are kafir" is wrong and must be rejected.'
+    checked = OutputCheck(policy).enforce(
+        quoted_refutation,
+        type("Decision", (), {"category_id": None})(),
+    )
+
+    assert checked.text == policy.categories["DB-SAFE-002"].refusal
+    assert checked.category_id == "DB-SAFE-002"
+
+
+def test_async_pipeline_runs_classifier_in_worker_thread():
+    policy = load_policy()
+    event_loop_thread = threading.get_ident()
+    classifier_threads = []
+
+    def classifier(prompt, candidates):
+        classifier_threads.append(threading.get_ident())
+        return {
+            "category_id": "DB-SAFE-001",
+            "confidence": 0.99,
+            "action": "allow_with_guidance",
+        }
+
+    pipeline = SafetyPipeline(InputGate(policy, classifier), OutputCheck(policy))
+    result = asyncio.run(
+        pipeline.run_async(
+            "Is this mortgage halal for my family?",
+            lambda prompt: "General educational information.",
+        )
+    )
+
+    assert result.action == "allow_with_guidance"
+    assert classifier_threads and classifier_threads[0] != event_loop_thread
 
 
 def test_classifier_response_schema_is_strict():
