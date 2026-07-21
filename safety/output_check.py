@@ -20,7 +20,6 @@ class OutputCheck:
 
     def enforce(self, text: str, decision: InputDecision) -> OutputDecision:
         stages = []
-        category = self.policy.categories.get(decision.category_id or "")
         for violating_category in self.policy.categories.values():
             if not violating_category.refusal:
                 continue
