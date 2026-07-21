@@ -12,6 +12,7 @@ import uuid
 from stellar import router as stellar_router
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 from study import router as study_router
+from rag import RAG_ENABLED, SourceDocument, format_reference_passages, retrieve
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -96,6 +97,7 @@ class ChatResponse(BaseModel):
     chat_id: str
     history: List[Message]
     moderation: Optional[Moderation] = None
+    sources: Optional[List[SourceDocument]] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -157,10 +159,22 @@ async def ping():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+    rag_sources: list[SourceDocument] = []
+
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
         chat_id = request.chat_id or str(uuid.uuid4())
+
+        # --- RAG retrieval (before generate) ---
+        rag_passages = ""
+        if RAG_ENABLED:
+            rag_sources = retrieve(request.prompt)
+            if rag_sources:
+                rag_passages = format_reference_passages(rag_sources)
+                logger.info("RAG: %d source(s) retrieved", len(rag_sources))
+            else:
+                logger.info("RAG: no sources retrieved")
 
         def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
@@ -172,7 +186,7 @@ async def chat(request: ChatRequest):
                 active_chats[chat_id] = model.start_chat(history=[])
 
             context = f"Additional context: {request.context}\n\n" if request.context else ""
-            full_prompt = f"{ISLAMIC_CONTEXT}\n{context}User question: {safety_prompt}"
+            full_prompt = f"{ISLAMIC_CONTEXT}\n{context}User question: {safety_prompt}{rag_passages}"
             logger.info("Sending message to chat...")
             response = active_chats[chat_id].send_message(
                 full_prompt,
@@ -222,15 +236,18 @@ async def chat(request: ChatRequest):
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
 
+        response_text = safety_result.text if safety_result else generated_text
+
         logger.info("Chat response generated successfully")
         return ChatResponse(
-            response=safety_result.text if safety_result else generated_text,
+            response=response_text,
             chat_id=chat_id,
             history=history,
             moderation=Moderation(
                 category_id=safety_result.category_id,
                 action=safety_result.action,
             ) if safety_result and safety_result.category_id else None,
+            sources=rag_sources or None,
         )
 
     except Exception as e:
