@@ -40,9 +40,8 @@ The platform is composed of three services:
 
 | Method | Route | Purpose |
 |--------|-------|---------|
-| `POST` | `/chat` | Start or continue a chat session |
+| `POST` | `/chat` | Start or continue a chat session; supports Gemini function-calling for zakat, Stellar info, and course search |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
-| `POST` | `/study/generate` | Generate schema-validated quizzes and flashcards |
 | `GET` | `/ping` | Health check |
 
 ## 🚀 Getting Started
@@ -72,10 +71,11 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GEMINI_API_KEY` | Google Gemini API key | — |
+| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement | `true` |
+| `BACKEND_API_URL` | Base URL for the dnb-backend REST API (tool: `search_courses`) | `https://dnb-backend-api.onrender.com` |
 
 ### Content-safety testing
 
