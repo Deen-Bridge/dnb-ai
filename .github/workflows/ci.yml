@@ -25,10 +25,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest flake8
 
       - name: Run linting
-        run: flake8 main.py --max-line-length=120 --ignore=E501,W503
+        run: |
+          flake8 main.py feedback.py stellar.py scripts/export_eval_candidates.py \
+            --max-line-length=120 --ignore=E501,W503
 
       - name: Check syntax
-        run: python -m py_compile main.py
+        run: |
+          python -m py_compile main.py
+          python -m py_compile feedback.py
+          python -m py_compile stellar.py
+          python -m py_compile scripts/export_eval_candidates.py
+
+      - name: Run tests
+        env:
+          GEMINI_API_KEY: test-key
+          ADMIN_TOKEN: test-admin-token
+        run: pytest tests/ -v --tb=short

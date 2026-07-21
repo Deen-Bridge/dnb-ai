@@ -35,14 +35,20 @@ The platform is composed of three services:
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
+- 👍 **User feedback** — per-message ratings and failure categories with durable storage
+- 📊 **Quality dashboard** — aggregate stats and records endpoints for maintainers
+- 🧪 **Eval-candidate export** — grow the evaluation harness from real user pain
 
 ## 🔗 API
 
-| Method | Route | Purpose |
-|--------|-------|---------|
-| `POST` | `/chat` | Start or continue a chat session |
-| `DELETE` | `/chat/{chat_id}` | Delete a chat session |
-| `GET` | `/ping` | Health check |
+| Method | Route | Auth | Purpose |
+|--------|-------|------|---------|
+| `POST` | `/chat` | — | Start or continue a chat session |
+| `DELETE` | `/chat/{chat_id}` | — | Delete a chat session |
+| `GET` | `/ping` | — | Health check |
+| `POST` | `/feedback` | — | Submit a rating for a specific model answer |
+| `GET` | `/feedback/stats` | `X-Admin-Token` | Aggregate quality metrics |
+| `GET` | `/feedback/records` | `X-Admin-Token` | Recent flagged records (filterable) |
 
 ## 🚀 Getting Started
 
@@ -71,13 +77,71 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `GEMINI_API_KEY` | Google Gemini API key |
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `GEMINI_API_KEY` | Google Gemini API key | ✅ |
+| `ADMIN_TOKEN` | Secret header value for `/feedback/stats` and `/feedback/records` | ✅ in prod |
+| `REDIS_URL` | Redis connection URL for persistent feedback storage | optional (SQLite fallback) |
+| `FEEDBACK_DB_PATH` | Path to the SQLite feedback database | optional (default: `feedback.db`) |
+| `ZAKAT_NISAB_USD` | Nisab threshold in USD for zakat calculation | optional (default: 6000) |
+| `STELLAR_NETWORK` | `testnet` or `public` | optional (default: `testnet`) |
+
+### Feedback Taxonomy
+
+The `categories` field on `/feedback` accepts any subset of these validated labels:
+
+| Category | Meaning |
+|----------|---------|
+| `incorrect_information` | Factually wrong answer |
+| `wrong_or_missing_citation` | Hadith/Quran reference is wrong or absent |
+| `one_sided_fiqh_answer` | Only one scholarly opinion presented |
+| `too_vague` | Answer lacks sufficient detail |
+| `too_long` | Answer is unnecessarily verbose |
+| `wrong_language` | Response in wrong language |
+| `poor_adab` | Tone or etiquette inappropriate |
+| `refused_unnecessarily` | Model declined a legitimate question |
+| `other` | Doesn't fit any above category |
+
+### Feedback API Contract
+
+`POST /feedback` body:
+```json
+{
+  "chat_id":    "<uuid from /chat>",
+  "message_id": "<uuid from /chat response>",
+  "rating":     "up" | "down",
+  "categories": ["<taxonomy label>", ...],
+  "comment":    "<optional, max 1000 chars>",
+  "prompt":     "<user question — required when session is no longer live>",
+  "answer":     "<model answer — required when session is no longer live>"
+}
+```
+
+> **Session-gone fallback**: the free-tier Render instance restarts frequently.
+> If the session is no longer in memory, the client **must** supply `prompt` and
+> `answer` in the request body; otherwise a `422` is returned.
+
+Rate limiting: 20 submissions per IP per 60 s (in-process sliding window —
+stopgap until issue #9 provides real auth infrastructure).
+Resubmitting for the same `(chat_id, message_id)` overwrites rather than duplicates.
+
+### Eval-candidate Export
+
+Convert down-rated records into evaluation-dataset candidates in the issue #16 harness format:
+
+```bash
+python scripts/export_eval_candidates.py --output candidates.jsonl
+# Redis store:
+REDIS_URL=redis://localhost:6379 python scripts/export_eval_candidates.py --output candidates.jsonl
+```
+
+Each emitted entry carries `needs_review: true`. A human curator must supply
+`expected_answer` before any record enters the golden set — the script
+**never fabricates expected answers** for religious content.
 
 ## ☁️ Deployment
 
-Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI runs lint and syntax checks on every PR (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI runs lint, syntax checks, and the full pytest suite on every PR (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## 🌊 Contributing & Drips Wave
 
