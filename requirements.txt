@@ -4,3 +4,7 @@ python-dotenv==0.21.0
 google-generativeai==0.8.3
 pydantic==2.5.3
 stellar-sdk>=12.0.0
+httpx>=0.27.0
+pytest>=8.0.0
+flake8>=7.0.0
+redis>=5.0.0
