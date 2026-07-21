@@ -42,8 +42,8 @@ The platform is composed of three services:
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
-| `POST` | `/study/generate` | Generate schema-validated quizzes and flashcards |
 | `GET` | `/ping` | Health check |
+| `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 
 ## 🚀 Getting Started
 
@@ -72,9 +72,13 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `GEMINI_API_KEY` | Google Gemini API key |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GEMINI_API_KEY` | Google Gemini API key | — |
+| `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
+| `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
+| `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
+| `SEMANTIC_CACHE_MAX_ENTRIES` | Maximum cache entries (LRU eviction) | `1000` |
 | `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` |
 
 ### Content-safety testing
