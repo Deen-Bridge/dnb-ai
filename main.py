@@ -112,7 +112,7 @@ def get_safety_settings():
 @app.get("/ping")
 async def ping():
     logger.info("************** Ping pong ping pong *************")
-    return {"************** Ping pong ping pong *************"}
+    return {"status": "ok"}
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -126,6 +126,7 @@ async def chat(request: ChatRequest):
             logger.info(f"Creating new chat session: {chat_id}")
             model = genai.GenerativeModel(
                 'gemini-2.5-flash-preview-05-20',
+                system_instruction=ISLAMIC_CONTEXT,
                 safety_settings=get_safety_settings()
             )
             # Initialize chat without sending context message
@@ -136,7 +137,7 @@ async def chat(request: ChatRequest):
         # Prepare the prompt with context if provided
         full_prompt = request.prompt
         if request.context:
-            full_prompt = f"Context: {request.context}\n\nQuestion: {ISLAMIC_CONTEXT, request.prompt}"
+            full_prompt = f"Context: {request.context}\n\nQuestion: {request.prompt}"
 
         # Send message and get response
         logger.info("Sending message to chat...")
