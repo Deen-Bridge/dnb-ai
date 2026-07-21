@@ -74,6 +74,14 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | Variable | Description |
 |----------|-------------|
 | `GEMINI_API_KEY` | Google Gemini API key |
+| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` |
+
+### Content-safety testing
+
+The versioned policy lives in [`safety/policy.yaml`](safety/policy.yaml), with
+review guidance in [`safety/POLICY.md`](safety/POLICY.md). Run the API-key-free
+red-team suite with `pytest -q tests/redteam`. A manual live classifier audit is
+available with `SAFETY_LIVE_TESTS=1 GEMINI_API_KEY=... pytest -q tests/redteam/test_live.py`.
 
 ## ☁️ Deployment
 
