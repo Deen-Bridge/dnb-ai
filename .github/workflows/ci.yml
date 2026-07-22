@@ -28,7 +28,13 @@ jobs:
           pip install pytest flake8
 
       - name: Run linting
-        run: flake8 main.py --max-line-length=120 --ignore=E501,W503
+        run: flake8 . --max-line-length=120 --ignore=E501,W503
 
       - name: Check syntax
-        run: python -m py_compile main.py
+        run: |
+          python -m py_compile main.py
+          python -m py_compile corpus.py
+          python -m py_compile verifier.py
+
+      - name: Run offline unit tests
+        run: pytest
