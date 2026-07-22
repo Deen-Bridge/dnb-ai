@@ -12,6 +12,11 @@ import uuid
 from stellar import router as stellar_router
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 from study import router as study_router
+from fiqh import (
+    FIQH_INSTRUCTIONS,
+    FiqhClassifier,
+    normalize_madhhab,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,7 +67,7 @@ ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic kn
 Your responses should:
 1. Be based on authentic Islamic sources (Quran and Hadith)
 2. Be respectful and appropriate
-3. Avoid controversial or divisive topics
+3. Acknowledge legitimate scholarly differences (ikhtilaf) between the major Islamic schools of thought where they exist — ikhtilaf is a core feature of fiqh methodology, not a controversy to be avoided
 4. Focus on promoting understanding and unity
 5. Acknowledge when a question is beyond your scope
 6. Always maintain Islamic etiquette (adab) in responses
@@ -84,6 +89,7 @@ class ChatRequest(BaseModel):
     prompt: str
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
+    madhhab: Optional[str] = None  # User's madhhab preference (hanafi, maliki, shafii, hanbali)
 
 
 class Moderation(BaseModel):
@@ -91,11 +97,17 @@ class Moderation(BaseModel):
     action: str
 
 
+class FiqhMetadata(BaseModel):
+    is_fiqh_question: bool
+    madhhab_requested: Optional[str] = None
+
+
 class ChatResponse(BaseModel):
     response: str
     chat_id: str
     history: List[Message]
     moderation: Optional[Moderation] = None
+    fiqh: Optional[FiqhMetadata] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -162,6 +174,25 @@ async def chat(request: ChatRequest):
 
         chat_id = request.chat_id or str(uuid.uuid4())
 
+        madhhab = normalize_madhhab(request.madhhab)
+
+        classifier = FiqhClassifier()
+        is_fiqh = classifier.is_fiqh_question(request.prompt)
+
+        fiqh_block = ""
+        if is_fiqh:
+            madhhab_lead = (
+                f"The user follows the {madhhab.title()} school. Lead with the {madhhab.title()} position. "
+                "Also summarize the positions of the other three schools."
+                if madhhab
+                else "No specific madhhab is indicated. Present all four schools fairly without ranking."
+            )
+            fiqh_block = FIQH_INSTRUCTIONS.replace("{MADHHAB_LEAD}", madhhab_lead)
+
+        def build_full_prompt(safety_prompt: str) -> str:
+            context = f"Additional context: {request.context}\n\n" if request.context else ""
+            return f"{ISLAMIC_CONTEXT}\n{fiqh_block}\n{context}User question: {safety_prompt}"
+
         def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
@@ -171,8 +202,7 @@ async def chat(request: ChatRequest):
                 )
                 active_chats[chat_id] = model.start_chat(history=[])
 
-            context = f"Additional context: {request.context}\n\n" if request.context else ""
-            full_prompt = f"{ISLAMIC_CONTEXT}\n{context}User question: {safety_prompt}"
+            full_prompt = build_full_prompt(safety_prompt)
             logger.info("Sending message to chat...")
             response = active_chats[chat_id].send_message(
                 full_prompt,
@@ -231,6 +261,10 @@ async def chat(request: ChatRequest):
                 category_id=safety_result.category_id,
                 action=safety_result.action,
             ) if safety_result and safety_result.category_id else None,
+            fiqh=FiqhMetadata(
+                is_fiqh_question=is_fiqh,
+                madhhab_requested=madhhab,
+            ),
         )
 
     except Exception as e:

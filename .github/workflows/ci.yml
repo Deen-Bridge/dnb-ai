@@ -28,13 +28,16 @@ jobs:
           pip install pytest flake8
 
       - name: Run linting
-        run: flake8 main.py stellar.py safety tests/redteam study.py --max-line-length=120 --ignore=E501,W503
+        run: flake8 main.py fiqh.py stellar.py safety tests/redteam study.py --max-line-length=120 --ignore=E501,W503
 
       - name: Check syntax
-        run: python -m compileall -q main.py stellar.py safety tests/redteam study.py
+        run: python -m compileall -q main.py fiqh.py stellar.py safety tests/redteam study.py
 
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam
 
       - name: Run study generator tests
         run: pytest -q tests/test_study.py
+
+      - name: Run fiqh tests
+        run: pytest -q tests/test_fiqh.py
