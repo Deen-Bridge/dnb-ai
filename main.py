@@ -9,6 +9,7 @@ from typing import List, Optional
 import uuid
 
 from stellar import router as stellar_router
+from store import SessionStore, history_to_dicts, dicts_to_contents
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,8 +51,8 @@ except Exception as e:
     logger.error(f"❌ Error configuring Gemini: {str(e)}")
     raise
 
-# Store active chats
-active_chats = {}
+# Session store (Redis-backed, with in-memory fallback)
+session_store = SessionStore()
 
 # Islamic context and safety instructions
 ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic knowledge and guidance.
@@ -120,19 +121,24 @@ async def chat(request: ChatRequest):
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
-        # Get or create chat session
         chat_id = request.chat_id or str(uuid.uuid4())
-        if chat_id not in active_chats:
-            logger.info(f"Creating new chat session: {chat_id}")
-            model = genai.GenerativeModel(
-                'gemini-2.5-flash-preview-05-20',
-                system_instruction=ISLAMIC_CONTEXT,
-                safety_settings=get_safety_settings()
-            )
-            # Initialize chat without sending context message
-            active_chats[chat_id] = model.start_chat(history=[])
 
-        chat = active_chats[chat_id]
+        # Load persisted history (empty list for new sessions)
+        history_dicts = await session_store.load_history(chat_id)
+        if history_dicts:
+            logger.info("Loaded %d prior turns for chat %s", len(history_dicts) // 2, chat_id)
+        else:
+            logger.info("Creating new chat session: %s", chat_id)
+
+        model = genai.GenerativeModel(
+            'gemini-2.5-flash-preview-05-20',
+            system_instruction=ISLAMIC_CONTEXT,
+            safety_settings=get_safety_settings()
+        )
+
+        # Rebuild chat session from persisted history
+        contents = dicts_to_contents(history_dicts)
+        chat = model.start_chat(history=contents)
 
         # Prepare the prompt with context if provided
         full_prompt = request.prompt
@@ -155,7 +161,10 @@ async def chat(request: ChatRequest):
             logger.error("Empty response received from model")
             raise HTTPException(status_code=500, detail="Empty response from AI model")
 
-        # Get chat history
+        # Persist the updated history (Gemini SDK has appended the new turn)
+        await session_store.save_history(chat_id, history_to_dicts(chat.history))
+
+        # Build response history
         history = []
         for message in chat.history:
             try:
@@ -188,8 +197,8 @@ async def chat(request: ChatRequest):
 @app.delete("/chat/{chat_id}")
 async def delete_chat(chat_id: str):
     try:
-        if chat_id in active_chats:
-            del active_chats[chat_id]
+        existed = await session_store.delete_session(chat_id)
+        if existed:
             logger.info(f"Deleted chat session: {chat_id}")
             return {"message": "Chat session deleted successfully"}
         return {"message": "Chat session not found"}
