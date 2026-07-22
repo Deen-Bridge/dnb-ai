@@ -9,6 +9,7 @@ from typing import List, Optional
 import uuid
 
 from stellar import router as stellar_router
+from history import trim_history
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -80,12 +81,14 @@ class ChatRequest(BaseModel):
     prompt: str
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
+    include_history: bool = True  # Set to false to omit history from response
 
 
 class ChatResponse(BaseModel):
     response: str
     chat_id: str
     history: List[Message]
+    truncated: bool = False  # True when oldest turn pairs were dropped
 
 
 def get_safety_settings():
@@ -139,6 +142,9 @@ async def chat(request: ChatRequest):
         if request.context:
             full_prompt = f"Context: {request.context}\n\nQuestion: {request.prompt}"
 
+        # Trim history to stay within budget (oldest turn-pairs dropped)
+        truncated = trim_history(chat)
+
         # Send message and get response
         logger.info("Sending message to chat...")
         response = chat.send_message(
@@ -155,28 +161,30 @@ async def chat(request: ChatRequest):
             logger.error("Empty response received from model")
             raise HTTPException(status_code=500, detail="Empty response from AI model")
 
-        # Get chat history
+        # Build history (only if caller wants it)
         history = []
-        for message in chat.history:
-            try:
-                if hasattr(message, 'parts') and message.parts:
-                    content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
-                else:
-                    content = str(message)
+        if request.include_history:
+            for message in chat.history:
+                try:
+                    if hasattr(message, 'parts') and message.parts:
+                        content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
+                    else:
+                        content = str(message)
 
-                history.append(Message(
-                    role="user" if message.role == "user" else "model",
-                    content=content
-                ))
-            except Exception as e:
-                logger.warning(f"Error processing message in history: {str(e)}")
-                continue
+                    history.append(Message(
+                        role="user" if message.role == "user" else "model",
+                        content=content
+                    ))
+                except Exception as e:
+                    logger.warning(f"Error processing message in history: {str(e)}")
+                    continue
 
         logger.info("Chat response generated successfully")
         return ChatResponse(
             response=response.text,
             chat_id=chat_id,
-            history=history
+            history=history,
+            truncated=truncated,
         )
 
     except Exception as e:

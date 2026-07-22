@@ -74,6 +74,8 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | Variable | Description |
 |----------|-------------|
 | `GEMINI_API_KEY` | Google Gemini API key |
+| `MAX_HISTORY_TOKENS` | Estimated-token budget for conversation history; oldest turn-pairs are dropped when exceeded (default `16000`) |
+| `MAX_HISTORY_TURNS` | Hard cap on turn pairs in history; enforced as a cheap backstop before the token-budget check (default `50`) |
 
 ## ☁️ Deployment
 
