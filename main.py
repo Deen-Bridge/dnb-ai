@@ -17,6 +17,13 @@ from semantic_cache import (
     get_cache,
     normalize_text,
 )
+from fiqh import (
+    FIQH_IKHTILAF_CONTEXT,
+    MADHHAB_LEAD_INSTRUCTION,
+    FiqhInfo,
+    classify_fiqh,
+    normalize_madhhab,
+)
 from study import router as study_router
 
 # Configure logging
@@ -90,6 +97,7 @@ class ChatRequest(BaseModel):
     prompt: str
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
+    madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
 
 
 class Moderation(BaseModel):
@@ -102,6 +110,7 @@ class ChatResponse(BaseModel):
     chat_id: str
     history: List[Message]
     moderation: Optional[Moderation] = None
+    fiqh: Optional[FiqhInfo] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -174,6 +183,11 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
         is_cacheable = is_new_chat and request.context is None and SEMANTIC_CACHE_ENABLED
 
+        # --- Fiqh classification & madhhab ---
+        madhhab = normalize_madhhab(request.madhhab)
+        is_fiqh = classify_fiqh(request.prompt)
+        fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+
         # --- Semantic cache lookup ---
         embedding: Any = None
         normalized: Optional[str] = None
@@ -197,6 +211,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     response=cached.response,
                     chat_id=chat_id,
                     history=cached.history,
+                    fiqh=fiqh_info,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -211,8 +226,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 )
                 active_chats[chat_id] = model.start_chat(history=[])
 
+            system_context = ISLAMIC_CONTEXT
+            if is_fiqh:
+                system_context += FIQH_IKHTILAF_CONTEXT
+                if madhhab:
+                    system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
             context = f"Additional context: {request.context}\n\n" if request.context else ""
-            full_prompt = f"{ISLAMIC_CONTEXT}\n{context}User question: {safety_prompt}"
+            full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
             response = active_chats[chat_id].send_message(
                 full_prompt,
@@ -283,6 +303,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 category_id=safety_result.category_id,
                 action=safety_result.action,
             ) if safety_result and safety_result.category_id else None,
+            fiqh=fiqh_info,
         )
 
     except Exception as e:

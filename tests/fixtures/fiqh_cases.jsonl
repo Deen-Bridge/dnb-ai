@@ -1,0 +1,9 @@
+{"prompt": "Where should I place my hands during prayer?", "is_fiqh": true, "expect_schools": ["Hanafi", "Maliki", "Shafi'i", "Hanbali"], "notes": "classic four-school ikhtilaf on hand placement in salah"}
+{"prompt": "Does touching a woman break wudu?", "is_fiqh": true, "expect_schools": ["Hanafi", "Maliki", "Shafi'i", "Hanbali"], "notes": "classic ikhtilaf on wudu invalidation by touch"}
+{"prompt": "Is it permissible to wipe over socks during wudu?", "is_fiqh": true, "expect_schools": ["Hanafi", "Maliki", "Shafi'i", "Hanbali"], "notes": "well-known khuffain / socks ikhtilaf"}
+{"prompt": "What are the conditions for a valid marriage contract in Islam?", "is_fiqh": true, "expect_schools": ["Hanafi", "Maliki", "Shafi'i", "Hanbali"], "notes": "nikah conditions differ by school"}
+{"prompt": "How is zakat calculated on cash savings?", "is_fiqh": true, "expect_schools": ["Hanafi", "Maliki", "Shafi'i", "Hanbali"], "notes": "zakat calculation thresholds and rates"}
+{"prompt": "What is the ruling on interest-based mortgages?", "is_fiqh": true, "expect_schools": ["Hanafi", "Maliki", "Shafi'i", "Hanbali"], "notes": "riba consensus with nuance on necessity"}
+{"prompt": "How many rak'ahs are in each daily prayer?", "is_fiqh": false, "expect_schools": [], "notes": "factual counting question, not comparative fiqh — should not trigger four-school boilerplate"}
+{"prompt": "What is the story of Prophet Musa?", "is_fiqh": false, "expect_schools": [], "notes": "seerah question — should not get fiqh treatment"}
+{"prompt": "What does Islam say about being kind to parents?", "is_fiqh": false, "expect_schools": [], "notes": "general ethics, not fiqh ikhtilaf"}
