@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
@@ -6,11 +6,17 @@ import json
 import os
 from dotenv import load_dotenv
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 import uuid
 
 from stellar import router as stellar_router
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
+from semantic_cache import (
+    SEMANTIC_CACHE_ENABLED,
+    embed_text,
+    get_cache,
+    normalize_text,
+)
 from study import router as study_router
 
 # Configure logging
@@ -127,6 +133,9 @@ safety_pipeline = SafetyPipeline(
     InputGate(safety_policy, classify_for_safety), OutputCheck(safety_policy)
 )
 
+# Semantic response cache
+semantic_cache = get_cache()
+
 
 def get_safety_settings():
     return [
@@ -156,12 +165,43 @@ async def ping():
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
         chat_id = request.chat_id or str(uuid.uuid4())
+        is_new_chat = chat_id not in active_chats
+        is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
+        is_cacheable = is_new_chat and request.context is None and SEMANTIC_CACHE_ENABLED
 
+        # --- Semantic cache lookup ---
+        embedding: Any = None
+        normalized: Optional[str] = None
+        if is_cacheable and not is_bypass:
+            normalized = normalize_text(request.prompt)
+            embedding = embed_text(normalized)
+            cached = semantic_cache.get(embedding)
+            if cached is not None:
+                fastapi_response.headers["X-Semantic-Cache"] = "hit"
+                model = genai.GenerativeModel(
+                    'gemini-2.5-flash-preview-05-20',
+                    safety_settings=get_safety_settings(),
+                )
+                chat_session = model.start_chat(history=[
+                    {"role": "user", "parts": [{"text": request.prompt}]},
+                    {"role": "model", "parts": [{"text": cached.response}]},
+                ])
+                active_chats[chat_id] = chat_session
+                logger.info("Semantic cache HIT for prompt: %s", request.prompt[:80])
+                return ChatResponse(
+                    response=cached.response,
+                    chat_id=chat_id,
+                    history=cached.history,
+                )
+        elif is_bypass:
+            semantic_cache.bypasses += 1
+
+        # --- Normal flow (cache miss / bypass / not cacheable) ---
         def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
@@ -222,9 +262,21 @@ async def chat(request: ChatRequest):
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
 
+        response_text = safety_result.text if safety_result else generated_text
+
+        # --- Semantic cache write ---
+        if is_cacheable and (safety_result is None or safety_result.generator_called):
+            if embedding is None:
+                normalized = normalize_text(request.prompt)
+                embedding = embed_text(normalized)
+            semantic_cache.put(embedding, response_text, chat_id, history)
+            logger.info("Semantic cache WRITE for prompt: %s", request.prompt[:80])
+
+        fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
+
         logger.info("Chat response generated successfully")
         return ChatResponse(
-            response=safety_result.text if safety_result else generated_text,
+            response=response_text,
             chat_id=chat_id,
             history=history,
             moderation=Moderation(
@@ -251,6 +303,12 @@ async def delete_chat(chat_id: str):
         error_msg = f"❌ Error deleting chat: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@app.get("/cache/stats")
+async def cache_stats():
+    return semantic_cache.get_stats()
+
 
 if __name__ == "__main__":
     import uvicorn
