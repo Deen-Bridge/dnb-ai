@@ -1,15 +1,42 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
+import json
 import os
 from dotenv import load_dotenv
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 import uuid
 
 from stellar import router as stellar_router
 from history import trim_history
+from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
+from semantic_cache import (
+    SEMANTIC_CACHE_ENABLED,
+    embed_text,
+    get_cache,
+    normalize_text,
+)
+from fiqh import (
+    FIQH_IKHTILAF_CONTEXT,
+    MADHHAB_LEAD_INSTRUCTION,
+    FiqhInfo,
+    classify_fiqh,
+    normalize_madhhab,
+)
+from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from study import router as study_router
+from confidence import (
+    ConfidenceAssessment,
+    ConfidenceBand,
+    apply_policy,
+    assess,
+    build_signals,
+    thresholds as confidence_thresholds,
+)
+from review import enqueue_for_review, router as review_router
+from review_store import get_review_store
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +50,9 @@ app = FastAPI(title="DeenBridge AI API")
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(study_router)
+# Scholar review: the human end of the abstention loop
+app.include_router(review_router)
 
 # Configure CORS
 app.add_middleware(
@@ -82,6 +112,12 @@ class ChatRequest(BaseModel):
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
     include_history: bool = True  # Set to false to omit history from response
+    madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
+
+
+class Moderation(BaseModel):
+    category_id: Optional[str] = None
+    action: str
 
 
 class ChatResponse(BaseModel):
@@ -89,6 +125,46 @@ class ChatResponse(BaseModel):
     chat_id: str
     history: List[Message]
     truncated: bool = False  # True when oldest turn pairs were dropped
+    moderation: Optional[Moderation] = None
+    fiqh: Optional[FiqhInfo] = None
+    hadith_references: Optional[List[HadithReference]] = None
+    confidence: Optional[ConfidenceAssessment] = None
+
+
+def classify_for_safety(prompt: str, candidate_ids: List[str]):
+    """Gemini classifier seam; offline tests replace this with a fixture."""
+    classifier_instruction = (
+        "Classify the user text for the Deen Bridge safety policy. Return only "
+        "strict JSON with exactly category_id, confidence, and action. "
+        "category_id must be one of the candidates or 'none'; action must be "
+        "allow, allow_with_guidance, or refuse. Candidates: "
+        f"{candidate_ids}"
+    )
+    model = genai.GenerativeModel(
+        "gemini-2.5-flash-preview-05-20",
+        system_instruction=classifier_instruction,
+    )
+    response = model.generate_content(
+        prompt,
+        generation_config={
+            "temperature": 0,
+            "response_mime_type": "application/json",
+        },
+        request_options={"timeout": 30},
+    )
+    return json.loads(response.text)
+
+
+safety_policy = load_policy()
+safety_pipeline = SafetyPipeline(
+    InputGate(safety_policy, classify_for_safety), OutputCheck(safety_policy)
+)
+
+# Semantic response cache
+semantic_cache = get_cache()
+
+# Durable queue for low-confidence religious answers awaiting a scholar
+review_store = get_review_store()
 
 
 def get_safety_settings():
@@ -119,72 +195,201 @@ async def ping():
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
-        # Get or create chat session
         chat_id = request.chat_id or str(uuid.uuid4())
-        if chat_id not in active_chats:
-            logger.info(f"Creating new chat session: {chat_id}")
-            model = genai.GenerativeModel(
-                'gemini-2.5-flash-preview-05-20',
-                system_instruction=ISLAMIC_CONTEXT,
-                safety_settings=get_safety_settings()
+        is_new_chat = chat_id not in active_chats
+        is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
+        is_cacheable = is_new_chat and request.context is None and SEMANTIC_CACHE_ENABLED
+
+        # --- Fiqh classification & madhhab ---
+        madhhab = normalize_madhhab(request.madhhab)
+        is_fiqh = classify_fiqh(request.prompt)
+        fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+
+        # --- Semantic cache lookup ---
+        embedding: Any = None
+        normalized: Optional[str] = None
+        if is_cacheable and not is_bypass:
+            normalized = normalize_text(request.prompt)
+            embedding = embed_text(normalized)
+            cached = semantic_cache.get(embedding)
+            if cached is not None:
+                fastapi_response.headers["X-Semantic-Cache"] = "hit"
+                model = genai.GenerativeModel(
+                    'gemini-2.5-flash-preview-05-20',
+                    safety_settings=get_safety_settings(),
+                )
+                chat_session = model.start_chat(history=[
+                    {"role": "user", "parts": [{"text": request.prompt}]},
+                    {"role": "model", "parts": [{"text": cached.response}]},
+                ])
+                active_chats[chat_id] = chat_session
+                logger.info("Semantic cache HIT for prompt: %s", request.prompt[:80])
+                return ChatResponse(
+                    response=cached.response,
+                    chat_id=chat_id,
+                    history=cached.history,
+                    fiqh=fiqh_info,
+                    hadith_references=annotate_hadith(cached.response),
+                )
+        elif is_bypass:
+            semantic_cache.bypasses += 1
+
+        # --- Normal flow (cache miss / bypass / not cacheable) ---
+        truncated = False
+
+        def generate(safety_prompt: str) -> str:
+            nonlocal truncated
+            if chat_id not in active_chats:
+                logger.info(f"Creating new chat session: {chat_id}")
+                model = genai.GenerativeModel(
+                    'gemini-2.5-flash-preview-05-20',
+                    safety_settings=get_safety_settings()
+                )
+                active_chats[chat_id] = model.start_chat(history=[])
+
+            # Trim history to stay within token budget (oldest turn-pairs dropped)
+            truncated = trim_history(active_chats[chat_id])
+
+            system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
+            if is_fiqh:
+                system_context += FIQH_IKHTILAF_CONTEXT
+                if madhhab:
+                    system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
+            context = f"Additional context: {request.context}\n\n" if request.context else ""
+            full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
+            logger.info("Sending message to chat...")
+            response = active_chats[chat_id].send_message(
+                full_prompt,
+                generation_config={
+                    "temperature": 0.7,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                    "max_output_tokens": 2048,
+                }
             )
-            # Initialize chat without sending context message
-            active_chats[chat_id] = model.start_chat(history=[])
+            if not response.text:
+                raise HTTPException(status_code=500, detail="Empty response from AI model")
+            return response.text
 
-        chat = active_chats[chat_id]
+        enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
+        if enabled:
+            safety_result = await safety_pipeline.run_async(request.prompt, generate)
+        else:
+            safety_result = None
+            generated_text = generate(request.prompt)
 
-        # Prepare the prompt with context if provided
-        full_prompt = request.prompt
-        if request.context:
-            full_prompt = f"Context: {request.context}\n\nQuestion: {request.prompt}"
-
-        # Trim history to stay within budget (oldest turn-pairs dropped)
-        truncated = trim_history(chat)
-
-        # Send message and get response
-        logger.info("Sending message to chat...")
-        response = chat.send_message(
-            full_prompt,
-            generation_config={
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 2048,
-            }
+        logger.info(
+            "safety=%s",
+            {
+                "policy_id": safety_result.category_id if safety_result else None,
+                "action": safety_result.action if safety_result else "disabled",
+                "stages_fired": safety_result.stages_fired if safety_result else [],
+                "latency_ms": safety_result.latency_ms if safety_result else 0,
+            },
         )
 
-        if not response.text:
-            logger.error("Empty response received from model")
-            raise HTTPException(status_code=500, detail="Empty response from AI model")
-
-        # Build history (only if caller wants it)
+        # Get chat history
         history = []
-        if request.include_history:
-            for message in chat.history:
-                try:
-                    if hasattr(message, 'parts') and message.parts:
-                        content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
-                    else:
-                        content = str(message)
+        chat_session = active_chats.get(chat_id)
+        for message in chat_session.history if chat_session else []:
+            try:
+                if hasattr(message, 'parts') and message.parts:
+                    content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
+                else:
+                    content = str(message)
 
-                    history.append(Message(
-                        role="user" if message.role == "user" else "model",
-                        content=content
-                    ))
-                except Exception as e:
-                    logger.warning(f"Error processing message in history: {str(e)}")
-                    continue
+                history.append(Message(
+                    role="user" if message.role == "user" else "model",
+                    content=content
+                ))
+            except Exception as e:
+                logger.warning(f"Error processing message in history: {str(e)}")
+                continue
+
+        response_text = safety_result.text if safety_result else generated_text
+
+        # --- Hadith authenticity grading ---
+        # Baked into response_text *before* the cache write so a cached hit
+        # replays the same caution the user originally saw.
+        hadith_refs = annotate_hadith(response_text)
+        caution = build_caution_note(response_text, hadith_refs)
+        if caution:
+            response_text = f"{response_text.rstrip()}\n\n{caution}"
+
+        # --- Confidence, abstention, and scholar escalation ---
+        # is_religious and is_high_stakes reuse classification that already ran
+        # this turn (the fiqh classifier and the hadith annotator) rather than
+        # adding a competing classifier. self_consistency (#ai-18) and
+        # citation_verification (#40) are passed through when those components
+        # supply them; until then they are simply absent from the average.
+        signals = build_signals(
+            response_text,
+            is_religious=is_fiqh or bool(hadith_refs),
+            is_high_stakes=is_fiqh,
+        )
+        assessment = assess(signals)
+        answer_before_policy = response_text
+
+        if assessment.queued:
+            # Queue before shaping the reply, so the user is only told their
+            # question reached a scholar if it actually did.
+            try:
+                item = await enqueue_for_review(
+                    question=request.prompt,
+                    answer=answer_before_policy,
+                    score=assessment.score,
+                    band=assessment.band.value,
+                    signals=assessment.signals,
+                    chat_id=chat_id,
+                )
+                assessment.review_id = item.id
+            except Exception as exc:  # noqa: BLE001 - the answer still matters
+                logger.error("Could not queue answer for scholar review: %s", exc)
+                assessment.queued = False
+
+        response_text = apply_policy(response_text, assessment)
+
+        logger.info(
+            "confidence=%s",
+            {
+                "score": assessment.score,
+                "band": assessment.band.value,
+                "signals": assessment.signals_used,
+                "queued": assessment.queued,
+            },
+        )
+
+        # --- Semantic cache write ---
+        # Only confident answers are cached. Replaying an abstention, or a
+        # hedged answer whose warning would outlive the doubt that caused it,
+        # would spread one turn's uncertainty to every later asker.
+        is_cacheable = is_cacheable and assessment.band is ConfidenceBand.CONFIDENT
+        if is_cacheable and (safety_result is None or safety_result.generator_called):
+            if embedding is None:
+                normalized = normalize_text(request.prompt)
+                embedding = embed_text(normalized)
+            semantic_cache.put(embedding, response_text, chat_id, history)
+            logger.info("Semantic cache WRITE for prompt: %s", request.prompt[:80])
+
+        fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
         logger.info("Chat response generated successfully")
         return ChatResponse(
-            response=response.text,
+            response=response_text,
             chat_id=chat_id,
             history=history,
             truncated=truncated,
+            moderation=Moderation(
+                category_id=safety_result.category_id,
+                action=safety_result.action,
+            ) if safety_result and safety_result.category_id else None,
+            fiqh=fiqh_info,
+            hadith_references=hadith_refs,
+            confidence=assessment,
         )
 
     except Exception as e:
@@ -205,6 +410,21 @@ async def delete_chat(chat_id: str):
         error_msg = f"❌ Error deleting chat: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@app.get("/cache/stats")
+async def cache_stats():
+    return semantic_cache.get_stats()
+
+
+@app.get("/confidence/policy")
+async def confidence_policy():
+    """Current confidence thresholds and the queue's durability."""
+    return {
+        "thresholds": confidence_thresholds(),
+        "review_queue": await review_store.stats(),
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -23,17 +23,18 @@ On the roadmap: Stellar-aware assistance — zakat calculation from a wallet's o
 
 The platform is composed of three services:
 
-| Repository | Role | Live |
-|------------|------|------|
-| [dnb-frontend](https://github.com/Deen-Bridge/dnb-frontend) | Next.js web application | [dnb-frontend.vercel.app](https://dnb-frontend.vercel.app) |
-| [dnb-backend](https://github.com/Deen-Bridge/dnb-backend) | REST API — auth, content, Stellar payments | [dnb-backend-api.onrender.com](https://dnb-backend-api.onrender.com) |
-| **dnb-ai** (this repo) | FastAPI service for the AI assistant | [dnb-ai.onrender.com](https://dnb-ai.onrender.com) |
+| Repository                                                  | Role                                       | Live                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------- |
+| [dnb-frontend](https://github.com/Deen-Bridge/dnb-frontend) | Next.js web application                    | [dnb-frontend.vercel.app](https://dnb-frontend.vercel.app)           |
+| [dnb-backend](https://github.com/Deen-Bridge/dnb-backend)   | REST API — auth, content, Stellar payments | [dnb-backend-api.onrender.com](https://dnb-backend-api.onrender.com) |
+| **dnb-ai** (this repo)                                      | FastAPI service for the AI assistant       | [dnb-ai.onrender.com](https://dnb-ai.onrender.com)                   |
 
 ## ✨ Features
 
 - 🤖 **Islamic context-aware responses** grounded in a curated system prompt
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
+- 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
@@ -43,6 +44,12 @@ The platform is composed of three services:
 | `POST` | `/chat` | Start or continue a chat session |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
 | `GET` | `/ping` | Health check |
+| `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
+| `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
+| `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
+| `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
+| `GET` | `/review/{id}` | A single review item (reviewer token) |
+| `POST` | `/review/{id}/verdict` | Record approve / correct / reject (reviewer token) |
 
 ## 🚀 Getting Started
 
@@ -62,6 +69,9 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 
 pip install -r requirements.txt
 
+# Copy environment template and add your API key
+cp .env.example .env
+
 echo "GEMINI_API_KEY=your_api_key_here" > .env
 
 uvicorn main:app --reload
@@ -71,11 +81,25 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `MAX_HISTORY_TOKENS` | Estimated-token budget for conversation history; oldest turn-pairs are dropped when exceeded (default `16000`) |
-| `MAX_HISTORY_TURNS` | Hard cap on turn pairs in history; enforced as a cheap backstop before the token-budget check (default `50`) |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GEMINI_API_KEY` | Google Gemini API key | — |
+| `MAX_HISTORY_TOKENS` | Estimated-token budget for conversation history; oldest turn-pairs are dropped when exceeded | `16000` |
+| `MAX_HISTORY_TURNS` | Hard cap on turn pairs in history; enforced as a cheap backstop before the token-budget check | `50` |
+| `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
+| `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
+| `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
+| `SEMANTIC_CACHE_MAX_ENTRIES` | Maximum cache entries (LRU eviction) | `1000` |
+| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` | `true` |
+| `CONFIDENCE_LOW_THRESHOLD` | Below this score the service abstains | `0.40` |
+| `CONFIDENCE_HIGH_THRESHOLD` | At or above this score it answers with no caveat | `0.70` |
+| `SCHOLAR_QUEUE_THRESHOLD` | Religious answers at or below this score are queued for review | `0.40` |
+| `CONFIDENCE_HIGH_STAKES_PENALTY` | Score multiplier applied to high-stakes rulings | `0.15` |
+| `CONFIDENCE_NO_SIGNAL_PRIOR` | Score when no signal is available | `0.55` |
+| `CONFIDENCE_UNVERIFIED_CEILING` | Cap when nothing external corroborated the answer | `0.65` |
+| `SCHOLAR_REVIEW_TOKEN` | Enables the reviewer endpoints; required as `X-Review-Token` | — (endpoints disabled) |
+| `REVIEW_EXPORT_PATH` | JSONL export of reviewed answers | `data/review/reviewed.jsonl` |
+| `REDIS_URL` | Makes the scholar-review queue durable across restarts | — (in-memory) |
 
 ## ☁️ Deployment
 
@@ -93,7 +117,7 @@ Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full workflow, coding standa
 
 ## 📜 License
 
-[MIT](LICENSE) © Deen Bridge
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ## 🔗 Links
 
