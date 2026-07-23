@@ -324,18 +324,25 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         )
         assessment = assess(signals)
         answer_before_policy = response_text
-        response_text = apply_policy(response_text, assessment)
 
         if assessment.queued:
-            item = await enqueue_for_review(
-                question=request.prompt,
-                answer=answer_before_policy,
-                score=assessment.score,
-                band=assessment.band.value,
-                signals=assessment.signals,
-                chat_id=chat_id,
-            )
-            assessment.review_id = item.id
+            # Queue before shaping the reply, so the user is only told their
+            # question reached a scholar if it actually did.
+            try:
+                item = await enqueue_for_review(
+                    question=request.prompt,
+                    answer=answer_before_policy,
+                    score=assessment.score,
+                    band=assessment.band.value,
+                    signals=assessment.signals,
+                    chat_id=chat_id,
+                )
+                assessment.review_id = item.id
+            except Exception as exc:  # noqa: BLE001 - the answer still matters
+                logger.error("Could not queue answer for scholar review: %s", exc)
+                assessment.queued = False
+
+        response_text = apply_policy(response_text, assessment)
 
         logger.info(
             "confidence=%s",

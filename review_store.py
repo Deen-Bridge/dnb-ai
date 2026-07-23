@@ -50,6 +50,18 @@ except ImportError:  # pragma: no cover - depends on deployment extras
     _redis_available = False
 
 
+class AlreadyReviewedError(Exception):
+    """Raised when a verdict is recorded on an item that already has one.
+
+    Carries the existing item so the caller can report what the earlier verdict
+    was rather than a bare conflict.
+    """
+
+    def __init__(self, item: "ReviewItem") -> None:
+        super().__init__(f"Review item {item.id} was already reviewed")
+        self.item = item
+
+
 class ReviewStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -106,6 +118,7 @@ class ReviewStore:
         self._redis: Optional[Any] = None
         self._local: Dict[str, ReviewItem] = {}
         self._use_redis = False
+        self._degraded = False
 
         if REDIS_URL and _redis_available:
             try:
@@ -127,16 +140,28 @@ class ReviewStore:
 
     @property
     def durable(self) -> bool:
-        return self._use_redis
+        return self._use_redis and not self._degraded
 
     # -- public API ---------------------------------------------------------
 
     async def add(self, item: ReviewItem) -> ReviewItem:
+        """Queue an item. Never raises: a queue write must not fail a chat turn.
+
+        If Redis is unreachable the item is kept in the in-process fallback and
+        the store reports itself degraded, so an operator sees that the queue
+        stopped being durable instead of losing the item outright.
+        """
         if self._use_redis:
-            await self._redis.set(
-                ITEM_KEY.format(item_id=item.id), item.model_dump_json()
-            )
-            await self._redis.zadd(PENDING_INDEX, {item.id: item.created_at})
+            try:
+                # One transaction: an item written without its index entry
+                # would be invisible to reviewers forever.
+                async with self._redis.pipeline(transaction=True) as pipe:
+                    pipe.set(ITEM_KEY.format(item_id=item.id), item.model_dump_json())
+                    pipe.zadd(PENDING_INDEX, {item.id: item.created_at})
+                    await pipe.execute()
+            except Exception as exc:  # noqa: BLE001 - degrade, never drop
+                self._mark_degraded("add", exc)
+                self._local[item.id] = item
         else:
             self._local[item.id] = item
         logger.info(
@@ -148,14 +173,28 @@ class ReviewStore:
 
     async def get(self, item_id: str) -> Optional[ReviewItem]:
         if self._use_redis:
-            raw = await self._redis.get(ITEM_KEY.format(item_id=item_id))
-            return self._deserialize(raw)
+            try:
+                raw = await self._redis.get(ITEM_KEY.format(item_id=item_id))
+            except Exception as exc:  # noqa: BLE001
+                self._mark_degraded("get", exc)
+                return self._local.get(item_id)
+            item = self._deserialize(raw)
+            if item is not None:
+                return item
+            # Items buffered locally while Redis was unreachable.
+            return self._local.get(item_id)
         return self._local.get(item_id)
 
     async def list_pending(self, limit: int = 50, offset: int = 0) -> List[ReviewItem]:
         """Oldest pending items first — the longest wait gets seen first."""
         if self._use_redis:
-            ids = await self._redis.zrange(PENDING_INDEX, offset, offset + limit - 1)
+            try:
+                ids = await self._redis.zrange(
+                    PENDING_INDEX, offset, offset + limit - 1
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._mark_degraded("list_pending", exc)
+                return []
             items = [await self.get(item_id) for item_id in ids]
             return [item for item in items if item is not None]
         pending = [
@@ -169,9 +208,13 @@ class ReviewStore:
     async def list_reviewed(self, limit: int = 50, offset: int = 0) -> List[ReviewItem]:
         """Most recently decided items first."""
         if self._use_redis:
-            ids = await self._redis.zrevrange(
-                REVIEWED_INDEX, offset, offset + limit - 1
-            )
+            try:
+                ids = await self._redis.zrevrange(
+                    REVIEWED_INDEX, offset, offset + limit - 1
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._mark_degraded("list_reviewed", exc)
+                return []
             items = [await self.get(item_id) for item_id in ids]
             return [item for item in items if item is not None]
         reviewed = [
@@ -190,11 +233,36 @@ class ReviewStore:
         reviewer: Optional[str] = None,
         reviewer_note: Optional[str] = None,
     ) -> Optional[ReviewItem]:
-        """Apply a reviewer's decision. Returns None if the item doesn't exist."""
+        """Apply a reviewer's decision, exactly once.
+
+        Returns None if the item does not exist, and raises
+        ``AlreadyReviewedError`` if it already carries a verdict. The
+        pending-to-reviewed transition is *claimed* atomically — by removing the
+        id from the pending index in Redis, or in a single uninterrupted step
+        in memory — so two concurrent verdicts cannot both succeed and silently
+        overwrite one another. A scholar's verdict is meant to be final.
+        """
         item = await self.get(item_id)
         if item is None:
             return None
+        if item.status is not ReviewStatus.PENDING:
+            raise AlreadyReviewedError(item)
 
+        if self._use_redis and item_id not in self._local:
+            try:
+                # zrem returns 1 only for the caller that actually removed the
+                # id, which makes it the claim: everyone else loses the race.
+                claimed = await self._redis.zrem(PENDING_INDEX, item_id)
+            except Exception as exc:  # noqa: BLE001
+                self._mark_degraded("record_verdict", exc)
+                claimed = 0
+                if item_id not in self._local:
+                    raise
+            if not claimed:
+                raise AlreadyReviewedError(await self.get(item_id) or item)
+
+        # No await between the status check above and the mutation below, so
+        # the in-memory path cannot interleave either.
         item.verdict = verdict
         item.status = VERDICT_STATUS[verdict]
         item.corrected_answer = corrected_answer
@@ -202,12 +270,17 @@ class ReviewStore:
         item.reviewer_note = reviewer_note
         item.reviewed_at = time.time()
 
-        if self._use_redis:
-            await self._redis.set(
-                ITEM_KEY.format(item_id=item.id), item.model_dump_json()
-            )
-            await self._redis.zrem(PENDING_INDEX, item.id)
-            await self._redis.zadd(REVIEWED_INDEX, {item.id: item.reviewed_at})
+        if self._use_redis and item_id not in self._local:
+            try:
+                async with self._redis.pipeline(transaction=True) as pipe:
+                    pipe.set(
+                        ITEM_KEY.format(item_id=item.id), item.model_dump_json()
+                    )
+                    pipe.zadd(REVIEWED_INDEX, {item.id: item.reviewed_at})
+                    await pipe.execute()
+            except Exception as exc:  # noqa: BLE001 - a recorded verdict is not lost
+                self._mark_degraded("record_verdict", exc)
+                self._local[item.id] = item
         else:
             self._local[item.id] = item
 
@@ -216,13 +289,18 @@ class ReviewStore:
 
     async def stats(self) -> Dict[str, Any]:
         if self._use_redis:
-            pending = await self._redis.zcard(PENDING_INDEX)
-            reviewed = await self._redis.zcard(REVIEWED_INDEX)
-            return {
-                "pending": pending,
-                "reviewed": reviewed,
-                "durable": True,
-            }
+            try:
+                pending = await self._redis.zcard(PENDING_INDEX)
+                reviewed = await self._redis.zcard(REVIEWED_INDEX)
+            except Exception as exc:  # noqa: BLE001
+                self._mark_degraded("stats", exc)
+            else:
+                return {
+                    "pending": pending,
+                    "reviewed": reviewed,
+                    "durable": True,
+                    "degraded": False,
+                }
         counts: Dict[str, int] = {}
         for item in self._local.values():
             counts[item.status.value] = counts.get(item.status.value, 0) + 1
@@ -235,6 +313,7 @@ class ReviewStore:
             ),
             "by_status": counts,
             "durable": False,
+            "degraded": self._degraded,
         }
 
     async def clear(self) -> None:
@@ -249,6 +328,26 @@ class ReviewStore:
             self._local.clear()
 
     # -- internals ----------------------------------------------------------
+
+    def _mark_degraded(self, operation: str, exc: Exception) -> None:
+        """Record that Redis failed, logging the first failure loudly.
+
+        ``from_url`` builds the client lazily, so an unreachable Redis only
+        shows up on the first real operation — long after __init__ decided the
+        store was durable. Rather than surfacing raw client errors to users,
+        the store keeps serving from its in-process fallback and reports
+        ``degraded`` in stats so the loss of durability is visible.
+        """
+        if not self._degraded:
+            logger.error(
+                "Review queue Redis operation %r failed (%s); serving from the "
+                "in-memory fallback — the queue is NO LONGER DURABLE",
+                operation,
+                exc,
+            )
+            self._degraded = True
+        else:
+            logger.warning("Review queue Redis %r failed again: %s", operation, exc)
 
     @staticmethod
     def _deserialize(raw: Optional[str]) -> Optional[ReviewItem]:

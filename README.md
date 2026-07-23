@@ -155,6 +155,12 @@ curl -X POST localhost:8000/review/$ID/verdict \
   -d '{"verdict": "correct", "corrected_answer": "…", "reviewer": "Shaykh …"}'
 ```
 
+If Redis is configured but becomes unreachable, the queue keeps accepting items
+into an in-process fallback and reports `degraded: true` from `/review/stats`
+rather than failing chat turns — the loss of durability is made visible instead
+of silent. Verdicts are claimed atomically, so two concurrent reviewers cannot
+both record one and silently overwrite each other.
+
 The reviewer endpoints are **closed by default** — without `SCHOLAR_REVIEW_TOKEN`
 they return 503 rather than exposing users' pending questions.
 
