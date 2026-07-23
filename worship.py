@@ -265,10 +265,10 @@ async def get_prayer_times(
     tz: str = Query(..., description="IANA timezone name")
 ):
     """Get Islamic prayer times for a given location, date, and calculation method."""
-    if tz not in available_timezones():
+    try:
+        zone = ZoneInfo(tz)
+    except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid timezone: {tz}")
-
-    zone = ZoneInfo(tz)
 
     times, fallback_applied = calculate_prayer_times(lat, lon, date, method, asr, zone)
 

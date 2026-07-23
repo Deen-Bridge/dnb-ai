@@ -45,18 +45,20 @@ app.add_middleware(
 # Configure Gemini
 mock_upstreams = os.getenv("MOCK_UPSTREAMS", "0") == "1"
 if not mock_upstreams:
-    try:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY not found in environment variables")
-        logger.info("Configuring Gemini API...")
-        genai.configure(api_key=api_key)
-        logger.info("Gemini API configured successfully")
-    except Exception as e:
-        logger.error(f"❌ Error configuring Gemini: {str(e)}")
-        raise
-else:
-    logger.info("🤖 Runing in MOCK_UPSTREAMS mode. Gemini will not be configured.")
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        logger.warning("GEMINI_API_KEY not set; falling back to mock mode")
+        mock_upstreams = True
+    else:
+        try:
+            logger.info("Configuring Gemini API...")
+            genai.configure(api_key=api_key)
+            logger.info("Gemini API configured successfully")
+        except Exception as e:
+            logger.error(f"❌ Error configuring Gemini: {str(e)}")
+            raise
+if mock_upstreams:
+    logger.info("🤖 Running in MOCK_UPSTREAMS mode. Gemini will not be configured.")
 
 # Session store (Redis-backed, with in-memory fallback)
 session_store = SessionStore()
