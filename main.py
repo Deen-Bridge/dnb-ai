@@ -26,6 +26,16 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from study import router as study_router
+from confidence import (
+    ConfidenceAssessment,
+    ConfidenceBand,
+    apply_policy,
+    assess,
+    build_signals,
+    thresholds as confidence_thresholds,
+)
+from review import enqueue_for_review, router as review_router
+from review_store import get_review_store
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +50,8 @@ app = FastAPI(title="DeenBridge AI API")
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
 app.include_router(study_router)
+# Scholar review: the human end of the abstention loop
+app.include_router(review_router)
 
 # Configure CORS
 app.add_middleware(
@@ -113,6 +125,7 @@ class ChatResponse(BaseModel):
     moderation: Optional[Moderation] = None
     fiqh: Optional[FiqhInfo] = None
     hadith_references: Optional[List[HadithReference]] = None
+    confidence: Optional[ConfidenceAssessment] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -146,6 +159,9 @@ safety_pipeline = SafetyPipeline(
 
 # Semantic response cache
 semantic_cache = get_cache()
+
+# Durable queue for low-confidence religious answers awaiting a scholar
+review_store = get_review_store()
 
 
 def get_safety_settings():
@@ -295,7 +311,54 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         if caution:
             response_text = f"{response_text.rstrip()}\n\n{caution}"
 
+        # --- Confidence, abstention, and scholar escalation ---
+        # is_religious and is_high_stakes reuse classification that already ran
+        # this turn (the fiqh classifier and the hadith annotator) rather than
+        # adding a competing classifier. self_consistency (#ai-18) and
+        # citation_verification (#40) are passed through when those components
+        # supply them; until then they are simply absent from the average.
+        signals = build_signals(
+            response_text,
+            is_religious=is_fiqh or bool(hadith_refs),
+            is_high_stakes=is_fiqh,
+        )
+        assessment = assess(signals)
+        answer_before_policy = response_text
+
+        if assessment.queued:
+            # Queue before shaping the reply, so the user is only told their
+            # question reached a scholar if it actually did.
+            try:
+                item = await enqueue_for_review(
+                    question=request.prompt,
+                    answer=answer_before_policy,
+                    score=assessment.score,
+                    band=assessment.band.value,
+                    signals=assessment.signals,
+                    chat_id=chat_id,
+                )
+                assessment.review_id = item.id
+            except Exception as exc:  # noqa: BLE001 - the answer still matters
+                logger.error("Could not queue answer for scholar review: %s", exc)
+                assessment.queued = False
+
+        response_text = apply_policy(response_text, assessment)
+
+        logger.info(
+            "confidence=%s",
+            {
+                "score": assessment.score,
+                "band": assessment.band.value,
+                "signals": assessment.signals_used,
+                "queued": assessment.queued,
+            },
+        )
+
         # --- Semantic cache write ---
+        # Only confident answers are cached. Replaying an abstention, or a
+        # hedged answer whose warning would outlive the doubt that caused it,
+        # would spread one turn's uncertainty to every later asker.
+        is_cacheable = is_cacheable and assessment.band is ConfidenceBand.CONFIDENT
         if is_cacheable and (safety_result is None or safety_result.generator_called):
             if embedding is None:
                 normalized = normalize_text(request.prompt)
@@ -316,6 +379,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             ) if safety_result and safety_result.category_id else None,
             fiqh=fiqh_info,
             hadith_references=hadith_refs,
+            confidence=assessment,
         )
 
     except Exception as e:
@@ -341,6 +405,15 @@ async def delete_chat(chat_id: str):
 @app.get("/cache/stats")
 async def cache_stats():
     return semantic_cache.get_stats()
+
+
+@app.get("/confidence/policy")
+async def confidence_policy():
+    """Current confidence thresholds and the queue's durability."""
+    return {
+        "thresholds": confidence_thresholds(),
+        "review_queue": await review_store.stats(),
+    }
 
 
 if __name__ == "__main__":
