@@ -17,6 +17,14 @@ from semantic_cache import (
     get_cache,
     normalize_text,
 )
+from fiqh import (
+    FIQH_IKHTILAF_CONTEXT,
+    MADHHAB_LEAD_INSTRUCTION,
+    FiqhInfo,
+    classify_fiqh,
+    normalize_madhhab,
+)
+from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from study import router as study_router
 from rag import RAG_ENABLED, SourceDocument, format_reference_passages, retrieve
 
@@ -91,6 +99,7 @@ class ChatRequest(BaseModel):
     prompt: str
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
+    madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
 
 
 class Moderation(BaseModel):
@@ -103,7 +112,8 @@ class ChatResponse(BaseModel):
     chat_id: str
     history: List[Message]
     moderation: Optional[Moderation] = None
-    sources: Optional[List[SourceDocument]] = None
+    fiqh: Optional[FiqhInfo] = None
+    hadith_references: Optional[List[HadithReference]] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -178,15 +188,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
         is_cacheable = is_new_chat and request.context is None and SEMANTIC_CACHE_ENABLED
 
-        # --- RAG retrieval (before generate) ---
-        rag_passages = ""
-        if RAG_ENABLED:
-            rag_sources = retrieve(request.prompt)
-            if rag_sources:
-                rag_passages = format_reference_passages(rag_sources)
-                logger.info("RAG: %d source(s) retrieved", len(rag_sources))
-            else:
-                logger.info("RAG: no sources retrieved")
+        # --- Fiqh classification & madhhab ---
+        madhhab = normalize_madhhab(request.madhhab)
+        is_fiqh = classify_fiqh(request.prompt)
+        fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
 
         # --- Semantic cache lookup ---
         embedding: Any = None
@@ -211,6 +216,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     response=cached.response,
                     chat_id=chat_id,
                     history=cached.history,
+                    fiqh=fiqh_info,
+                    hadith_references=annotate_hadith(cached.response),
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -225,8 +232,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 )
                 active_chats[chat_id] = model.start_chat(history=[])
 
+            system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
+            if is_fiqh:
+                system_context += FIQH_IKHTILAF_CONTEXT
+                if madhhab:
+                    system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
             context = f"Additional context: {request.context}\n\n" if request.context else ""
-            full_prompt = f"{ISLAMIC_CONTEXT}\n{context}User question: {safety_prompt}{rag_passages}"
+            full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
             response = active_chats[chat_id].send_message(
                 full_prompt,
@@ -278,6 +290,14 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         response_text = safety_result.text if safety_result else generated_text
 
+        # --- Hadith authenticity grading ---
+        # Baked into response_text *before* the cache write so a cached hit
+        # replays the same caution the user originally saw.
+        hadith_refs = annotate_hadith(response_text)
+        caution = build_caution_note(response_text, hadith_refs)
+        if caution:
+            response_text = f"{response_text.rstrip()}\n\n{caution}"
+
         # --- Semantic cache write ---
         if is_cacheable and (safety_result is None or safety_result.generator_called):
             if embedding is None:
@@ -297,7 +317,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 category_id=safety_result.category_id,
                 action=safety_result.action,
             ) if safety_result and safety_result.category_id else None,
-            sources=rag_sources or None,
+            fiqh=fiqh_info,
+            hadith_references=hadith_refs,
         )
 
     except Exception as e:
