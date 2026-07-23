@@ -25,6 +25,7 @@ Two existing sinks, no third pipeline:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -35,7 +36,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 
-from review_store import ReviewItem, ReviewStatus, Verdict, get_review_store
+from review_store import (
+    AlreadyReviewedError,
+    ReviewItem,
+    Verdict,
+    get_review_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,26 +252,30 @@ async def record_verdict(
     require_reviewer(x_review_token)
     store = get_review_store()
 
-    existing = await store.get(item_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail=f"No review item {item_id}.")
-    if existing.status is not ReviewStatus.PENDING:
+    # The store claims the pending-to-reviewed transition atomically, so two
+    # concurrent verdicts cannot both win; a lost verdict would defeat the
+    # point of having a scholar decide.
+    try:
+        item = await store.record_verdict(
+            item_id,
+            request.verdict,
+            corrected_answer=request.corrected_answer,
+            reviewer=request.reviewer,
+            reviewer_note=request.note,
+        )
+    except AlreadyReviewedError as exc:
         raise HTTPException(
             status_code=409,
             detail=(
                 f"Item {item_id} was already reviewed "
-                f"({existing.status.value}); it cannot be decided twice."
+                f"({exc.item.status.value}); it cannot be decided twice."
             ),
         )
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"No review item {item_id}.")
 
-    item = await store.record_verdict(
-        item_id,
-        request.verdict,
-        corrected_answer=request.corrected_answer,
-        reviewer=request.reviewer,
-        reviewer_note=request.note,
-    )
-
-    cached = cache_reviewed_answer(item)
-    exported = export_reviewed_item(item)
+    # Both sinks block — one on disk, one on the embedding API — so they run
+    # off the event loop rather than stalling every other in-flight request.
+    cached = await asyncio.to_thread(cache_reviewed_answer, item)
+    exported = await asyncio.to_thread(export_reviewed_item, item)
     return VerdictResponse(item=item, cached=cached, exported=exported)

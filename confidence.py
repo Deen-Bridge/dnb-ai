@@ -151,8 +151,25 @@ HEDGE_PATTERNS: tuple[str, ...] = (
 
 _HEDGE_REGEXES = tuple(re.compile(p, re.IGNORECASE) for p in HEDGE_PATTERNS)
 
+
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, falling back on nonsense."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r is not an integer; using %s", name, raw, default)
+        return default
+    if value < 1:
+        logger.warning("%s=%s must be at least 1; using %s", name, value, default)
+        return default
+    return value
+
+
 # Number of hedges at which expressed certainty bottoms out at 0.
-HEDGE_SATURATION = int(os.getenv("CONFIDENCE_HEDGE_SATURATION", "3"))
+HEDGE_SATURATION = _env_int("CONFIDENCE_HEDGE_SATURATION", 3)
 
 
 def count_hedges(text: str) -> int:
@@ -260,8 +277,14 @@ def band_for(score: float) -> ConfidenceBand:
 
 
 def should_queue_for_scholar(score: float, signals: ConfidenceSignals) -> bool:
-    """Only religious answers reach a scholar; general trivia never does."""
-    return signals.is_religious and score <= SCHOLAR_QUEUE_THRESHOLD
+    """Only religious answers reach a scholar; general trivia never does.
+
+    The comparison is strict, matching ``band_for``: with the default
+    thresholds equal, "queued" then means exactly "abstained", and a score
+    sitting precisely on the threshold cannot be queued while the user is shown
+    an ordinary hedge.
+    """
+    return signals.is_religious and score < SCHOLAR_QUEUE_THRESHOLD
 
 
 def assess(signals: ConfidenceSignals) -> ConfidenceAssessment:
@@ -314,7 +337,13 @@ def apply_policy(answer: str, assessment: ConfidenceAssessment) -> str:
             message += SCHOLAR_QUEUED_NOTE
         return message
     if assessment.band is ConfidenceBand.UNCERTAIN:
-        return f"{answer.rstrip()}\n\n{UNCERTAINTY_NOTE}"
+        text = f"{answer.rstrip()}\n\n{UNCERTAINTY_NOTE}"
+        # An operator may set SCHOLAR_QUEUE_THRESHOLD above the abstain
+        # threshold to route hedged answers for review too. Nothing should ever
+        # go to a scholar without the user being told it did.
+        if assessment.queued:
+            text += SCHOLAR_QUEUED_NOTE
+        return text
     return answer
 
 

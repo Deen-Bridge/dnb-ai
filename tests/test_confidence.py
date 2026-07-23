@@ -151,6 +151,26 @@ class TestComputeConfidence:
 # ---------------------------------------------------------------------------
 
 
+class TestConfiguration:
+    """Bad configuration must degrade to defaults, never crash on import."""
+
+    @pytest.mark.parametrize("raw", ["not-a-number", "", "1.5", "-0.2"])
+    def test_invalid_threshold_falls_back(self, monkeypatch, raw):
+        monkeypatch.setenv("CONFIDENCE_LOW_THRESHOLD", raw)
+        assert confidence._env_float("CONFIDENCE_LOW_THRESHOLD", 0.4) == 0.4
+
+    @pytest.mark.parametrize("raw", ["not-a-number", "", "0", "-3"])
+    def test_invalid_hedge_saturation_falls_back(self, monkeypatch, raw):
+        monkeypatch.setenv("CONFIDENCE_HEDGE_SATURATION", raw)
+        assert confidence._env_int("CONFIDENCE_HEDGE_SATURATION", 3) == 3
+
+    def test_valid_values_are_read(self, monkeypatch):
+        monkeypatch.setenv("CONFIDENCE_LOW_THRESHOLD", "0.25")
+        monkeypatch.setenv("CONFIDENCE_HEDGE_SATURATION", "5")
+        assert confidence._env_float("CONFIDENCE_LOW_THRESHOLD", 0.4) == 0.25
+        assert confidence._env_int("CONFIDENCE_HEDGE_SATURATION", 3) == 5
+
+
 class TestBands:
     def test_band_boundaries(self):
         low = confidence.CONFIDENCE_LOW_THRESHOLD
@@ -186,6 +206,36 @@ class TestQueueing:
         """A scholar's time is for religious content, not general trivia."""
         signals = ConfidenceSignals(self_consistency=0.1, is_religious=False)
         assert should_queue_for_scholar(compute_confidence(signals), signals) is False
+
+    def test_threshold_boundary_does_not_queue_silently(self):
+        """Queued must never be true while the user is shown a plain hedge.
+
+        At exactly the low threshold the band is UNCERTAIN, so with the
+        default (equal) thresholds the item must not be queued either —
+        otherwise the answer goes to a scholar without the user being told.
+        """
+        signals = ConfidenceSignals(
+            self_consistency=confidence.CONFIDENCE_LOW_THRESHOLD,
+            citation_verification=confidence.CONFIDENCE_LOW_THRESHOLD,
+            is_religious=True,
+        )
+        assessment = assess(signals)
+        assert assessment.score == pytest.approx(confidence.CONFIDENCE_LOW_THRESHOLD)
+        assert assessment.band is ConfidenceBand.UNCERTAIN
+        assert assessment.queued is False
+
+    def test_queueing_above_the_abstain_band_still_tells_the_user(self, monkeypatch):
+        """If an operator queues hedged answers too, the user is still told."""
+        monkeypatch.setattr(confidence, "SCHOLAR_QUEUE_THRESHOLD", 0.9)
+        signals = ConfidenceSignals(
+            self_consistency=0.6, citation_verification=0.6, is_religious=True
+        )
+        assessment = assess(signals)
+        assert assessment.band is ConfidenceBand.UNCERTAIN
+        assert assessment.queued is True
+        text = apply_policy("An answer.", assessment)
+        assert UNCERTAINTY_NOTE in text
+        assert SCHOLAR_QUEUED_NOTE.strip() in text
 
     def test_high_confidence_religious_answer_is_not_queued(self):
         signals = ConfidenceSignals(self_consistency=0.95, is_religious=True)

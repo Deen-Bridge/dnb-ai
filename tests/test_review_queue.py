@@ -25,7 +25,13 @@ from review import (
     require_reviewer,
     review_stats,
 )
-from review_store import ReviewItem, ReviewStatus, ReviewStore, Verdict
+from review_store import (
+    AlreadyReviewedError,
+    ReviewItem,
+    ReviewStatus,
+    ReviewStore,
+    Verdict,
+)
 
 TOKEN = "test-review-token"
 
@@ -118,6 +124,34 @@ class TestReviewStore:
         assert decided.status is ReviewStatus.REJECTED
         assert decided.final_answer is None
 
+    def test_second_verdict_raises_already_reviewed(self, store):
+        item = run(store.add(make_item()))
+        run(store.record_verdict(item.id, Verdict.APPROVE))
+        with pytest.raises(AlreadyReviewedError) as exc:
+            run(store.record_verdict(item.id, Verdict.REJECT))
+        assert exc.value.item.status is ReviewStatus.APPROVED
+
+    def test_concurrent_verdicts_do_not_both_win(self, store):
+        """A scholar's verdict is final — a concurrent one must not overwrite it."""
+        item = run(store.add(make_item()))
+
+        async def race():
+            return await asyncio.gather(
+                store.record_verdict(item.id, Verdict.APPROVE, reviewer="A"),
+                store.record_verdict(item.id, Verdict.REJECT, reviewer="B"),
+                return_exceptions=True,
+            )
+
+        results = run(race())
+        succeeded = [r for r in results if isinstance(r, ReviewItem)]
+        conflicts = [r for r in results if isinstance(r, AlreadyReviewedError)]
+        assert len(succeeded) == 1
+        assert len(conflicts) == 1
+        # And the stored item matches whoever won, not a mix of the two.
+        stored = run(store.get(item.id))
+        assert stored.reviewer == succeeded[0].reviewer
+        assert stored.status is succeeded[0].status
+
     def test_pagination(self, store):
         for i in range(5):
             run(store.add(make_item(question=f"q{i}", created_at=float(i))))
@@ -141,6 +175,66 @@ class TestReviewStore:
         assert not hasattr(store, "_ttl")
         item = run(store.add(make_item(created_at=0.0)))
         assert run(store.get(item.id)) is not None
+
+
+# ---------------------------------------------------------------------------
+# Redis outage behaviour
+#
+# from_url() builds the client lazily, so an unreachable Redis only shows up on
+# the first real operation — long after the store decided it was durable. These
+# use a stub client that always raises, which is what that looks like.
+# ---------------------------------------------------------------------------
+
+
+class ExplodingRedis:
+    """Stands in for a Redis that has gone away mid-flight."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def _boom(self, *args, **kwargs):
+        self.calls += 1
+        raise ConnectionError("redis is unreachable")
+
+    get = set = zadd = zrem = zrange = zrevrange = zcard = delete = _boom
+
+    def pipeline(self, transaction=True):
+        raise ConnectionError("redis is unreachable")
+
+
+@pytest.fixture
+def redis_down(store):
+    store._use_redis = True
+    store._redis = ExplodingRedis()
+    return store
+
+
+class TestRedisOutage:
+    def test_add_keeps_the_item_instead_of_raising(self, redis_down):
+        """A queue write must never be the reason a chat turn fails."""
+        item = run(redis_down.add(make_item()))
+        assert run(redis_down.get(item.id)) is not None
+        assert redis_down._degraded is True
+
+    def test_outage_is_reported_as_not_durable(self, redis_down):
+        run(redis_down.add(make_item()))
+        assert redis_down.durable is False
+        stats = run(redis_down.stats())
+        assert stats["degraded"] is True
+        assert stats["durable"] is False
+
+    def test_listing_degrades_to_empty_rather_than_500(self, redis_down):
+        assert run(redis_down.list_pending(limit=50, offset=0)) == []
+        assert run(redis_down.list_reviewed(limit=50, offset=0)) == []
+
+    def test_verdict_still_records_on_a_locally_held_item(self, redis_down):
+        item = run(redis_down.add(make_item()))
+        decided = run(redis_down.record_verdict(item.id, Verdict.APPROVE))
+        assert decided.status is ReviewStatus.APPROVED
+
+    def test_healthy_store_is_not_marked_degraded(self, store):
+        run(store.add(make_item()))
+        assert store._degraded is False
 
 
 # ---------------------------------------------------------------------------
