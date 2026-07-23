@@ -1,0 +1,11 @@
+Count,Message,Traceback,Nodes
+10,'UserBehavior' object has no attribute 'execute_taskset',"  File ""C:\Users\DELL-PC\Desktop\dnb-ai\venv_win\Lib\site-packages\locust\user\task.py"", line 363, in run
+    self.execute_next_task()
+  File ""C:\Users\DELL-PC\Desktop\dnb-ai\venv_win\Lib\site-packages\locust\user\task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""C:\Users\DELL-PC\Desktop\dnb-ai\venv_win\Lib\site-packages\locust\user\task.py"", line 513, in execute_task
+    task(self.user)
+  File ""C:\Users\DELL-PC\Desktop\dnb-ai\loadtest\locustfile.py"", line 47, in multi_turn_chat
+    self.execute_taskset(MultiTurnChatSession)
+    ^^^^^^^^^^^^^^^^^^^^
+",local

@@ -43,16 +43,20 @@ app.add_middleware(
 )
 
 # Configure Gemini
-try:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in environment variables")
-    logger.info("Configuring Gemini API...")
-    genai.configure(api_key=api_key)
-    logger.info("Gemini API configured successfully")
-except Exception as e:
-    logger.error(f"❌ Error configuring Gemini: {str(e)}")
-    raise
+mock_upstreams = os.getenv("MOCK_UPSTREAMS", "0") == "1"
+if not mock_upstreams:
+    try:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not found in environment variables")
+        logger.info("Configuring Gemini API...")
+        genai.configure(api_key=api_key)
+        logger.info("Gemini API configured successfully")
+    except Exception as e:
+        logger.error(f"❌ Error configuring Gemini: {str(e)}")
+        raise
+else:
+    logger.info("🤖 Runing in MOCK_UPSTREAMS mode. Gemini will not be configured.")
 
 # Session store (Redis-backed, with in-memory fallback)
 session_store = SessionStore()
@@ -141,12 +145,36 @@ async def chat(request: ChatRequest):
 
         # Rebuild chat session from persisted history
         contents = dicts_to_contents(history_dicts)
-        chat = model.start_chat(history=contents)
-
+        
         # Prepare the prompt with context if provided
         full_prompt = request.prompt
         if request.context:
             full_prompt = f"Context: {request.context}\n\nQuestion: {request.prompt}"
+
+        if mock_upstreams:
+            import time
+            latency_ms = float(os.getenv("MOCK_LLM_LATENCY_MS", "800"))
+            time.sleep(latency_ms / 1000.0)
+            
+            history_dicts.append({"role": "user", "parts": [{"text": full_prompt}]})
+            mock_response_text = f"Mock LLM Response for: {request.prompt}"
+            history_dicts.append({"role": "model", "parts": [{"text": mock_response_text}]})
+            
+            await session_store.save_history(chat_id, history_dicts)
+            
+            history = []
+            for item in history_dicts:
+                history.append(Message(
+                    role=item["role"],
+                    content=item["parts"][0]["text"]
+                ))
+            return ChatResponse(
+                response=mock_response_text,
+                chat_id=chat_id,
+                history=history
+            )
+
+        chat = model.start_chat(history=contents)
 
         # Send message and get response
         logger.info("Sending message to chat...")
