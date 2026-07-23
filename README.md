@@ -23,11 +23,11 @@ On the roadmap: Stellar-aware assistance — zakat calculation from a wallet's o
 
 The platform is composed of three services:
 
-| Repository | Role | Live |
-|------------|------|------|
-| [dnb-frontend](https://github.com/Deen-Bridge/dnb-frontend) | Next.js web application | [dnb-frontend.vercel.app](https://dnb-frontend.vercel.app) |
-| [dnb-backend](https://github.com/Deen-Bridge/dnb-backend) | REST API — auth, content, Stellar payments | [dnb-backend-api.onrender.com](https://dnb-backend-api.onrender.com) |
-| **dnb-ai** (this repo) | FastAPI service for the AI assistant | [dnb-ai.onrender.com](https://dnb-ai.onrender.com) |
+| Repository                                                  | Role                                       | Live                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------- |
+| [dnb-frontend](https://github.com/Deen-Bridge/dnb-frontend) | Next.js web application                    | [dnb-frontend.vercel.app](https://dnb-frontend.vercel.app)           |
+| [dnb-backend](https://github.com/Deen-Bridge/dnb-backend)   | REST API — auth, content, Stellar payments | [dnb-backend-api.onrender.com](https://dnb-backend-api.onrender.com) |
+| **dnb-ai** (this repo)                                      | FastAPI service for the AI assistant       | [dnb-ai.onrender.com](https://dnb-ai.onrender.com)                   |
 
 ## ✨ Features
 
@@ -62,6 +62,9 @@ python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 
 pip install -r requirements.txt
+
+# Copy environment template and add your API key
+cp .env.example .env
 
 echo "GEMINI_API_KEY=your_api_key_here" > .env
 
@@ -104,7 +107,7 @@ Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full workflow, coding standa
 
 ## 📜 License
 
-[MIT](LICENSE) © Deen Bridge
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ## 🔗 Links
 
