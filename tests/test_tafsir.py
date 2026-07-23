@@ -6,12 +6,14 @@ index; no live API calls and no GEMINI_API_KEY needed.
 """
 
 import asyncio
+import time
 
 import pytest
 
 from semantic_cache import get_keyed_cache
 from tafsir import (
     DEFAULT_TAFSIR_KEYS,
+    _normalize_surah_name,
     MAX_AYAT_PER_REQUEST,
     TAFSIR_REGISTRY,
     AyahRef,
@@ -167,6 +169,56 @@ class TestSurahIndex:
 
     def test_unknown_name_returns_none(self):
         assert surah_by_name("Al-Nonexistent") is None
+
+    @pytest.mark.parametrize("name,expected", [
+        # Sun-letter assimilation: the article's lām doubles the consonant, so
+        # the article is not spelled "al" and cannot be stripped as if it were.
+        ("At-Tawbah", 9), ("at-tawbah", 9), ("tawbah", 9),
+        ("As-Sajdah", 32), ("Al-Sajdah", 32), ("sajdah", 32),
+        ("Ash-Shams", 91), ("shams", 91),
+        ("As-Saff", 61), ("saff", 61),
+        ("Ar-Rahman", 55), ("rahman", 55),
+        ("An-Nur", 24), ("nur", 24),
+        ("Adh-Dhariyat", 51), ("dhariyat", 51),
+        ("At-Tin", 95), ("tin", 95),
+        ("Az-Zumar", 39), ("zumar", 39),
+    ])
+    def test_sun_letter_names_resolve(self, name, expected):
+        surah = surah_by_name(name)
+        assert surah is not None and surah.number == expected
+
+    @pytest.mark.parametrize("name,expected", [
+        # "an"/"al" here are part of the name, not the article — stripping them
+        # would turn Al-Anfal into "fal".
+        ("Al-Anfal", 8), ("anfal", 8),
+        ("An-Naml", 27), ("naml", 27),
+        ("An-Nahl", 16), ("nahl", 16),
+    ])
+    def test_names_that_only_look_like_articles(self, name, expected):
+        surah = surah_by_name(name)
+        assert surah is not None and surah.number == expected
+
+    def test_every_canonical_name_resolves_to_its_own_surah(self):
+        for surah in load_surah_index():
+            found = surah_by_name(surah.name)
+            assert found is not None, f"{surah.name} does not resolve"
+            assert found.number == surah.number, f"{surah.name} -> {found.name}"
+
+    def test_every_alias_resolves_to_its_own_surah(self):
+        for surah in load_surah_index():
+            for alias in surah.aliases:
+                found = surah_by_name(alias)
+                assert found is not None, f"alias {alias!r} does not resolve"
+                assert found.number == surah.number, f"{alias!r} -> {found.name}"
+
+    def test_no_two_surahs_share_a_normalized_name(self):
+        seen: dict[str, int] = {}
+        for surah in load_surah_index():
+            for label in [surah.name, surah.arabic_name, *surah.aliases]:
+                key = _normalize_surah_name(label)
+                assert seen.setdefault(key, surah.number) == surah.number, (
+                    f"{label!r} collides with surah {seen[key]}"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +608,16 @@ class TestIntentDetection:
         refs = detect_ayah_references("What does Surah al-Baqarah mean?")
         assert [r.key for r in refs] == ["2:1"]
 
+    @pytest.mark.parametrize("prompt,expected", [
+        ("Explain surah at-tawbah 5", ["9:5"]),
+        ("What does surah as-sajdah 5 mean?", ["32:5"]),
+        ("Explain surah ash-shams 1", ["91:1"]),
+        ("What is the tafsir of As-Saff 4?", ["61:4"]),
+        ("Explain surah al-anfal 1", ["8:1"]),
+    ])
+    def test_detects_sun_letter_surah_names(self, prompt, expected):
+        assert [r.key for r in detect_ayah_references(prompt)] == expected
+
     def test_out_of_range_reference_is_skipped_not_raised(self):
         assert detect_ayah_references("Explain 2:300") == []
 
@@ -625,6 +687,52 @@ class TestChatIntegration:
         info = summarize_tafsir_context(context)
         assert info.grounded is False
         assert info.works_cited == []
+
+    def test_slow_source_times_out_instead_of_stalling_the_turn(self):
+        """A slow upstream costs the turn its grounding, never its response."""
+
+        class SlowSource(FakeTafsirSource):
+            async def fetch_tafsir(self, slug, verse_key):
+                await asyncio.sleep(5)
+                return None
+
+            async def fetch_verse(self, verse_key, language):
+                await asyncio.sleep(5)
+                return VerseText()
+
+        started = time.monotonic()
+        context = run(build_chat_tafsir_context(
+            "Explain 103:2", "en", SlowSource(), timeout=0.05
+        ))
+        assert context is None
+        assert time.monotonic() - started < 2
+
+    def test_retrieval_runs_concurrently_across_ayat(self):
+        """Ayat are independent, so a range must not stack one wait per ayah."""
+
+        class SlowishSource(FakeTafsirSource):
+            async def fetch_tafsir(self, slug, verse_key):
+                await asyncio.sleep(0.05)
+                return await super().fetch_tafsir(slug, verse_key)
+
+            async def fetch_verse(self, verse_key, language):
+                await asyncio.sleep(0.05)
+                return await super().fetch_verse(verse_key, language)
+
+        source = SlowishSource(
+            tafsirs={
+                ("en-tafisr-ibn-kathir", f"103:{n}"): IBN_KATHIR_103
+                for n in (1, 2, 3)
+            }
+        )
+        started = time.monotonic()
+        context = run(build_chat_tafsir_context(
+            "What does Surah al-Asr mean?", "en", source, timeout=None
+        ))
+        elapsed = time.monotonic() - started
+        assert context is not None and len(context.ayat) == 3
+        # 3 ayat x (verse + 4 works) x 50ms would be 750ms if serialized.
+        assert elapsed < 0.4
 
     def test_prompt_block_truncates_long_passages(self):
         long_payload = dict(IBN_KATHIR_103, text="<p>" + ("word " * 5000) + "</p>")

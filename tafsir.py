@@ -36,6 +36,7 @@ introducing a second cache system.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
@@ -80,6 +81,11 @@ LANGUAGE_NAMES: Dict[str, str] = {
 
 MAX_AYAT_PER_REQUEST = int(os.getenv("TAFSIR_MAX_AYAT", "10"))
 MAX_TAFSIRS_PER_REQUEST = 6
+
+# Wall-clock budget for retrieving tafsir inside a /chat turn. Retrieval runs
+# concurrently, but a slow upstream must not hold a chat turn open indefinitely:
+# past this budget the turn proceeds ungrounded rather than stalling.
+CHAT_RETRIEVAL_TIMEOUT = float(os.getenv("TAFSIR_CHAT_TIMEOUT", "20"))
 
 # How much tafsir text is handed to the model when synthesizing a chat answer.
 # Ibn Kathir on a single ayah can run to thousands of words; the cap keeps the
@@ -276,24 +282,56 @@ def _name_lookup() -> Dict[str, int]:
     return lookup
 
 
+# The definite article as it is actually transliterated. Before a "sun letter"
+# the lām assimilates and the consonant doubles — At-Tawbah, Ash-Shams,
+# Adh-Dhariyat — so the article cannot simply be matched as "al". Longest forms
+# first, so "adh" is tried before "ad".
+_SUN_ARTICLES: Tuple[Tuple[str, str], ...] = (
+    ("ash", "sh"), ("adh", "dh"), ("ath", "th"),
+    ("as", "s"), ("ad", "d"), ("an", "n"),
+    ("ar", "r"), ("at", "t"), ("az", "z"),
+)
+_MOON_ARTICLES: Tuple[str, ...] = ("al", "ul")
+
+
+def _strip_article(collapsed: str) -> str:
+    """Remove a leading definite article, assimilated or not.
+
+    A sun-letter article is only stripped when the consonant it assimilated into
+    actually doubles: "attawbah" → "tawbah", but "anfal" (Al-Anfal without its
+    article) keeps its "an", because "f" is not "n" and the "an" is part of the
+    name.
+    """
+    for article, consonant in _SUN_ARTICLES:
+        remainder = collapsed[len(article):]
+        if (
+            collapsed.startswith(article)
+            and remainder.startswith(consonant)
+            and len(remainder) > 2
+        ):
+            return remainder
+    for article in _MOON_ARTICLES:
+        if collapsed.startswith(article) and len(collapsed) > len(article) + 2:
+            return collapsed[len(article):]
+    return collapsed
+
+
 def _normalize_surah_name(name: str) -> str:
     """Fold the many spellings of a surah name onto one form.
 
-    "Al-'Asr", "al asr", "Surat ul-Asr" and "AlAsr" all normalize to "asr":
-    punctuation is dropped, the article is stripped, and case is folded.
+    "Al-'Asr", "al asr", "Surat ul-Asr" and "AlAsr" all normalize to "asr", and
+    "At-Tawbah", "at tawbah" and the bare "tawbah" all normalize to "tawbah":
+    punctuation is dropped, case is folded, and the definite article is removed
+    in whichever form it was written.
     """
     lowered = (name or "").casefold()
     lowered = re.sub(r"^surah?t?\s+", "", lowered)
     lowered = re.sub(r"[^\w؀-ۿ\s]", "", lowered)
-    lowered = re.sub(r"^(al|al-|as|ash|ad|an|ar|at|az)\s+", "", lowered)
+    lowered = re.sub(
+        r"^(al|ul|as|ash|adh|ath|ad|an|ar|at|az)\s+", r"\1", lowered
+    )
     collapsed = re.sub(r"\s+", "", lowered)
-    for article in ("al", "ul"):
-        if collapsed.startswith(article) and len(collapsed) > len(article) + 2:
-            candidate = collapsed[len(article):]
-            if candidate:
-                collapsed = candidate
-                break
-    return collapsed
+    return _strip_article(collapsed)
 
 
 def surah_by_number(number: int) -> Optional[Surah]:
@@ -728,6 +766,10 @@ async def fetch_tafsirs_for_ayah(
     available: List[TafsirText] = []
     unavailable: List[TafsirUnavailable] = []
 
+    # Resolve which edition of each work to fetch first, then fetch them
+    # concurrently: four works fetched one after another would stack four
+    # timeouts on a slow upstream, and they do not depend on each other.
+    plans: List[Tuple[TafsirWork, str, str]] = []
     for key in keys:
         work = TAFSIR_REGISTRY.get(key)
         if work is None:
@@ -751,17 +793,13 @@ async def fetch_tafsirs_for_ayah(
                 continue
             used_language = work.languages[0]
             slug = work.slug_for(used_language)
+        plans.append((work, used_language, slug))
 
-        cache_key = f"{slug}|{ref.key}"
-        cache = _tafsir_cache()
-        payload = cache.get(cache_key)
-        if payload is None:
-            payload = await src.fetch_tafsir(slug, ref.key)
-            if payload is not None:
-                # Tafsir text is immutable per ayah, so this never goes stale
-                # within a TTL window.
-                cache.put(cache_key, payload)
+    payloads = await asyncio.gather(
+        *(_fetch_tafsir_cached(src, slug, ref) for _, _, slug in plans)
+    )
 
+    for (work, used_language, _), payload in zip(plans, payloads):
         if payload is None:
             unavailable.append(
                 TafsirUnavailable(
@@ -787,6 +825,23 @@ async def fetch_tafsirs_for_ayah(
         available.append(parsed)
 
     return available, unavailable
+
+
+async def _fetch_tafsir_cached(
+    src: TafsirSource, slug: str, ref: AyahRef
+) -> Optional[Dict[str, Any]]:
+    """One tafsir payload, from the keyed cache when it is already there."""
+    cache = _tafsir_cache()
+    cache_key = f"{slug}|{ref.key}"
+    payload = cache.get(cache_key)
+    if payload is not None:
+        return payload
+    payload = await src.fetch_tafsir(slug, ref.key)
+    if payload is not None:
+        # Tafsir text is immutable per ayah, so this never goes stale within a
+        # TTL window.
+        cache.put(cache_key, payload)
+    return payload
 
 
 async def fetch_verse_text(
@@ -888,6 +943,41 @@ def resolve_requested_tafsirs(requested: Optional[List[str]]) -> List[str]:
     return resolved
 
 
+async def assemble_ayah(
+    ref: AyahRef,
+    keys: List[str],
+    language: str,
+    allow_language_fallback: bool = True,
+    source: Optional[TafsirSource] = None,
+) -> AyahTafsir:
+    """Verse text plus every requested tafsir for one ayah.
+
+    Shared by ``/tafsir`` and the chat path so both assemble an ayah — and
+    degrade on a missing work — identically. The verse text and the tafsir
+    lookups are independent, so they run concurrently.
+    """
+    verse, (available, unavailable) = await asyncio.gather(
+        fetch_verse_text(ref, language, source),
+        fetch_tafsirs_for_ayah(
+            ref,
+            keys,
+            language,
+            allow_language_fallback=allow_language_fallback,
+            source=source,
+        ),
+    )
+    surah = surah_by_number(ref.surah)
+    return AyahTafsir(
+        ayah=ref.key,
+        surah_name=surah.name if surah else str(ref.surah),
+        arabic=verse.arabic,
+        translation=verse.translation,
+        translation_language=verse.translation_language,
+        tafsirs=available,
+        unavailable=unavailable,
+    )
+
+
 async def build_tafsir_response(
     request: TafsirRequest, source: Optional[TafsirSource] = None
 ) -> TafsirResponse:
@@ -896,30 +986,22 @@ async def build_tafsir_response(
     keys = resolve_requested_tafsirs(request.tafsirs)
     language = (request.language or DEFAULT_TRANSLATION_LANGUAGE).strip().casefold()
 
-    ayat: List[AyahTafsir] = []
-    for ref in refs:
-        verse = await fetch_verse_text(ref, language, source)
-        available, unavailable = await fetch_tafsirs_for_ayah(
-            ref,
-            keys,
-            language,
-            allow_language_fallback=request.allow_language_fallback,
-            source=source,
-        )
-        surah = surah_by_number(ref.surah)
-        ayat.append(
-            AyahTafsir(
-                ayah=ref.key,
-                surah_name=surah.name if surah else str(ref.surah),
-                arabic=verse.arabic,
-                translation=verse.translation,
-                translation_language=verse.translation_language,
-                tafsirs=available,
-                unavailable=unavailable,
+    ayat = await asyncio.gather(
+        *(
+            assemble_ayah(
+                ref,
+                keys,
+                language,
+                allow_language_fallback=request.allow_language_fallback,
+                source=source,
             )
+            for ref in refs
         )
+    )
 
-    return TafsirResponse(reference=request.reference, language=language, ayat=ayat)
+    return TafsirResponse(
+        reference=request.reference, language=language, ayat=list(ayat)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -997,31 +1079,45 @@ async def build_chat_tafsir_context(
     prompt: str,
     language: str = DEFAULT_TRANSLATION_LANGUAGE,
     source: Optional[TafsirSource] = None,
+    timeout: Optional[float] = CHAT_RETRIEVAL_TIMEOUT,
 ) -> Optional[TafsirContext]:
-    """Retrieve tafsir for a chat prompt, or None if it isn't a tafsir question."""
+    """Retrieve tafsir for a chat prompt, or None if it isn't a tafsir question.
+
+    Returns None if retrieval exceeds *timeout*, so a slow upstream costs the
+    turn its grounding but never its response. Pass ``timeout=None`` to wait
+    indefinitely (offline tests do, since their source is instant).
+    """
+    if timeout is None:
+        return await _build_chat_tafsir_context(prompt, language, source)
+    try:
+        return await asyncio.wait_for(
+            _build_chat_tafsir_context(prompt, language, source), timeout
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Tafsir retrieval exceeded %ss; answering without it", timeout
+        )
+        return None
+
+
+async def _build_chat_tafsir_context(
+    prompt: str,
+    language: str = DEFAULT_TRANSLATION_LANGUAGE,
+    source: Optional[TafsirSource] = None,
+) -> Optional[TafsirContext]:
     refs = detect_ayah_references(prompt)
     if not refs:
         return None
 
     keys = list(DEFAULT_TAFSIR_KEYS)
-    ayat: List[AyahTafsir] = []
-    for ref in refs:
-        verse = await fetch_verse_text(ref, language, source)
-        available, unavailable = await fetch_tafsirs_for_ayah(
-            ref, keys, language, allow_language_fallback=True, source=source
-        )
-        surah = surah_by_number(ref.surah)
-        ayat.append(
-            AyahTafsir(
-                ayah=ref.key,
-                surah_name=surah.name if surah else str(ref.surah),
-                arabic=verse.arabic,
-                translation=verse.translation,
-                translation_language=verse.translation_language,
-                tafsirs=available,
-                unavailable=unavailable,
+    ayat = list(await asyncio.gather(
+        *(
+            assemble_ayah(
+                ref, keys, language, allow_language_fallback=True, source=source
             )
+            for ref in refs
         )
+    ))
 
     context = TafsirContext(
         references=[ayah.ayah for ayah in ayat],
