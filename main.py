@@ -26,6 +26,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from study import router as study_router
+from rag import RAG_ENABLED, SourceDocument, format_reference_passages, retrieve
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -177,6 +178,8 @@ async def ping():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
+    rag_sources: list[SourceDocument] = []
+
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 

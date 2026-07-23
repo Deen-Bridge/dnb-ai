@@ -39,6 +39,9 @@ jobs:
       - name: Run study generator tests
         run: pytest -q tests/test_study.py
 
+      - name: Run RAG tests
+        run: pytest -q tests/test_rag.py
+
       - name: Run semantic cache tests
         run: pytest -q tests/test_semantic_cache.py
 

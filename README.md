@@ -34,6 +34,7 @@ The platform is composed of three services:
 - 🤖 **Islamic context-aware responses** grounded in a curated system prompt
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
+- 📖 **RAG over Quran and Hadith** — retrieves relevant passages from a ChromaDB index and injects them into the prompt
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
@@ -73,16 +74,40 @@ uvicorn main:app --reload
 
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
+### RAG / Corpus Ingestion
+
+To build the ChromaDB index, run the ingestion script after setup:
+
+```bash
+python scripts/ingest_corpus.py
+```
+
+This downloads the Saheeh International Quran translation (Tanzil.net) and
+Sahih al-Bukhari hadith (permissively licensed GitHub export), chunks them
+(one ayah per chunk, one hadith per chunk), embeds them via Gemini
+`text-embedding-004`, and stores the vectors in the directory configured by
+`CHROMA_PERSIST_DIR` (default `chroma_data/`). The raw corpus JSONL is
+cached under `data/`.
+
+Use `--reuse-cache` to skip re-downloading:
+```bash
+python scripts/ingest_corpus.py --reuse-cache
+```
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | Google Gemini API key | — |
+| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement | `true` |
+| `RAG_ENABLED` | Enable retrieval-augmented generation over Quran/Hadith | `0` (disabled) |
+| `RAG_TOP_K` | Number of passages to retrieve per query | `5` |
+| `RAG_MIN_SCORE` | Minimum similarity score for retrieved passages | `0.0` |
+| `CHROMA_PERSIST_DIR` | Directory for the persistent ChromaDB index | `chroma_data` |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
 | `SEMANTIC_CACHE_MAX_ENTRIES` | Maximum cache entries (LRU eviction) | `1000` |
-| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` |
 
 ### Content-safety testing
 

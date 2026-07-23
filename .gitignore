@@ -35,4 +35,8 @@ ENV/
 *.swo
 
 # Logs
-*.log 
+*.log
+
+# RAG / ChromaDB
+data/
+chroma_data/
