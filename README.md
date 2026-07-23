@@ -34,6 +34,7 @@ The platform is composed of three services:
 - 🤖 **Islamic context-aware responses** grounded in a curated system prompt
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
+- 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
@@ -44,6 +45,8 @@ The platform is composed of three services:
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
 | `GET` | `/ping` | Health check |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
+| `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
+| `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 
 ## 🚀 Getting Started
 
@@ -82,7 +85,66 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
 | `SEMANTIC_CACHE_MAX_ENTRIES` | Maximum cache entries (LRU eviction) | `1000` |
-| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` |
+| `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` | `true` |
+| `QURAN_API_BASE` | Base URL for tafsir/ayah retrieval | `https://api.quran.com/api/v4` |
+| `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
+| `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
+| `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
+
+### Tafsir (ayah explanation)
+
+`POST /tafsir` explains an ayah from **named** tafsir works instead of from the
+model's memory. Every passage is returned with the work, its author, and the
+language the text is actually in — attribution comes from the source's own
+response, never from the service's recollection of who wrote what.
+
+```bash
+curl -X POST http://localhost:8000/tafsir \
+  -H 'Content-Type: application/json' \
+  -d '{"reference": "103:1-3", "tafsirs": ["ibn-kathir", "tabari", "saadi"], "language": "en"}'
+```
+
+```jsonc
+{
+  "reference": "103:1-3",
+  "language": "en",
+  "ayat": [
+    {
+      "ayah": "103:1",
+      "surah_name": "Al-'Asr",
+      "arabic": "وَٱلْعَصْرِ",
+      "translation": "By time,",
+      "tafsirs": [
+        {"key": "ibn-kathir", "name": "Ibn Kathir (Abridged)", "author": "Ibn Kathir (d. 774 AH)",
+         "language": "english", "text": "…", "verse_range": "103:1-3"}
+      ],
+      "unavailable": [
+        {"key": "qurtubi", "name": "Al-Jami' li-Ahkam al-Qur'an (Tafsir al-Qurtubi)",
+         "author": "Al-Qurtubi (d. 671 AH)", "reason": "No entry for 103:1 in this tafsir."}
+      ]
+    }
+  ]
+}
+```
+
+- **References** accept `103:1`, a range `103:1-3`, or a surah name (`Al-Asr 1-3`).
+  Bounds are checked offline against [`data/quran/surah_index.json`](data/quran/surah_index.json),
+  so `2:300` is a `400` naming Al-Baqarah's 286 ayat — never an invented verse.
+- **Language**: tafsirs published in the requested language are served in it. A
+  work with no such edition falls back to its original language and is labelled
+  with it (set `allow_language_fallback: false` to omit it instead).
+- **Degradation**: a work with no entry for the ayah appears under `unavailable`
+  with a reason; the rest of the response is unaffected.
+- **Caching**: tafsir text is immutable per ayah, so it is cached by exact ayah
+  key through `semantic_cache.KeyedCache` — the keyed sibling of the semantic
+  response cache, sharing its TTL and eviction settings rather than adding a
+  second cache system.
+
+In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
+"explain 2:255") is detected offline and answered from the same retrieved
+passages, with the model instructed to attribute each claim to a named mufassir
+and to surface — not flatten — points where the mufassirun differ. The response
+carries a `tafsir` block naming the works whose text actually backed the answer.
 
 ### Content-safety testing
 

@@ -220,3 +220,96 @@ _cache: SemanticCache = SemanticCache()
 
 def get_cache() -> SemanticCache:
     return _cache
+
+
+# ---------------------------------------------------------------------------
+# Keyed cache (exact-key sibling of the semantic cache)
+# ---------------------------------------------------------------------------
+
+
+class KeyedCache:
+    """Exact-key LRU cache for content that is immutable per key.
+
+    Why this lives here rather than in its own module: it is the same cache
+    concern as ``SemanticCache`` — same TTL and max-entry configuration, same
+    LRU eviction, same stats shape — and callers that need caching should have
+    exactly one place to look. It is *not* a second cache system; it is the
+    lookup mode the semantic cache cannot serve.
+
+    Why not reuse ``SemanticCache`` directly: a tafsir lookup is keyed by an
+    ayah reference, which is exact. Approximate embedding similarity is the
+    wrong matching rule there — 2:255 and 2:256 are near-identical strings and
+    must never match each other. Cached values are keyed and looked up by an
+    exact string, never by distance.
+    """
+
+    __slots__ = ("_entries", "_access_times", "hits", "misses", "evictions")
+
+    def __init__(self) -> None:
+        # key -> (value, expires_at)
+        self._entries: dict[str, tuple[Any, float]] = {}
+        self._access_times: dict[str, float] = {}
+        self.hits = 0
+        self.misses = 0
+        self.evictions = 0
+
+    def get(self, key: str) -> Optional[Any]:
+        entry = self._entries.get(key)
+        if entry is None:
+            self.misses += 1
+            return None
+        value, expires_at = entry
+        if time.time() > expires_at:
+            del self._entries[key]
+            self._access_times.pop(key, None)
+            self.evictions += 1
+            self.misses += 1
+            return None
+        self._access_times[key] = time.time()
+        self.hits += 1
+        return value
+
+    def put(self, key: str, value: Any) -> None:
+        self._evict_lru_if_full()
+        self._entries[key] = (value, time.time() + SEMANTIC_CACHE_TTL_SECONDS)
+        self._access_times[key] = time.time()
+
+    def get_stats(self) -> dict[str, Any]:
+        total = self.hits + self.misses
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "evictions": self.evictions,
+            "hit_rate": round(self.hits / total, 4) if total > 0 else 0.0,
+            "size": len(self._entries),
+            "max_entries": SEMANTIC_CACHE_MAX_ENTRIES,
+            "ttl_seconds": SEMANTIC_CACHE_TTL_SECONDS,
+        }
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._access_times.clear()
+
+    def _evict_lru_if_full(self) -> None:
+        if len(self._entries) < SEMANTIC_CACHE_MAX_ENTRIES:
+            return
+        lru_key = min(self._access_times, key=lambda k: self._access_times[k])
+        self._entries.pop(lru_key, None)
+        self._access_times.pop(lru_key, None)
+        self.evictions += 1
+
+
+_keyed_caches: dict[str, KeyedCache] = {}
+
+
+def get_keyed_cache(namespace: str) -> KeyedCache:
+    """Return the process-wide keyed cache for *namespace*, creating it once."""
+    cache = _keyed_caches.get(namespace)
+    if cache is None:
+        cache = KeyedCache()
+        _keyed_caches[namespace] = cache
+    return cache
+
+
+def keyed_cache_stats() -> dict[str, dict[str, Any]]:
+    return {name: cache.get_stats() for name, cache in _keyed_caches.items()}

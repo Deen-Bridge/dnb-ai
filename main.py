@@ -26,6 +26,14 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from study import router as study_router
+from tafsir import (
+    TafsirContext,
+    TafsirInfo,
+    build_chat_tafsir_context,
+    router as tafsir_router,
+    summarize_tafsir_context,
+    tafsir_system_context,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +48,8 @@ app = FastAPI(title="DeenBridge AI API")
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
 app.include_router(study_router)
+# Tafsir: grounded, attributed ayah explanations from named classical works
+app.include_router(tafsir_router)
 
 # Configure CORS
 app.add_middleware(
@@ -99,6 +109,7 @@ class ChatRequest(BaseModel):
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
     madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
+    language: Optional[str] = None  # Preferred language for retrieved tafsir
 
 
 class Moderation(BaseModel):
@@ -113,6 +124,7 @@ class ChatResponse(BaseModel):
     moderation: Optional[Moderation] = None
     fiqh: Optional[FiqhInfo] = None
     hadith_references: Optional[List[HadithReference]] = None
+    tafsir: Optional[TafsirInfo] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -146,6 +158,19 @@ safety_pipeline = SafetyPipeline(
 
 # Semantic response cache
 semantic_cache = get_cache()
+
+# Tafsir retrieval seam: returns None for prompts that are not
+# verse-explanation questions. Offline tests replace this with a stub.
+DEFAULT_TAFSIR_LANGUAGE = "en"
+
+
+async def tafsir_retriever(prompt: str, language: str) -> Optional[TafsirContext]:
+    """Retrieve tafsir for a chat turn; never fail the turn over retrieval."""
+    try:
+        return await build_chat_tafsir_context(prompt, language)
+    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
+        logger.warning("Tafsir retrieval failed; answering without it: %s", exc)
+        return None
 
 
 def get_safety_settings():
@@ -183,12 +208,30 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         chat_id = request.chat_id or str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
-        is_cacheable = is_new_chat and request.context is None and SEMANTIC_CACHE_ENABLED
 
         # --- Fiqh classification & madhhab ---
         madhhab = normalize_madhhab(request.madhhab)
         is_fiqh = classify_fiqh(request.prompt)
         fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+
+        # --- Tafsir retrieval for verse-explanation questions ---
+        # Detection is offline (regex + the bundled surah index), so a
+        # non-tafsir prompt costs nothing.
+        tafsir_context = await tafsir_retriever(
+            request.prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
+        )
+        tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
+
+        # A grounded tafsir answer is built from retrieved passages, so it does
+        # not go through the semantic response cache — the expensive part, the
+        # tafsir text itself, is already cached by exact ayah key in
+        # semantic_cache.KeyedCache.
+        is_cacheable = (
+            is_new_chat
+            and request.context is None
+            and tafsir_context is None
+            and SEMANTIC_CACHE_ENABLED
+        )
 
         # --- Semantic cache lookup ---
         embedding: Any = None
@@ -234,6 +277,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += FIQH_IKHTILAF_CONTEXT
                 if madhhab:
                     system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
+            if tafsir_context is not None:
+                system_context += tafsir_system_context(tafsir_context)
             context = f"Additional context: {request.context}\n\n" if request.context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
@@ -316,6 +361,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             ) if safety_result and safety_result.category_id else None,
             fiqh=fiqh_info,
             hadith_references=hadith_refs,
+            tafsir=tafsir_info,
         )
 
     except Exception as e:
