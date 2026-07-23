@@ -281,6 +281,8 @@ def parse_references(text: str) -> List[RawReference]:
         number = int(number_match.group("number"))
         book = int(number_match.group("book")) if number_match.group("book") else None
         end = match.end() + number_match.end()
+        while end < len(text) and text[end] in ").,;:]":
+            end += 1
         references.append(
             RawReference(
                 raw=text[match.start():end].strip(),
