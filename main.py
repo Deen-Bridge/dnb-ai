@@ -10,6 +10,7 @@ from typing import Any, List, Optional
 import uuid
 
 from stellar import router as stellar_router
+from history import trim_history
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 from semantic_cache import (
     SEMANTIC_CACHE_ENABLED,
@@ -110,6 +111,7 @@ class ChatRequest(BaseModel):
     prompt: str
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
+    include_history: bool = True  # Set to false to omit history from response
     madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
 
 
@@ -122,6 +124,7 @@ class ChatResponse(BaseModel):
     response: str
     chat_id: str
     history: List[Message]
+    truncated: bool = False  # True when oldest turn pairs were dropped
     moderation: Optional[Moderation] = None
     fiqh: Optional[FiqhInfo] = None
     hadith_references: Optional[List[HadithReference]] = None
@@ -188,7 +191,7 @@ def get_safety_settings():
 @app.get("/ping")
 async def ping():
     logger.info("************** Ping pong ping pong *************")
-    return {"************** Ping pong ping pong *************"}
+    return {"status": "ok"}
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -236,7 +239,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             semantic_cache.bypasses += 1
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
+        truncated = False
+
         def generate(safety_prompt: str) -> str:
+            nonlocal truncated
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
                 model = genai.GenerativeModel(
@@ -244,6 +250,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     safety_settings=get_safety_settings()
                 )
                 active_chats[chat_id] = model.start_chat(history=[])
+
+            # Trim history to stay within token budget (oldest turn-pairs dropped)
+            truncated = trim_history(active_chats[chat_id])
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
             if is_fiqh:
@@ -373,6 +382,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             response=response_text,
             chat_id=chat_id,
             history=history,
+            truncated=truncated,
             moderation=Moderation(
                 category_id=safety_result.category_id,
                 action=safety_result.action,

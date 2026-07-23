@@ -84,6 +84,8 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | Google Gemini API key | — |
+| `MAX_HISTORY_TOKENS` | Estimated-token budget for conversation history; oldest turn-pairs are dropped when exceeded | `16000` |
+| `MAX_HISTORY_TURNS` | Hard cap on turn pairs in history; enforced as a cheap backstop before the token-budget check | `50` |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
@@ -98,87 +100,6 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | `SCHOLAR_REVIEW_TOKEN` | Enables the reviewer endpoints; required as `X-Review-Token` | — (endpoints disabled) |
 | `REVIEW_EXPORT_PATH` | JSONL export of reviewed answers | `data/review/reviewed.jsonl` |
 | `REDIS_URL` | Makes the scholar-review queue durable across restarts | — (in-memory) |
-
-### Confidence, abstention, and scholar review
-
-Every chat answer carries a documented 0–1 confidence score, and the service
-acts on it rather than answering everything with equal certainty.
-
-**The score** (one formula, in [`confidence.py`](confidence.py)) is a weighted
-mean over whatever signals ran for that turn — a component that did not run
-drops out of the average instead of being guessed at:
-
-| Signal | Weight | Produced by |
-|--------|--------|-------------|
-| `self_consistency` | 0.40 | the self-consistency work (#ai-18) — **passed in, never recomputed here** |
-| `citation_verification` | 0.30 | citation verification (#40) — passed in the same way |
-| `expressed_certainty` | 0.30 | derived here from the answer's own hedging language |
-
-```
-base   = Σ(wᵢ · sᵢ) / Σ(wᵢ)                     over signals present
-capped = min(base, UNVERIFIED_CEILING)          if no external signal ran
-score  = capped · (1 − HIGH_STAKES_PENALTY)     if the question is a high-stakes ruling
-```
-
-Two deliberate choices worth knowing:
-
-- **High stakes is a multiplier, not a fourth signal.** It comes from intent
-  classification and applies once — the same evidence should support less
-  confidence when being wrong means issuing a wrong ruling. Counting it as both
-  a signal and a modifier would double-count it.
-- **Self-reported certainty cannot certify itself.** With no external
-  corroboration the score is capped below the confident band, so a fluent answer
-  that nothing checked gets hedged rather than waved through.
-
-**The bands**, all configurable:
-
-| Band | Score | Behaviour |
-|------|-------|-----------|
-| abstain | `< CONFIDENCE_LOW_THRESHOLD` | No answer. A pointer to a qualified scholar and authenticated sources. |
-| uncertain | `< CONFIDENCE_HIGH_THRESHOLD` | Answers, with an explicit "please verify this" note attached. |
-| confident | otherwise | Answers normally. |
-
-**Scholar review.** Religious answers that land in the abstain band are
-persisted to a durable queue (Redis when `REDIS_URL` is set — the same store
-shape session persistence uses — in-memory otherwise, and **never** with a TTL:
-a question waiting on a scholar must not expire unanswered). Low-confidence
-*non-religious* answers are hedged but never queued; a scholar's time is for
-religious content.
-
-Reviewers list the queue and record a verdict:
-
-```bash
-curl -H "X-Review-Token: $SCHOLAR_REVIEW_TOKEN" localhost:8000/review/pending
-
-curl -X POST localhost:8000/review/$ID/verdict \
-  -H "X-Review-Token: $SCHOLAR_REVIEW_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"verdict": "correct", "corrected_answer": "…", "reviewer": "Shaykh …"}'
-```
-
-If Redis is configured but becomes unreachable, the queue keeps accepting items
-into an in-process fallback and reports `degraded: true` from `/review/stats`
-rather than failing chat turns — the loss of durability is made visible instead
-of silent. Verdicts are claimed atomically, so two concurrent reviewers cannot
-both record one and silently overwrite each other.
-
-The reviewer endpoints are **closed by default** — without `SCHOLAR_REVIEW_TOKEN`
-they return 503 rather than exposing users' pending questions.
-
-Approved and corrected answers flow back through the two sinks that already
-exist, not a new pipeline: the semantic cache (#27), and a JSONL export in an
-eval-case shape at `REVIEW_EXPORT_PATH` for the eval set (#16) and feedback loop
-(#43). Rejected answers are exported too — an answer a scholar caught is a
-valuable eval case.
-
-`ChatResponse` gains an optional `confidence: {score, band, abstained, queued,
-signals, review_id}` block. It is additive; existing clients are unaffected.
-
-### Content-safety testing
-
-The versioned policy lives in [`safety/policy.yaml`](safety/policy.yaml), with
-review guidance in [`safety/POLICY.md`](safety/POLICY.md). Run the API-key-free
-red-team suite with `pytest -q tests/redteam`. A manual live classifier audit is
-available with `SAFETY_LIVE_TESTS=1 GEMINI_API_KEY=... pytest -q tests/redteam/test_live.py`.
 
 ## ☁️ Deployment
 
