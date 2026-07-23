@@ -155,13 +155,13 @@ async def chat(request: ChatRequest):
             import time
             latency_ms = float(os.getenv("MOCK_LLM_LATENCY_MS", "800"))
             time.sleep(latency_ms / 1000.0)
-            
+
             history_dicts.append({"role": "user", "parts": [{"text": full_prompt}]})
             mock_response_text = f"Mock LLM Response for: {request.prompt}"
             history_dicts.append({"role": "model", "parts": [{"text": mock_response_text}]})
-            
+
             await session_store.save_history(chat_id, history_dicts)
-            
+
             history = []
             for item in history_dicts:
                 history.append(Message(
