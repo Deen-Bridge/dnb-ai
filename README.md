@@ -74,6 +74,8 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | Variable | Description |
 |----------|-------------|
 | `GEMINI_API_KEY` | Google Gemini API key |
+| `REDIS_URL` | Redis connection string for session persistence; when set, chat history survives restarts and is shared across instances (default: empty — uses in-memory fallback) |
+| `SESSION_TTL_SECONDS` | Time-to-live for abandoned chat sessions in seconds (default `86400` — 24h) |
 
 ## ☁️ Deployment
 
