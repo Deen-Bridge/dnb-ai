@@ -90,6 +90,7 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
+| `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
 
 ### Tafsir (ayah explanation)
 
@@ -123,7 +124,8 @@ curl -X POST http://localhost:8000/tafsir \
          "author": "Al-Qurtubi (d. 671 AH)", "reason": "No entry for 103:1 in this tafsir."}
       ]
     }
-  ]
+  ],
+  "disclaimer": "Tafsir text is retrieved verbatim from the works named above and is presented for study. …"
 }
 ```
 
@@ -135,6 +137,9 @@ curl -X POST http://localhost:8000/tafsir \
   with it (set `allow_language_fallback: false` to omit it instead).
 - **Degradation**: a work with no entry for the ayah appears under `unavailable`
   with a reason; the rest of the response is unaffected.
+- **Latency**: ayat, and the works within an ayah, are fetched concurrently, and
+  retrieval inside `/chat` is bounded by `TAFSIR_CHAT_TIMEOUT` — a slow upstream
+  costs the turn its grounding, never its response.
 - **Caching**: tafsir text is immutable per ayah, so it is cached by exact ayah
   key through `semantic_cache.KeyedCache` — the keyed sibling of the semantic
   response cache, sharing its TTL and eviction settings rather than adding a
