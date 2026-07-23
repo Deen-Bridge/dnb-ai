@@ -10,7 +10,7 @@ import uuid
 
 from stellar import router as stellar_router
 from store import SessionStore, history_to_dicts, dicts_to_contents
-
+from worship import router as worship_router
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +23,9 @@ app = FastAPI(title="DeenBridge AI API")
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+
+# Worship utilities: prayer times and Islamic calendars
+app.include_router(worship_router)
 
 # Configure CORS
 app.add_middleware(
@@ -40,16 +43,22 @@ app.add_middleware(
 )
 
 # Configure Gemini
-try:
+mock_upstreams = os.getenv("MOCK_UPSTREAMS", "0") == "1"
+if not mock_upstreams:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in environment variables")
-    logger.info("Configuring Gemini API...")
-    genai.configure(api_key=api_key)
-    logger.info("Gemini API configured successfully")
-except Exception as e:
-    logger.error(f"❌ Error configuring Gemini: {str(e)}")
-    raise
+        logger.warning("GEMINI_API_KEY not set; falling back to mock mode")
+        mock_upstreams = True
+    else:
+        try:
+            logger.info("Configuring Gemini API...")
+            genai.configure(api_key=api_key)
+            logger.info("Gemini API configured successfully")
+        except Exception as e:
+            logger.error(f"❌ Error configuring Gemini: {str(e)}")
+            raise
+if mock_upstreams:
+    logger.info("🤖 Running in MOCK_UPSTREAMS mode. Gemini will not be configured.")
 
 # Session store (Redis-backed, with in-memory fallback)
 session_store = SessionStore()
@@ -138,12 +147,36 @@ async def chat(request: ChatRequest):
 
         # Rebuild chat session from persisted history
         contents = dicts_to_contents(history_dicts)
-        chat = model.start_chat(history=contents)
-
+        
         # Prepare the prompt with context if provided
         full_prompt = request.prompt
         if request.context:
             full_prompt = f"Context: {request.context}\n\nQuestion: {request.prompt}"
+
+        if mock_upstreams:
+            import time
+            latency_ms = float(os.getenv("MOCK_LLM_LATENCY_MS", "800"))
+            time.sleep(latency_ms / 1000.0)
+
+            history_dicts.append({"role": "user", "parts": [{"text": full_prompt}]})
+            mock_response_text = f"Mock LLM Response for: {request.prompt}"
+            history_dicts.append({"role": "model", "parts": [{"text": mock_response_text}]})
+
+            await session_store.save_history(chat_id, history_dicts)
+
+            history = []
+            for item in history_dicts:
+                history.append(Message(
+                    role=item["role"],
+                    content=item["parts"][0]["text"]
+                ))
+            return ChatResponse(
+                response=mock_response_text,
+                chat_id=chat_id,
+                history=history
+            )
+
+        chat = model.start_chat(history=contents)
 
         # Send message and get response
         logger.info("Sending message to chat...")

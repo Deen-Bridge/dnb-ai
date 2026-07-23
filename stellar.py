@@ -86,6 +86,20 @@ def fetch_usdc_balance(public_key: str) -> Optional[Decimal]:
 
     Raises HTTPException(404) if the account does not exist on this network.
     """
+    if os.getenv("MOCK_UPSTREAMS", "0") == "1":
+        import time
+        latency_ms = float(os.getenv("MOCK_HORIZON_LATENCY_MS", "200"))
+        time.sleep(latency_ms / 1000.0)
+        if public_key.endswith("A"):
+            return Decimal("100.50")
+        elif public_key.endswith("B"):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Account not found on the Stellar {STELLAR_NETWORK} network. (MOCK)",
+            )
+        else:
+            return None
+
     server = Server(horizon_url())
     try:
         account = server.accounts().account_id(public_key).call()

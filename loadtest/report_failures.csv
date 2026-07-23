@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/chat (single-turn),HTTPError('500 Server Error: Internal Server Error for url: /chat (single-turn)'),10,2026-07-23T11:51:02Z,2026-07-23T11:51:19Z

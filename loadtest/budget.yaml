@@ -1,0 +1,24 @@
+# Performance budget configuration for DeenBridge AI CI Gate
+# Margin is set generous enough for CI runner CPU fluctuations.
+
+# Thresholds to evaluate against stats exported by Locust.
+# Key names match the endpoint names grouped in locustfile.
+# Note: /chat (multi-turn start) etc. will be mapped to 'chat' or evaluated individually.
+
+budget:
+  "/chat (single-turn)":
+    max_p95_ms: 12000
+    min_rps: 0.2
+    max_error_rate: 0.05
+  "/chat (multi-turn start)":
+    max_p95_ms: 12000
+    min_rps: 0.1
+    max_error_rate: 0.05
+  "/zakat (valid funded)":
+    max_p95_ms: 6000
+    min_rps: 0.1
+    max_error_rate: 0.05
+  "/ping":
+    max_p95_ms: 5000
+    min_rps: 0.1
+    max_error_rate: 0.05

@@ -43,6 +43,10 @@ The platform is composed of three services:
 | `POST` | `/chat` | Start or continue a chat session |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
 | `GET` | `/ping` | Health check |
+| `POST` | `/zakat` | Estimate zakat on an account's USDC balance |
+| `GET` | `/prayer-times` | Calculate daily Islamic prayer times |
+| `GET` | `/hijri` | Convert Gregorian to Hijri calendar date |
+| `GET` | `/gregorian` | Convert Hijri to Gregorian calendar date |
 
 ## 🚀 Getting Started
 
