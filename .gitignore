@@ -36,3 +36,5 @@ ENV/
 
 # Logs
 *.log 
+# Scholar-review export (contains user questions)
+data/review/
