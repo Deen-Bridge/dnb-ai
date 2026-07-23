@@ -26,6 +26,7 @@ wheels/
 
 # Virtual Environment
 venv/
+venv_win/
 ENV/
 
 # IDE

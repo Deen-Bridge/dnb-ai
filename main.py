@@ -10,7 +10,7 @@ import uuid
 
 from stellar import router as stellar_router
 from store import SessionStore, history_to_dicts, dicts_to_contents
-
+from worship import router as worship_router
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +23,9 @@ app = FastAPI(title="DeenBridge AI API")
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+
+# Worship utilities: prayer times and Islamic calendars
+app.include_router(worship_router)
 
 # Configure CORS
 app.add_middleware(
