@@ -25,13 +25,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest flake8
+          pip install pytest flake8 pytest-asyncio
 
       - name: Run linting
-        run: flake8 main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tests/test_confidence.py tests/test_review_queue.py scripts/build_hadith_data.py --max-line-length=120 --ignore=E501,W503
+        run: flake8 main.py memory stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tests/test_confidence.py tests/test_review_queue.py tests/test_memory_profile.py tests/test_memory_extraction.py tests/test_memory_integration.py scripts/build_hadith_data.py --max-line-length=120 --ignore=E501,W503
 
       - name: Check syntax
-        run: python -m compileall -q main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py scripts/build_hadith_data.py
+        run: python -m compileall -q main.py memory stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tests/test_memory_profile.py tests/test_memory_extraction.py tests/test_memory_integration.py scripts/build_hadith_data.py
 
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam
@@ -53,3 +53,12 @@ jobs:
 
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
+
+      - name: Run memory profile tests
+        run: pytest -q tests/test_memory_profile.py
+
+      - name: Run memory extraction tests
+        run: pytest -q tests/test_memory_extraction.py
+
+      - name: Run memory integration tests
+        run: pytest -q tests/test_memory_integration.py

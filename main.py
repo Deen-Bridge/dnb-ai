@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Request, Response
+﻿from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import google.generativeai as genai
 import json
 import os
@@ -8,6 +8,13 @@ from dotenv import load_dotenv
 import logging
 from typing import Any, List, Optional
 import uuid
+
+from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
+from memory.extraction import (
+    MEMORY_EXTRACTION_ENABLED,
+    apply_updates,
+    extract_updates,
+)
 
 from stellar import router as stellar_router
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -77,11 +84,14 @@ try:
     genai.configure(api_key=api_key)
     logger.info("Gemini API configured successfully")
 except Exception as e:
-    logger.error(f"❌ Error configuring Gemini: {str(e)}")
+    logger.error(f"Γ¥î Error configuring Gemini: {str(e)}")
     raise
 
 # Store active chats
 active_chats = {}
+
+# Per-user memory store (Redis-backed or in-memory)
+memory_store = create_memory_store()
 
 # Islamic context and safety instructions
 ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic knowledge and guidance.
@@ -111,6 +121,8 @@ class ChatRequest(BaseModel):
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
     madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
+    user_id: Optional[str] = Field(default=None, max_length=128)  # Opaque user identifier for personalization
+    remember: bool = True           # When False, existing memory is read but no new data persisted
 
 
 class Moderation(BaseModel):
@@ -192,19 +204,32 @@ async def ping():
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
+async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response,
+               background_tasks: BackgroundTasks):
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
         chat_id = request.chat_id or str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
-        is_cacheable = is_new_chat and request.context is None and SEMANTIC_CACHE_ENABLED
+        is_cacheable = (
+            is_new_chat
+            and request.context is None
+            and SEMANTIC_CACHE_ENABLED
+            and request.user_id is None
+        )
 
         # --- Fiqh classification & madhhab ---
         madhhab = normalize_madhhab(request.madhhab)
         is_fiqh = classify_fiqh(request.prompt)
         fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+
+        # --- Memory lookup ---
+        profile: Optional[UserProfile] = None
+        summary: Optional[ChatSummary] = None
+        if request.user_id:
+            profile = await memory_store.get_profile(request.user_id)
+            summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
 
         # --- Semantic cache lookup ---
         embedding: Any = None
@@ -250,6 +275,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += FIQH_IKHTILAF_CONTEXT
                 if madhhab:
                     system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
+            memory_block = render_user_context(profile, summary)
+            if memory_block:
+                system_context += f"\n\n{memory_block}"
             context = f"Additional context: {request.context}\n\n" if request.context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
@@ -368,6 +396,16 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
+        # --- Background memory extraction ---
+        # Runs after the HTTP response is sent. Not a durable queue — lost
+        # if the process crashes mid-extraction.
+        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+            background_tasks.add_task(
+                _extract_and_update_memory,
+                request.user_id, request.prompt, response_text,
+            )
+            logger.info("Memory extraction scheduled for user %s", request.user_id[:8])
+
         logger.info("Chat response generated successfully")
         return ChatResponse(
             response=response_text,
@@ -383,9 +421,30 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         )
 
     except Exception as e:
-        error_msg = f"❌ Chat API Error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        logger.error("Chat API Error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+async def _extract_and_update_memory(
+    user_id: str, prompt: str, response: str,
+) -> None:
+    """Fire-and-forget memory extraction. Runs via BackgroundTasks.
+
+    Not a durable queue — if the process crashes mid-extraction the
+    extraction is lost (the chat history itself is unaffected).
+    """
+    try:
+        updates = await extract_updates(prompt, response)
+        if updates.get("none"):
+            return
+        profile = await memory_store.get_profile(user_id)
+        if profile is None:
+            profile = UserProfile(user_id=user_id)
+        profile = apply_updates(profile, updates)
+        await memory_store.save_profile(user_id, profile)
+        logger.debug("Memory updated for user %s", user_id[:8])
+    except Exception:
+        logger.warning("Memory extraction failed for user %s", user_id[:8], exc_info=True)
 
 
 @app.delete("/chat/{chat_id}")
@@ -397,9 +456,35 @@ async def delete_chat(chat_id: str):
             return {"message": "Chat session deleted successfully"}
         return {"message": "Chat session not found"}
     except Exception as e:
-        error_msg = f"❌ Error deleting chat: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        logger.error("Error deleting chat", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@app.get("/memory/{user_id}")
+async def get_memory(user_id: str):
+    """Retrieve the stored user profile for transparency.
+
+    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    can currently read another user's memory.
+    """
+    profile = await memory_store.get_profile(user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return profile.model_dump()
+
+
+@app.delete("/memory/{user_id}")
+async def delete_memory(user_id: str):
+    """Completely erase the stored user profile.
+
+    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    can currently erase another user's memory.
+    """
+    existed = await memory_store.delete_profile(user_id)
+    if existed:
+        logger.info("Deleted memory for user %s", user_id[:8])
+        return {"message": "Memory deleted successfully"}
+    return {"message": "Memory not found"}
 
 
 @app.get("/cache/stats")
