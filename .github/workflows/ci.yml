@@ -28,10 +28,10 @@ jobs:
           pip install pytest flake8
 
       - name: Run linting
-        run: flake8 main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py tafsir.py semantic_cache.py tests/test_tafsir.py scripts/build_hadith_data.py scripts/build_surah_index.py --max-line-length=120 --ignore=E501,W503
+        run: flake8 main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py scripts/build_hadith_data.py scripts/build_surah_index.py --max-line-length=120 --ignore=E501,W503
 
       - name: Check syntax
-        run: python -m compileall -q main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py tafsir.py semantic_cache.py scripts/build_hadith_data.py scripts/build_surah_index.py
+        run: python -m compileall -q main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py scripts/build_hadith_data.py scripts/build_surah_index.py
 
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam
@@ -47,6 +47,12 @@ jobs:
 
       - name: Run hadith grading tests
         run: pytest -q tests/test_hadith.py
+
+      - name: Run confidence and abstention tests
+        run: pytest -q tests/test_confidence.py
+
+      - name: Run scholar-review queue tests
+        run: pytest -q tests/test_review_queue.py
 
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
