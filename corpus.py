@@ -41,3 +41,4 @@ class QuranCorpus:
 
 # Shared instance across the application
 corpus = QuranCorpus()
+
