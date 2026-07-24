@@ -24,7 +24,8 @@ ISLAMIC_CONTEXT = (
     "POLICY ON CITATIONS:\n"
     "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
     "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
-    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or general knowledge—do NOT fabricate references."
+    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
+    "general knowledge—do NOT fabricate references."
 )
 
 
@@ -163,4 +164,3 @@ async def delete_chat(chat_id: str):
 @app.get("/ping")
 async def ping():
     return {"status": "ok"}
-
