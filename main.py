@@ -1,6 +1,6 @@
 ﻿from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import google.generativeai as genai
 import json
 import os
@@ -121,7 +121,7 @@ class ChatRequest(BaseModel):
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
     madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
-    user_id: Optional[str] = None  # Opaque user identifier for personalization
+    user_id: Optional[str] = Field(default=None, max_length=128)  # Opaque user identifier for personalization
     remember: bool = True           # When False, existing memory is read but no new data persisted
 
 
@@ -229,7 +229,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         summary: Optional[ChatSummary] = None
         if request.user_id:
             profile = await memory_store.get_profile(request.user_id)
-            summary = await memory_store.get_chat_summary(chat_id)
+            summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
 
         # --- Semantic cache lookup ---
         embedding: Any = None
@@ -421,9 +421,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         )
 
     except Exception as e:
-        error_msg = f"Γ¥î Chat API Error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        logger.error("Chat API Error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 async def _extract_and_update_memory(
@@ -435,7 +434,7 @@ async def _extract_and_update_memory(
     extraction is lost (the chat history itself is unaffected).
     """
     try:
-        updates = extract_updates(prompt, response)
+        updates = await extract_updates(prompt, response)
         if updates.get("none"):
             return
         profile = await memory_store.get_profile(user_id)
@@ -457,14 +456,17 @@ async def delete_chat(chat_id: str):
             return {"message": "Chat session deleted successfully"}
         return {"message": "Chat session not found"}
     except Exception as e:
-        error_msg = f"Γ¥î Error deleting chat: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        logger.error("Error deleting chat", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/memory/{user_id}")
 async def get_memory(user_id: str):
-    """Retrieve the stored user profile for transparency."""
+    """Retrieve the stored user profile for transparency.
+
+    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    can currently read another user's memory.
+    """
     profile = await memory_store.get_profile(user_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Memory not found")
@@ -473,7 +475,11 @@ async def get_memory(user_id: str):
 
 @app.delete("/memory/{user_id}")
 async def delete_memory(user_id: str):
-    """Completely erase the stored user profile."""
+    """Completely erase the stored user profile.
+
+    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    can currently erase another user's memory.
+    """
     existed = await memory_store.delete_profile(user_id)
     if existed:
         logger.info("Deleted memory for user %s", user_id[:8])

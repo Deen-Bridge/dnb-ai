@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from pydantic import ValidationError
+
 from memory.models import (
     MAX_FACT_LENGTH,
     MAX_FACTS,
@@ -44,19 +46,19 @@ class TestUserProfile:
         assert p.topics_studied == []
 
     def test_extra_fields_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             UserProfile(user_id="u", injected="harmful")
 
     def test_fact_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FactEntry(fact="x" * (MAX_FACT_LENGTH + 1), created_at=time.time())
 
     def test_topic_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TopicEntry(topic="x" * (MAX_TOPIC_LENGTH + 1), last_asked=time.time())
 
     def test_summary_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ChatSummary(chat_id="c", content="x" * (MAX_SUMMARY_LENGTH + 1))
 
     def test_timestamps_set_on_creation(self):
