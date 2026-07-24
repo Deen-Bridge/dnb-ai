@@ -107,10 +107,13 @@ class TestApplyUpdates:
 
 
 class TestSummarizeConversationTurns:
-    @patch("memory.extraction._call_summary_gemini", return_value="user asked about salah")
-    def test_returns_summary(self, mock_call):
+    pytestmark = pytest.mark.asyncio(loop_scope="function")
+
+    @patch("memory.extraction._call_summary_gemini", new_callable=AsyncMock)
+    async def test_returns_summary(self, mock_call):
+        mock_call.return_value = "user asked about salah"
         turns = [{"role": "user", "text": "tell me about salah"}]
-        result = summarize_conversation_turns(turns)
+        result = await summarize_conversation_turns(turns)
         assert result == "user asked about salah"
         mock_call.assert_called_once()
 

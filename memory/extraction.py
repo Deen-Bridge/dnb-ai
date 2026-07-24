@@ -111,7 +111,7 @@ def apply_updates(profile: UserProfile, updates: dict) -> UserProfile:
     return profile
 
 
-def extract_updates(user_prompt: str, model_response: str) -> dict:
+async def extract_updates(user_prompt: str, model_response: str) -> dict:
     """Propose profile updates from a conversation turn.
 
     Offline seam: patch ``memory.extraction._call_extraction_gemini``.
@@ -121,14 +121,14 @@ def extract_updates(user_prompt: str, model_response: str) -> dict:
         f"User question: {user_prompt}\n"
         f"Assistant response: {model_response}"
     )
-    raw = _call_extraction_gemini(full_prompt)
+    raw = await _call_extraction_gemini(full_prompt)
     if not isinstance(raw, dict):
         logger.warning("Extraction returned non-dict: %s", type(raw).__name__)
         return {"none": True}
     return raw
 
 
-def _call_extraction_gemini(prompt: str) -> dict:
+async def _call_extraction_gemini(prompt: str) -> dict:
     """Gemini structured-output call for extraction.
 
     Override this in offline tests with a fixture.
@@ -139,7 +139,7 @@ def _call_extraction_gemini(prompt: str) -> dict:
         "gemini-2.5-flash-preview-05-20",
         system_instruction=_EXTRACTION_INSTRUCTION,
     )
-    response = model.generate_content(
+    response = await model.generate_content_async(
         prompt,
         generation_config={"temperature": 0, "response_mime_type": "application/json"},
         request_options={"timeout": 30},
@@ -157,7 +157,7 @@ Preserve:
 Be concise. Maximum 2000 characters."""
 
 
-def summarize_conversation_turns(evicted_turns: list[dict[str, str]]) -> str:
+async def summarize_conversation_turns(evicted_turns: list[dict[str, str]]) -> str:
     """Summarize a list of evicted conversation turns.
 
     Each dict has keys ``role`` and ``text``.
@@ -169,10 +169,10 @@ def summarize_conversation_turns(evicted_turns: list[dict[str, str]]) -> str:
         for t in evicted_turns
     )
     prompt = f"{_SUMMARY_INSTRUCTION}\n\nTurns:\n{turns_text}"
-    return _call_summary_gemini(prompt)
+    return await _call_summary_gemini(prompt)
 
 
-def _call_summary_gemini(prompt: str) -> str:
+async def _call_summary_gemini(prompt: str) -> str:
     """Gemini structured-output call for summarization.
 
     Override this in offline tests with a fixture.
@@ -183,7 +183,7 @@ def _call_summary_gemini(prompt: str) -> str:
         "gemini-2.5-flash-preview-05-20",
         system_instruction=_SUMMARY_INSTRUCTION,
     )
-    response = model.generate_content(
+    response = await model.generate_content_async(
         prompt,
         generation_config={"temperature": 0},
         request_options={"timeout": 30},
@@ -221,7 +221,7 @@ async def _call_recompress_gemini(existing: str, new: str) -> str:
         "gemini-2.5-flash-preview-05-20",
         system_instruction=_RECOMPRESS_INSTRUCTION,
     )
-    response = model.generate_content(
+    response = await model.generate_content_async(
         prompt,
         generation_config={"temperature": 0},
         request_options={"timeout": 30},
