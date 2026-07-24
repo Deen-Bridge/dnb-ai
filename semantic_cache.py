@@ -269,9 +269,16 @@ class KeyedCache:
         self.hits += 1
         return value
 
-    def put(self, key: str, value: Any) -> None:
+    def put(self, key: str, value: Any, ttl_seconds: Optional[int] = None) -> None:
+        """Store *value*, expiring after *ttl_seconds* (default: the cache TTL).
+
+        The override exists for content that is cacheable but not immutable —
+        a market price is worth caching for hours, not for the day-long TTL
+        that suits a fixed tafsir passage.
+        """
         self._evict_lru_if_full()
-        self._entries[key] = (value, time.time() + SEMANTIC_CACHE_TTL_SECONDS)
+        ttl = SEMANTIC_CACHE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        self._entries[key] = (value, time.time() + ttl)
         self._access_times[key] = time.time()
 
     def get_stats(self) -> dict[str, Any]:
