@@ -1,0 +1,1034 @@
+[
+  {
+    "number": 1,
+    "name": "Al-Fatihah",
+    "arabic_name": "الفاتحة",
+    "revelation_place": "meccan",
+    "ayah_count": 7,
+    "aliases": [
+      "fatiha",
+      "fatihah",
+      "opening",
+      "umm al-kitab"
+    ]
+  },
+  {
+    "number": 2,
+    "name": "Al-Baqarah",
+    "arabic_name": "البقرة",
+    "revelation_place": "medinan",
+    "ayah_count": 286,
+    "aliases": [
+      "baqara",
+      "baqarah",
+      "cow"
+    ]
+  },
+  {
+    "number": 3,
+    "name": "Ali 'Imran",
+    "arabic_name": "آل عمران",
+    "revelation_place": "medinan",
+    "ayah_count": 200,
+    "aliases": [
+      "al-imran",
+      "aal-imran",
+      "imran",
+      "family of imran"
+    ]
+  },
+  {
+    "number": 4,
+    "name": "An-Nisa",
+    "arabic_name": "النساء",
+    "revelation_place": "medinan",
+    "ayah_count": 176,
+    "aliases": [
+      "nisa",
+      "nisaa",
+      "women"
+    ]
+  },
+  {
+    "number": 5,
+    "name": "Al-Ma'idah",
+    "arabic_name": "المائدة",
+    "revelation_place": "medinan",
+    "ayah_count": 120,
+    "aliases": [
+      "maidah",
+      "maida",
+      "table spread"
+    ]
+  },
+  {
+    "number": 6,
+    "name": "Al-An'am",
+    "arabic_name": "الأنعام",
+    "revelation_place": "meccan",
+    "ayah_count": 165,
+    "aliases": [
+      "anam",
+      "an'am",
+      "cattle"
+    ]
+  },
+  {
+    "number": 7,
+    "name": "Al-A'raf",
+    "arabic_name": "الأعراف",
+    "revelation_place": "meccan",
+    "ayah_count": 206,
+    "aliases": [
+      "araf",
+      "a'raf",
+      "heights"
+    ]
+  },
+  {
+    "number": 8,
+    "name": "Al-Anfal",
+    "arabic_name": "الأنفال",
+    "revelation_place": "medinan",
+    "ayah_count": 75,
+    "aliases": []
+  },
+  {
+    "number": 9,
+    "name": "At-Tawbah",
+    "arabic_name": "التوبة",
+    "revelation_place": "medinan",
+    "ayah_count": 129,
+    "aliases": [
+      "tawba",
+      "taubah",
+      "bara'ah",
+      "baraah",
+      "repentance"
+    ]
+  },
+  {
+    "number": 10,
+    "name": "Yunus",
+    "arabic_name": "يونس",
+    "revelation_place": "meccan",
+    "ayah_count": 109,
+    "aliases": []
+  },
+  {
+    "number": 11,
+    "name": "Hud",
+    "arabic_name": "هود",
+    "revelation_place": "meccan",
+    "ayah_count": 123,
+    "aliases": []
+  },
+  {
+    "number": 12,
+    "name": "Yusuf",
+    "arabic_name": "يوسف",
+    "revelation_place": "meccan",
+    "ayah_count": 111,
+    "aliases": [
+      "joseph"
+    ]
+  },
+  {
+    "number": 13,
+    "name": "Ar-Ra'd",
+    "arabic_name": "الرعد",
+    "revelation_place": "medinan",
+    "ayah_count": 43,
+    "aliases": []
+  },
+  {
+    "number": 14,
+    "name": "Ibrahim",
+    "arabic_name": "إبراهيم",
+    "revelation_place": "meccan",
+    "ayah_count": 52,
+    "aliases": [
+      "abraham"
+    ]
+  },
+  {
+    "number": 15,
+    "name": "Al-Hijr",
+    "arabic_name": "الحجر",
+    "revelation_place": "meccan",
+    "ayah_count": 99,
+    "aliases": []
+  },
+  {
+    "number": 16,
+    "name": "An-Nahl",
+    "arabic_name": "النحل",
+    "revelation_place": "meccan",
+    "ayah_count": 128,
+    "aliases": []
+  },
+  {
+    "number": 17,
+    "name": "Al-Isra",
+    "arabic_name": "الإسراء",
+    "revelation_place": "meccan",
+    "ayah_count": 111,
+    "aliases": [
+      "bani israil",
+      "isra",
+      "night journey"
+    ]
+  },
+  {
+    "number": 18,
+    "name": "Al-Kahf",
+    "arabic_name": "الكهف",
+    "revelation_place": "meccan",
+    "ayah_count": 110,
+    "aliases": [
+      "kahf",
+      "cave"
+    ]
+  },
+  {
+    "number": 19,
+    "name": "Maryam",
+    "arabic_name": "مريم",
+    "revelation_place": "meccan",
+    "ayah_count": 98,
+    "aliases": [
+      "mary"
+    ]
+  },
+  {
+    "number": 20,
+    "name": "Taha",
+    "arabic_name": "طه",
+    "revelation_place": "meccan",
+    "ayah_count": 135,
+    "aliases": [
+      "ta-ha",
+      "ta ha"
+    ]
+  },
+  {
+    "number": 21,
+    "name": "Al-Anbiya",
+    "arabic_name": "الأنبياء",
+    "revelation_place": "meccan",
+    "ayah_count": 112,
+    "aliases": []
+  },
+  {
+    "number": 22,
+    "name": "Al-Hajj",
+    "arabic_name": "الحج",
+    "revelation_place": "medinan",
+    "ayah_count": 78,
+    "aliases": []
+  },
+  {
+    "number": 23,
+    "name": "Al-Mu'minun",
+    "arabic_name": "المؤمنون",
+    "revelation_place": "meccan",
+    "ayah_count": 118,
+    "aliases": []
+  },
+  {
+    "number": 24,
+    "name": "An-Nur",
+    "arabic_name": "النور",
+    "revelation_place": "medinan",
+    "ayah_count": 64,
+    "aliases": [
+      "nur",
+      "noor",
+      "light"
+    ]
+  },
+  {
+    "number": 25,
+    "name": "Al-Furqan",
+    "arabic_name": "الفرقان",
+    "revelation_place": "meccan",
+    "ayah_count": 77,
+    "aliases": []
+  },
+  {
+    "number": 26,
+    "name": "Ash-Shu'ara",
+    "arabic_name": "الشعراء",
+    "revelation_place": "meccan",
+    "ayah_count": 227,
+    "aliases": []
+  },
+  {
+    "number": 27,
+    "name": "An-Naml",
+    "arabic_name": "النمل",
+    "revelation_place": "meccan",
+    "ayah_count": 93,
+    "aliases": []
+  },
+  {
+    "number": 28,
+    "name": "Al-Qasas",
+    "arabic_name": "القصص",
+    "revelation_place": "meccan",
+    "ayah_count": 88,
+    "aliases": []
+  },
+  {
+    "number": 29,
+    "name": "Al-'Ankabut",
+    "arabic_name": "العنكبوت",
+    "revelation_place": "meccan",
+    "ayah_count": 69,
+    "aliases": []
+  },
+  {
+    "number": 30,
+    "name": "Ar-Rum",
+    "arabic_name": "الروم",
+    "revelation_place": "meccan",
+    "ayah_count": 60,
+    "aliases": []
+  },
+  {
+    "number": 31,
+    "name": "Luqman",
+    "arabic_name": "لقمان",
+    "revelation_place": "meccan",
+    "ayah_count": 34,
+    "aliases": []
+  },
+  {
+    "number": 32,
+    "name": "As-Sajdah",
+    "arabic_name": "السجدة",
+    "revelation_place": "meccan",
+    "ayah_count": 30,
+    "aliases": [
+      "sajda",
+      "prostration"
+    ]
+  },
+  {
+    "number": 33,
+    "name": "Al-Ahzab",
+    "arabic_name": "الأحزاب",
+    "revelation_place": "medinan",
+    "ayah_count": 73,
+    "aliases": []
+  },
+  {
+    "number": 34,
+    "name": "Saba",
+    "arabic_name": "سبأ",
+    "revelation_place": "meccan",
+    "ayah_count": 54,
+    "aliases": []
+  },
+  {
+    "number": 35,
+    "name": "Fatir",
+    "arabic_name": "فاطر",
+    "revelation_place": "meccan",
+    "ayah_count": 45,
+    "aliases": []
+  },
+  {
+    "number": 36,
+    "name": "Ya-Sin",
+    "arabic_name": "يس",
+    "revelation_place": "meccan",
+    "ayah_count": 83,
+    "aliases": [
+      "yasin",
+      "yaseen",
+      "ya sin"
+    ]
+  },
+  {
+    "number": 37,
+    "name": "As-Saffat",
+    "arabic_name": "الصافات",
+    "revelation_place": "meccan",
+    "ayah_count": 182,
+    "aliases": []
+  },
+  {
+    "number": 38,
+    "name": "Sad",
+    "arabic_name": "ص",
+    "revelation_place": "meccan",
+    "ayah_count": 88,
+    "aliases": []
+  },
+  {
+    "number": 39,
+    "name": "Az-Zumar",
+    "arabic_name": "الزمر",
+    "revelation_place": "meccan",
+    "ayah_count": 75,
+    "aliases": []
+  },
+  {
+    "number": 40,
+    "name": "Ghafir",
+    "arabic_name": "غافر",
+    "revelation_place": "meccan",
+    "ayah_count": 85,
+    "aliases": []
+  },
+  {
+    "number": 41,
+    "name": "Fussilat",
+    "arabic_name": "فصلت",
+    "revelation_place": "meccan",
+    "ayah_count": 54,
+    "aliases": [
+      "ha mim sajdah"
+    ]
+  },
+  {
+    "number": 42,
+    "name": "Ash-Shura",
+    "arabic_name": "الشورى",
+    "revelation_place": "meccan",
+    "ayah_count": 53,
+    "aliases": []
+  },
+  {
+    "number": 43,
+    "name": "Az-Zukhruf",
+    "arabic_name": "الزخرف",
+    "revelation_place": "meccan",
+    "ayah_count": 89,
+    "aliases": []
+  },
+  {
+    "number": 44,
+    "name": "Ad-Dukhan",
+    "arabic_name": "الدخان",
+    "revelation_place": "meccan",
+    "ayah_count": 59,
+    "aliases": []
+  },
+  {
+    "number": 45,
+    "name": "Al-Jathiyah",
+    "arabic_name": "الجاثية",
+    "revelation_place": "meccan",
+    "ayah_count": 37,
+    "aliases": []
+  },
+  {
+    "number": 46,
+    "name": "Al-Ahqaf",
+    "arabic_name": "الأحقاف",
+    "revelation_place": "meccan",
+    "ayah_count": 35,
+    "aliases": []
+  },
+  {
+    "number": 47,
+    "name": "Muhammad",
+    "arabic_name": "محمد",
+    "revelation_place": "medinan",
+    "ayah_count": 38,
+    "aliases": []
+  },
+  {
+    "number": 48,
+    "name": "Al-Fath",
+    "arabic_name": "الفتح",
+    "revelation_place": "medinan",
+    "ayah_count": 29,
+    "aliases": []
+  },
+  {
+    "number": 49,
+    "name": "Al-Hujurat",
+    "arabic_name": "الحجرات",
+    "revelation_place": "medinan",
+    "ayah_count": 18,
+    "aliases": []
+  },
+  {
+    "number": 50,
+    "name": "Qaf",
+    "arabic_name": "ق",
+    "revelation_place": "meccan",
+    "ayah_count": 45,
+    "aliases": []
+  },
+  {
+    "number": 51,
+    "name": "Adh-Dhariyat",
+    "arabic_name": "الذاريات",
+    "revelation_place": "meccan",
+    "ayah_count": 60,
+    "aliases": []
+  },
+  {
+    "number": 52,
+    "name": "At-Tur",
+    "arabic_name": "الطور",
+    "revelation_place": "meccan",
+    "ayah_count": 49,
+    "aliases": []
+  },
+  {
+    "number": 53,
+    "name": "An-Najm",
+    "arabic_name": "النجم",
+    "revelation_place": "meccan",
+    "ayah_count": 62,
+    "aliases": []
+  },
+  {
+    "number": 54,
+    "name": "Al-Qamar",
+    "arabic_name": "القمر",
+    "revelation_place": "meccan",
+    "ayah_count": 55,
+    "aliases": []
+  },
+  {
+    "number": 55,
+    "name": "Ar-Rahman",
+    "arabic_name": "الرحمن",
+    "revelation_place": "medinan",
+    "ayah_count": 78,
+    "aliases": [
+      "rahman",
+      "most merciful"
+    ]
+  },
+  {
+    "number": 56,
+    "name": "Al-Waqi'ah",
+    "arabic_name": "الواقعة",
+    "revelation_place": "meccan",
+    "ayah_count": 96,
+    "aliases": [
+      "waqia",
+      "waqiah",
+      "inevitable"
+    ]
+  },
+  {
+    "number": 57,
+    "name": "Al-Hadid",
+    "arabic_name": "الحديد",
+    "revelation_place": "medinan",
+    "ayah_count": 29,
+    "aliases": []
+  },
+  {
+    "number": 58,
+    "name": "Al-Mujadila",
+    "arabic_name": "المجادلة",
+    "revelation_place": "medinan",
+    "ayah_count": 22,
+    "aliases": []
+  },
+  {
+    "number": 59,
+    "name": "Al-Hashr",
+    "arabic_name": "الحشر",
+    "revelation_place": "medinan",
+    "ayah_count": 24,
+    "aliases": []
+  },
+  {
+    "number": 60,
+    "name": "Al-Mumtahanah",
+    "arabic_name": "الممتحنة",
+    "revelation_place": "medinan",
+    "ayah_count": 13,
+    "aliases": []
+  },
+  {
+    "number": 61,
+    "name": "As-Saff",
+    "arabic_name": "الصف",
+    "revelation_place": "medinan",
+    "ayah_count": 14,
+    "aliases": []
+  },
+  {
+    "number": 62,
+    "name": "Al-Jumu'ah",
+    "arabic_name": "الجمعة",
+    "revelation_place": "medinan",
+    "ayah_count": 11,
+    "aliases": []
+  },
+  {
+    "number": 63,
+    "name": "Al-Munafiqun",
+    "arabic_name": "المنافقون",
+    "revelation_place": "medinan",
+    "ayah_count": 11,
+    "aliases": []
+  },
+  {
+    "number": 64,
+    "name": "At-Taghabun",
+    "arabic_name": "التغابن",
+    "revelation_place": "medinan",
+    "ayah_count": 18,
+    "aliases": []
+  },
+  {
+    "number": 65,
+    "name": "At-Talaq",
+    "arabic_name": "الطلاق",
+    "revelation_place": "medinan",
+    "ayah_count": 12,
+    "aliases": []
+  },
+  {
+    "number": 66,
+    "name": "At-Tahrim",
+    "arabic_name": "التحريم",
+    "revelation_place": "medinan",
+    "ayah_count": 12,
+    "aliases": []
+  },
+  {
+    "number": 67,
+    "name": "Al-Mulk",
+    "arabic_name": "الملك",
+    "revelation_place": "meccan",
+    "ayah_count": 30,
+    "aliases": [
+      "mulk",
+      "sovereignty",
+      "dominion"
+    ]
+  },
+  {
+    "number": 68,
+    "name": "Al-Qalam",
+    "arabic_name": "القلم",
+    "revelation_place": "meccan",
+    "ayah_count": 52,
+    "aliases": []
+  },
+  {
+    "number": 69,
+    "name": "Al-Haqqah",
+    "arabic_name": "الحاقة",
+    "revelation_place": "meccan",
+    "ayah_count": 52,
+    "aliases": []
+  },
+  {
+    "number": 70,
+    "name": "Al-Ma'arij",
+    "arabic_name": "المعارج",
+    "revelation_place": "meccan",
+    "ayah_count": 44,
+    "aliases": []
+  },
+  {
+    "number": 71,
+    "name": "Nuh",
+    "arabic_name": "نوح",
+    "revelation_place": "meccan",
+    "ayah_count": 28,
+    "aliases": [
+      "noah"
+    ]
+  },
+  {
+    "number": 72,
+    "name": "Al-Jinn",
+    "arabic_name": "الجن",
+    "revelation_place": "meccan",
+    "ayah_count": 28,
+    "aliases": []
+  },
+  {
+    "number": 73,
+    "name": "Al-Muzzammil",
+    "arabic_name": "المزمل",
+    "revelation_place": "meccan",
+    "ayah_count": 20,
+    "aliases": []
+  },
+  {
+    "number": 74,
+    "name": "Al-Muddaththir",
+    "arabic_name": "المدثر",
+    "revelation_place": "meccan",
+    "ayah_count": 56,
+    "aliases": []
+  },
+  {
+    "number": 75,
+    "name": "Al-Qiyamah",
+    "arabic_name": "القيامة",
+    "revelation_place": "meccan",
+    "ayah_count": 40,
+    "aliases": []
+  },
+  {
+    "number": 76,
+    "name": "Al-Insan",
+    "arabic_name": "الإنسان",
+    "revelation_place": "medinan",
+    "ayah_count": 31,
+    "aliases": [
+      "dahr",
+      "ad-dahr",
+      "man"
+    ]
+  },
+  {
+    "number": 77,
+    "name": "Al-Mursalat",
+    "arabic_name": "المرسلات",
+    "revelation_place": "meccan",
+    "ayah_count": 50,
+    "aliases": []
+  },
+  {
+    "number": 78,
+    "name": "An-Naba",
+    "arabic_name": "النبأ",
+    "revelation_place": "meccan",
+    "ayah_count": 40,
+    "aliases": [
+      "naba",
+      "tidings"
+    ]
+  },
+  {
+    "number": 79,
+    "name": "An-Nazi'at",
+    "arabic_name": "النازعات",
+    "revelation_place": "meccan",
+    "ayah_count": 46,
+    "aliases": []
+  },
+  {
+    "number": 80,
+    "name": "'Abasa",
+    "arabic_name": "عبس",
+    "revelation_place": "meccan",
+    "ayah_count": 42,
+    "aliases": []
+  },
+  {
+    "number": 81,
+    "name": "At-Takwir",
+    "arabic_name": "التكوير",
+    "revelation_place": "meccan",
+    "ayah_count": 29,
+    "aliases": []
+  },
+  {
+    "number": 82,
+    "name": "Al-Infitar",
+    "arabic_name": "الانفطار",
+    "revelation_place": "meccan",
+    "ayah_count": 19,
+    "aliases": []
+  },
+  {
+    "number": 83,
+    "name": "Al-Mutaffifin",
+    "arabic_name": "المطففين",
+    "revelation_place": "meccan",
+    "ayah_count": 36,
+    "aliases": []
+  },
+  {
+    "number": 84,
+    "name": "Al-Inshiqaq",
+    "arabic_name": "الانشقاق",
+    "revelation_place": "meccan",
+    "ayah_count": 25,
+    "aliases": []
+  },
+  {
+    "number": 85,
+    "name": "Al-Buruj",
+    "arabic_name": "البروج",
+    "revelation_place": "meccan",
+    "ayah_count": 22,
+    "aliases": []
+  },
+  {
+    "number": 86,
+    "name": "At-Tariq",
+    "arabic_name": "الطارق",
+    "revelation_place": "meccan",
+    "ayah_count": 17,
+    "aliases": []
+  },
+  {
+    "number": 87,
+    "name": "Al-A'la",
+    "arabic_name": "الأعلى",
+    "revelation_place": "meccan",
+    "ayah_count": 19,
+    "aliases": []
+  },
+  {
+    "number": 88,
+    "name": "Al-Ghashiyah",
+    "arabic_name": "الغاشية",
+    "revelation_place": "meccan",
+    "ayah_count": 26,
+    "aliases": []
+  },
+  {
+    "number": 89,
+    "name": "Al-Fajr",
+    "arabic_name": "الفجر",
+    "revelation_place": "meccan",
+    "ayah_count": 30,
+    "aliases": []
+  },
+  {
+    "number": 90,
+    "name": "Al-Balad",
+    "arabic_name": "البلد",
+    "revelation_place": "meccan",
+    "ayah_count": 20,
+    "aliases": []
+  },
+  {
+    "number": 91,
+    "name": "Ash-Shams",
+    "arabic_name": "الشمس",
+    "revelation_place": "meccan",
+    "ayah_count": 15,
+    "aliases": []
+  },
+  {
+    "number": 92,
+    "name": "Al-Layl",
+    "arabic_name": "الليل",
+    "revelation_place": "meccan",
+    "ayah_count": 21,
+    "aliases": []
+  },
+  {
+    "number": 93,
+    "name": "Ad-Duha",
+    "arabic_name": "الضحى",
+    "revelation_place": "meccan",
+    "ayah_count": 11,
+    "aliases": [
+      "duha",
+      "morning hours"
+    ]
+  },
+  {
+    "number": 94,
+    "name": "Ash-Sharh",
+    "arabic_name": "الشرح",
+    "revelation_place": "meccan",
+    "ayah_count": 8,
+    "aliases": [
+      "inshirah",
+      "al-inshirah",
+      "sharh",
+      "relief"
+    ]
+  },
+  {
+    "number": 95,
+    "name": "At-Tin",
+    "arabic_name": "التين",
+    "revelation_place": "meccan",
+    "ayah_count": 8,
+    "aliases": []
+  },
+  {
+    "number": 96,
+    "name": "Al-'Alaq",
+    "arabic_name": "العلق",
+    "revelation_place": "meccan",
+    "ayah_count": 19,
+    "aliases": []
+  },
+  {
+    "number": 97,
+    "name": "Al-Qadr",
+    "arabic_name": "القدر",
+    "revelation_place": "meccan",
+    "ayah_count": 5,
+    "aliases": [
+      "qadr",
+      "power",
+      "decree"
+    ]
+  },
+  {
+    "number": 98,
+    "name": "Al-Bayyinah",
+    "arabic_name": "البينة",
+    "revelation_place": "medinan",
+    "ayah_count": 8,
+    "aliases": []
+  },
+  {
+    "number": 99,
+    "name": "Az-Zalzalah",
+    "arabic_name": "الزلزلة",
+    "revelation_place": "medinan",
+    "ayah_count": 8,
+    "aliases": []
+  },
+  {
+    "number": 100,
+    "name": "Al-'Adiyat",
+    "arabic_name": "العاديات",
+    "revelation_place": "meccan",
+    "ayah_count": 11,
+    "aliases": []
+  },
+  {
+    "number": 101,
+    "name": "Al-Qari'ah",
+    "arabic_name": "القارعة",
+    "revelation_place": "meccan",
+    "ayah_count": 11,
+    "aliases": []
+  },
+  {
+    "number": 102,
+    "name": "At-Takathur",
+    "arabic_name": "التكاثر",
+    "revelation_place": "meccan",
+    "ayah_count": 8,
+    "aliases": []
+  },
+  {
+    "number": 103,
+    "name": "Al-'Asr",
+    "arabic_name": "العصر",
+    "revelation_place": "meccan",
+    "ayah_count": 3,
+    "aliases": [
+      "asr",
+      "time",
+      "declining day"
+    ]
+  },
+  {
+    "number": 104,
+    "name": "Al-Humazah",
+    "arabic_name": "الهمزة",
+    "revelation_place": "meccan",
+    "ayah_count": 9,
+    "aliases": []
+  },
+  {
+    "number": 105,
+    "name": "Al-Fil",
+    "arabic_name": "الفيل",
+    "revelation_place": "meccan",
+    "ayah_count": 5,
+    "aliases": []
+  },
+  {
+    "number": 106,
+    "name": "Quraysh",
+    "arabic_name": "قريش",
+    "revelation_place": "meccan",
+    "ayah_count": 4,
+    "aliases": []
+  },
+  {
+    "number": 107,
+    "name": "Al-Ma'un",
+    "arabic_name": "الماعون",
+    "revelation_place": "meccan",
+    "ayah_count": 7,
+    "aliases": []
+  },
+  {
+    "number": 108,
+    "name": "Al-Kawthar",
+    "arabic_name": "الكوثر",
+    "revelation_place": "meccan",
+    "ayah_count": 3,
+    "aliases": [
+      "kawthar",
+      "abundance"
+    ]
+  },
+  {
+    "number": 109,
+    "name": "Al-Kafirun",
+    "arabic_name": "الكافرون",
+    "revelation_place": "meccan",
+    "ayah_count": 6,
+    "aliases": [
+      "kafirun",
+      "disbelievers"
+    ]
+  },
+  {
+    "number": 110,
+    "name": "An-Nasr",
+    "arabic_name": "النصر",
+    "revelation_place": "medinan",
+    "ayah_count": 3,
+    "aliases": [
+      "nasr",
+      "divine support"
+    ]
+  },
+  {
+    "number": 111,
+    "name": "Al-Masad",
+    "arabic_name": "المسد",
+    "revelation_place": "meccan",
+    "ayah_count": 5,
+    "aliases": []
+  },
+  {
+    "number": 112,
+    "name": "Al-Ikhlas",
+    "arabic_name": "الإخلاص",
+    "revelation_place": "meccan",
+    "ayah_count": 4,
+    "aliases": [
+      "ikhlas",
+      "sincerity",
+      "tawhid"
+    ]
+  },
+  {
+    "number": 113,
+    "name": "Al-Falaq",
+    "arabic_name": "الفلق",
+    "revelation_place": "meccan",
+    "ayah_count": 5,
+    "aliases": [
+      "falaq",
+      "daybreak"
+    ]
+  },
+  {
+    "number": 114,
+    "name": "An-Nas",
+    "arabic_name": "الناس",
+    "revelation_place": "meccan",
+    "ayah_count": 6,
+    "aliases": [
+      "nas",
+      "mankind"
+    ]
+  }
+]
