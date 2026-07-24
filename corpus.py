@@ -1,4 +1,3 @@
-
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -41,4 +40,3 @@ class QuranCorpus:
 
 # Shared instance across the application
 corpus = QuranCorpus()
-
