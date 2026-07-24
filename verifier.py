@@ -151,3 +151,4 @@ def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
         results.append(res)
 
     return results
+
