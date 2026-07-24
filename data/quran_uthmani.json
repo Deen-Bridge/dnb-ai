@@ -1,0 +1,17 @@
+{
+  "surahs": {
+    "1": { "name": "Al-Fatiha", "ayahs_count": 7 },
+    "2": { "name": "Al-Baqarah", "ayahs_count": 286 },
+    "114": { "name": "An-Nas", "ayahs_count": 6 }
+  },
+  "ayat": {
+    "1:1": {
+      "arabic": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
+      "english": "In the name of Allah, the Entirely Merciful, the Especially Merciful."
+    },
+    "2:255": {
+      "arabic": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ",
+      "english": "Allah - there is no deity except Him, the Ever-Living, the Sustainer of all existence."
+    }
+  }
+}
