@@ -1,4 +1,3 @@
-
 import re
 import difflib
 from enum import Enum
@@ -110,7 +109,11 @@ def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) ->
         }
 
 
-def verify_hadith_citation(collection: str, number: Optional[str] = None, quote: Optional[str] = None) -> Dict[str, Any]:
+def verify_hadith_citation(
+    collection: str,
+    number: Optional[str] = None,
+    quote: Optional[str] = None
+) -> Dict[str, Any]:
     """Verification for Hadith citations (defaults to honest unverified label when corpus is unavailable)."""
     if not corpus.has_hadith_corpus():
         return {
@@ -151,4 +154,3 @@ def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
         results.append(res)
 
     return results
-
