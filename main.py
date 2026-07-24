@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Path as FastAPIPath, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 import google.generativeai as genai
 import json
 import os
@@ -52,7 +52,83 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(title="DeenBridge AI API")
+API_DESCRIPTION = """
+The AI service behind **Deen Bridge**, a platform for authentic Islamic
+education built on the Stellar network.
+
+`/chat` wraps Google's Gemini model with an Islamic-knowledge system prompt and
+several layers that exist to keep answers trustworthy: content-safety
+classification, madhhab-aware fiqh handling, hadith authenticity grading,
+tafsir-grounded ayah explanations, and a confidence score that makes the
+service abstain — or route an answer to a human scholar — rather than guess.
+
+### Sessions
+
+`POST /chat` is the whole conversation API. **Omit `chat_id` to start a new
+session**; the response returns the id that was created. **Pass that same
+`chat_id` back on the next request to continue the conversation** — history is
+kept server-side, so you never resend earlier turns. `DELETE /chat/{chat_id}`
+ends a session.
+
+### Response envelope
+
+Every answer carries the text plus optional metadata blocks describing *how*
+it was produced — `moderation`, `fiqh`, `hadith_references`, `tafsir`, and
+`confidence`. All of them are additive and may be `null`; a client that only
+reads `response` and `chat_id` keeps working.
+"""
+
+TAGS_METADATA = [
+    {
+        "name": "chat",
+        "description": "Conversation with the assistant, and session lifecycle.",
+    },
+    {
+        "name": "health",
+        "description": "Liveness and service-internal metrics.",
+    },
+    {
+        "name": "tafsir",
+        "description": (
+            "Ayah explanations retrieved from named classical tafsir works, "
+            "each attributed to its author."
+        ),
+    },
+    {
+        "name": "study",
+        "description": "Schema-validated quiz and flashcard generation.",
+    },
+    {
+        "name": "stellar",
+        "description": (
+            "Read-only Stellar features, including zakat on a wallet's "
+            "on-chain USDC balance. Public keys only — secret keys are never "
+            "accepted."
+        ),
+    },
+    {
+        "name": "scholar-review",
+        "description": (
+            "Human review queue for low-confidence religious answers. "
+            "Requires the `X-Review-Token` header."
+        ),
+    },
+]
+
+app = FastAPI(
+    title="DeenBridge AI API",
+    description=API_DESCRIPTION,
+    version="1.0.0",
+    openapi_tags=TAGS_METADATA,
+    contact={
+        "name": "Deen Bridge",
+        "url": "https://github.com/Deen-Bridge/dnb-ai",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://github.com/Deen-Bridge/dnb-ai/blob/main/LICENSE",
+    },
+)
 
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
@@ -112,32 +188,186 @@ Remember to:
 
 
 class Message(BaseModel):
-    role: str
-    content: str
+    """One turn of the conversation, as replayed in `history`."""
+
+    role: str = Field(
+        ...,
+        description="Who produced this turn: `user` or `model`.",
+        examples=["user"],
+    )
+    content: str = Field(
+        ...,
+        description="The text of the turn.",
+        examples=["What are the conditions of wudu?"],
+    )
 
 
 class ChatRequest(BaseModel):
-    prompt: str
-    chat_id: Optional[str] = None
-    context: Optional[str] = None  # Additional context for specific queries
-    madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
-    language: Optional[str] = None  # Preferred language for retrieved tafsir
+    """A question for the assistant, optionally continuing an existing session."""
+
+    prompt: str = Field(
+        ...,
+        description="The user's question or message.",
+        examples=["What are the conditions of wudu?"],
+    )
+    chat_id: Optional[str] = Field(
+        None,
+        description=(
+            "Session to continue. **Omit to start a new session** — the "
+            "response returns the id that was created. Pass that id back on "
+            "later requests to keep the conversation going; history is stored "
+            "server-side, so earlier turns are never resent."
+        ),
+        examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+    )
+    context: Optional[str] = Field(
+        None,
+        description=(
+            "Extra context for this one question — for example the lesson the "
+            "user is reading, or their Stellar public key. It is prepended to "
+            "the prompt and is **not** stored in the session history. Sending "
+            "it also opts this turn out of the response cache."
+        ),
+        examples=["The user is reading a lesson on the fiqh of purification."],
+    )
+    madhhab: Optional[str] = Field(
+        None,
+        description=(
+            "The user's school of jurisprudence, so fiqh answers lead with it: "
+            "`hanafi`, `maliki`, `shafii`, or `hanbali`. Other schools' "
+            "positions are still presented. An unrecognized value is ignored."
+        ),
+        examples=["shafii"],
+    )
+    language: Optional[str] = Field(
+        None,
+        description=(
+            "Preferred language code for retrieved tafsir and translations "
+            "(default `en`). A work with no edition in this language is "
+            "returned in its original language, labelled as such."
+        ),
+        examples=["en"],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "summary": "Start a new session",
+                    "description": "No chat_id — the response returns a new one.",
+                    "value": {"prompt": "What are the conditions of wudu?"},
+                },
+                {
+                    "summary": "Continue a session",
+                    "description": "Reuse the chat_id returned by the first call.",
+                    "value": {
+                        "prompt": "Does touching a cat break it?",
+                        "chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "madhhab": "shafii",
+                    },
+                },
+            ]
+        }
+    )
 
 
 class Moderation(BaseModel):
-    category_id: Optional[str] = None
-    action: str
+    """Present only when the safety policy matched the request."""
+
+    category_id: Optional[str] = Field(
+        None,
+        description="Policy category that matched, from `safety/policy.yaml`.",
+        examples=["self_harm"],
+    )
+    action: str = Field(
+        ...,
+        description="What the policy did: `allow`, `allow_with_guidance`, or `refuse`.",
+        examples=["allow_with_guidance"],
+    )
+
+
+class DeleteChatResponse(BaseModel):
+    """Result of ending a chat session."""
+
+    message: str = Field(
+        ...,
+        description=(
+            "Human-readable outcome. Deleting an unknown or already-deleted "
+            "session is not an error — it reports that none was found."
+        ),
+        examples=["Chat session deleted successfully"],
+    )
+
+
+class PingResponse(RootModel[List[str]]):
+    """Liveness probe payload — a single-element array."""
+
+    root: List[str] = Field(
+        ...,
+        description="Liveness marker.",
+        examples=[["************** Ping pong ping pong *************"]],
+    )
 
 
 class ChatResponse(BaseModel):
-    response: str
-    chat_id: str
-    history: List[Message]
-    moderation: Optional[Moderation] = None
-    fiqh: Optional[FiqhInfo] = None
-    hadith_references: Optional[List[HadithReference]] = None
-    tafsir: Optional[TafsirInfo] = None
-    confidence: Optional[ConfidenceAssessment] = None
+    """The assistant's answer, plus optional metadata about how it was produced.
+
+    Every metadata block is additive and may be `null`; a client that reads
+    only `response` and `chat_id` is unaffected by any of them.
+    """
+
+    response: str = Field(
+        ...,
+        description=(
+            "The assistant's answer. This is the text to display — it already "
+            "includes any hadith-authenticity caution, uncertainty note, or "
+            "abstention message the service decided to attach."
+        ),
+        examples=["Wudu requires intention (niyyah), washing the face, ..."],
+    )
+    chat_id: str = Field(
+        ...,
+        description=(
+            "Session id for this conversation. Send it back on the next "
+            "request to continue; it is newly created when the request omitted "
+            "one."
+        ),
+        examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+    )
+    history: List[Message] = Field(
+        ...,
+        description="Every turn in the session so far, oldest first.",
+    )
+    moderation: Optional[Moderation] = Field(
+        None,
+        description="Safety-policy outcome, when a policy category matched.",
+    )
+    fiqh: Optional[FiqhInfo] = Field(
+        None,
+        description="Whether this was treated as a fiqh question, and under which madhhab.",
+    )
+    hadith_references: Optional[List[HadithReference]] = Field(
+        None,
+        description=(
+            "Hadith cited in the answer, each with its authenticity grade and "
+            "grader, so a weak narration is never presented as authentic."
+        ),
+    )
+    tafsir: Optional[TafsirInfo] = Field(
+        None,
+        description=(
+            "For verse-explanation questions: the ayat retrieved and the tafsir "
+            "works whose text actually backed the answer."
+        ),
+    )
+    confidence: Optional[ConfidenceAssessment] = Field(
+        None,
+        description=(
+            "How reliable the answer is judged to be (0–1), the band that score "
+            "falls in, and whether the service abstained or queued the answer "
+            "for a scholar."
+        ),
+    )
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -210,14 +440,106 @@ def get_safety_settings():
     ]
 
 
-@app.get("/ping")
+@app.get(
+    "/ping",
+    response_model=PingResponse,
+    tags=["health"],
+    summary="Liveness check",
+)
 async def ping():
+    """Confirm the service is up.
+
+    Takes no parameters and touches no dependency — a 200 means this process is
+    serving requests, not that Gemini or Redis are reachable.
+    """
     logger.info("************** Ping pong ping pong *************")
     return {"************** Ping pong ping pong *************"}
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    tags=["chat"],
+    summary="Ask the assistant a question",
+    responses={
+        200: {
+            "description": "The assistant's answer, with any metadata blocks that applied.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "response": "Wudu requires intention (niyyah), washing the face, ...",
+                        "chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "history": [
+                            {"role": "user", "content": "What are the conditions of wudu?"},
+                            {
+                                "role": "model",
+                                "content": "Wudu requires intention (niyyah), washing the face, ...",
+                            },
+                        ],
+                        "fiqh": {"is_fiqh_question": True, "madhhab_requested": "shafii"},
+                        "confidence": {
+                            "score": 0.55,
+                            "band": "uncertain",
+                            "abstained": False,
+                            "queued": False,
+                            "signals": {"expressed_certainty": 1.0},
+                            "signals_used": ["expressed_certainty"],
+                            "review_id": None,
+                        },
+                    }
+                }
+            },
+        },
+        422: {
+            "description": (
+                "The request body failed validation — for example `prompt` is "
+                "missing or is not a string."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "type": "missing",
+                                "loc": ["body", "prompt"],
+                                "msg": "Field required",
+                                "input": {"chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"},
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+        500: {
+            "description": (
+                "Generation failed — the upstream model errored or returned an "
+                "empty response."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {"detail": "❌ Chat API Error: Empty response from AI model"}
+                }
+            },
+        },
+    },
+)
 async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
+    """Send a message and get the assistant's answer.
+
+    **Starting a session:** omit `chat_id`. The response carries a newly
+    created one.
+
+    **Continuing a session:** pass that `chat_id` back. Conversation history is
+    held server-side, so only the new message is sent each time; the full
+    history is replayed in the response.
+
+    The answer is shaped by several layers before it is returned: the safety
+    policy may add guidance or refuse, fiqh questions lead with the requested
+    madhhab, cited hadith are graded, verse-explanation questions are grounded
+    in real tafsir, and a low-confidence religious answer may be replaced by an
+    abstention and queued for a scholar. Everything relevant is reported in the
+    optional metadata blocks alongside `response`.
+    """
     try:
         logger.info(f"Received chat request: {request.prompt[:100]}...")
 
@@ -434,8 +756,52 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         raise HTTPException(status_code=500, detail=error_msg)
 
 
-@app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str):
+@app.delete(
+    "/chat/{chat_id}",
+    response_model=DeleteChatResponse,
+    tags=["chat"],
+    summary="End a chat session",
+    responses={
+        200: {
+            "description": (
+                "The session was deleted, or no such session existed. Both "
+                "cases return 200 — deleting is idempotent."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "deleted": {
+                            "summary": "Session existed",
+                            "value": {"message": "Chat session deleted successfully"},
+                        },
+                        "not_found": {
+                            "summary": "Unknown or already deleted",
+                            "value": {"message": "Chat session not found"},
+                        },
+                    }
+                }
+            },
+        },
+        500: {
+            "description": "Deletion failed unexpectedly.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "❌ Error deleting chat: ..."}
+                }
+            },
+        },
+    },
+)
+async def delete_chat(chat_id: str = FastAPIPath(
+    ...,
+    description="The `chat_id` returned by `POST /chat`.",
+    examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+)):
+    """Discard a conversation and its stored history.
+
+    Idempotent: deleting a session that does not exist (or was already deleted)
+    returns 200 with a "not found" message rather than a 404.
+    """
     try:
         if chat_id in active_chats:
             del active_chats[chat_id]
@@ -448,14 +814,31 @@ async def delete_chat(chat_id: str):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
-@app.get("/cache/stats")
+@app.get(
+    "/cache/stats",
+    tags=["health"],
+    summary="Semantic cache metrics",
+)
 async def cache_stats():
+    """Hit rate, size, and eviction counts for the semantic response cache.
+
+    Counters are per-process and reset on restart.
+    """
     return semantic_cache.get_stats()
 
 
-@app.get("/confidence/policy")
+@app.get(
+    "/confidence/policy",
+    tags=["health"],
+    summary="Confidence thresholds and review-queue depth",
+)
 async def confidence_policy():
-    """Current confidence thresholds and the queue's durability."""
+    """Current confidence thresholds and the queue's durability.
+
+    Useful for confirming what an environment is actually configured to do:
+    the abstain/hedge boundaries in force, and whether the scholar-review queue
+    is backed by Redis (`durable`) or only by process memory.
+    """
     return {
         "thresholds": confidence_thresholds(),
         "review_queue": await review_store.stats(),

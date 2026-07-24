@@ -40,6 +40,11 @@ The platform is composed of three services:
 
 ## 🔗 API
 
+**Interactive docs: [`/docs`](https://dnb-ai.onrender.com/docs)** (Swagger UI, or
+`http://localhost:8000/docs` when running locally) — every route is tagged and
+summarized there, with request/response examples and the error shapes. The raw
+schema is at `/openapi.json`.
+
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
@@ -53,6 +58,51 @@ The platform is composed of three services:
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
 | `GET` | `/review/{id}` | A single review item (reviewer token) |
 | `POST` | `/review/{id}/verdict` | Record approve / correct / reject (reviewer token) |
+
+### Holding a conversation
+
+`POST /chat` is the whole conversation API. **Omit `chat_id` to start a
+session** — the response returns the id that was created:
+
+```bash
+curl -sX POST http://localhost:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "What are the conditions of wudu?"}'
+```
+
+```jsonc
+{
+  "response": "Wudu requires intention (niyyah), washing the face, ...",
+  "chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "history": [ /* every turn so far */ ],
+  "fiqh": {"is_fiqh_question": true, "madhhab_requested": null},
+  "confidence": {"score": 0.55, "band": "uncertain", "abstained": false, "queued": false}
+}
+```
+
+**Pass that `chat_id` back to continue.** History lives server-side, so the
+follow-up sends only the new message — earlier turns are never resent:
+
+```bash
+curl -sX POST http://localhost:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "prompt": "Does touching a cat break it?",
+        "chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "madhhab": "shafii"
+      }'
+```
+
+End the session when you are done (idempotent — an unknown id is not an error):
+
+```bash
+curl -sX DELETE http://localhost:8000/chat/3fa85f64-5717-4562-b3fc-2c963f66afa6
+```
+
+Alongside `response` and `chat_id`, an answer may carry `moderation`, `fiqh`,
+`hadith_references`, `tafsir`, and `confidence` blocks describing how it was
+produced. All are optional and may be `null`; a client that reads only
+`response` and `chat_id` is unaffected by them.
 
 ## 🚀 Getting Started
 
