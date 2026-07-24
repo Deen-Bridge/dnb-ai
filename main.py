@@ -80,7 +80,7 @@ async def run_strict_corrective_loop(
             corrections_text.append(f"- {m['reason']}")
 
     correction_prompt = (
-        f"Your previous response had citation errors:\n"
+        "Your previous response had citation errors:\n"
         + "\n".join(corrections_text)
         + "\n\nPlease regenerate your response correcting the quotes/references, or remove any unverified references entirely."
     )
@@ -163,3 +163,4 @@ async def delete_chat(chat_id: str):
 @app.get("/ping")
 async def ping():
     return {"status": "ok"}
+
