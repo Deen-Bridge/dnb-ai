@@ -111,15 +111,45 @@ class TestChatRoute:
         assert "chat_id" in description
         assert "omit" in description
 
-    def test_request_body_carries_worked_examples(self, schemas):
-        examples = schemas["ChatRequest"]["examples"]
-        summaries = [example["summary"] for example in examples]
+    def test_request_body_carries_labelled_examples(self, spec):
+        """Labelled variants belong on the operation, as OpenAPI Example Objects."""
+        content = spec["paths"]["/chat"]["post"]["requestBody"]["content"]
+        examples = content["application/json"]["examples"]
+        summaries = [example["summary"] for example in examples.values()]
         assert any("new" in s.lower() for s in summaries)
         assert any("continue" in s.lower() for s in summaries)
-        # The "start" example must not send a chat_id, or it teaches the
-        # opposite of what it says.
-        start = next(e for e in examples if "new" in e["summary"].lower())
+
+    def test_start_example_really_starts_a_session(self, spec):
+        """An example that contradicts its own caption is worse than none."""
+        content = spec["paths"]["/chat"]["post"]["requestBody"]["content"]
+        examples = content["application/json"]["examples"]
+        start = next(
+            e for e in examples.values() if "new" in e["summary"].lower()
+        )
         assert "chat_id" not in start["value"]
+        assert start["value"]["prompt"]
+
+    def test_continue_example_sends_a_chat_id(self, spec):
+        content = spec["paths"]["/chat"]["post"]["requestBody"]["content"]
+        examples = content["application/json"]["examples"]
+        cont = next(
+            e for e in examples.values() if "continue" in e["summary"].lower()
+        )
+        assert cont["value"]["chat_id"]
+
+    def test_schema_examples_are_plain_model_instances(self, schemas):
+        """JSON Schema `examples` take instances of the model itself.
+
+        Wrapping them in {summary, description, value} is the OpenAPI Example
+        Object shape and would show the wrapper in the schema view instead of
+        a usable request body.
+        """
+        examples = schemas["ChatRequest"]["examples"]
+        properties = set(schemas["ChatRequest"]["properties"])
+        for example in examples:
+            assert not {"summary", "value", "description"} & set(example)
+            assert set(example) <= properties
+            assert example.get("prompt")
 
 
 class TestOtherRoutes:

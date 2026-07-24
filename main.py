@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Path as FastAPIPath, Request, Response
+from fastapi import Body, FastAPI, HTTPException, Path as FastAPIPath, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 import google.generativeai as genai
@@ -249,26 +249,40 @@ class ChatRequest(BaseModel):
         examples=["en"],
     )
 
+    # JSON Schema `examples` are plain instances of the model. The labelled
+    # variants a reader picks between live on the /chat operation instead, as
+    # OpenAPI Example Objects (see CHAT_REQUEST_EXAMPLES).
     model_config = ConfigDict(
         json_schema_extra={
             "examples": [
+                {"prompt": "What are the conditions of wudu?"},
                 {
-                    "summary": "Start a new session",
-                    "description": "No chat_id — the response returns a new one.",
-                    "value": {"prompt": "What are the conditions of wudu?"},
-                },
-                {
-                    "summary": "Continue a session",
-                    "description": "Reuse the chat_id returned by the first call.",
-                    "value": {
-                        "prompt": "Does touching a cat break it?",
-                        "chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-                        "madhhab": "shafii",
-                    },
+                    "prompt": "Does touching a cat break it?",
+                    "chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                    "madhhab": "shafii",
                 },
             ]
         }
     )
+
+
+# Rendered as the example dropdown on POST /chat.
+CHAT_REQUEST_EXAMPLES = {
+    "start_session": {
+        "summary": "Start a new session",
+        "description": "No chat_id — the response returns a newly created one.",
+        "value": {"prompt": "What are the conditions of wudu?"},
+    },
+    "continue_session": {
+        "summary": "Continue a session",
+        "description": "Reuse the chat_id returned by the first call.",
+        "value": {
+            "prompt": "Does touching a cat break it?",
+            "chat_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "madhhab": "shafii",
+        },
+    },
+}
 
 
 class Moderation(BaseModel):
@@ -523,7 +537,11 @@ async def ping():
         },
     },
 )
-async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
+async def chat(
+    http_request: Request,
+    fastapi_response: Response,
+    request: ChatRequest = Body(..., openapi_examples=CHAT_REQUEST_EXAMPLES),
+):
     """Send a message and get the assistant's answer.
 
     **Starting a session:** omit `chat_id`. The response carries a newly
