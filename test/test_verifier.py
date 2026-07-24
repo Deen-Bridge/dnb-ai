@@ -1,4 +1,3 @@
-
 from verifier import (
     normalize_arabic,
     normalize_english,
@@ -82,4 +81,3 @@ def test_extract_and_verify_all():
     # Hadith result
     hadith_res = next(r for r in results if r["source"] == "hadith")
     assert hadith_res["status"] == VerificationStatus.UNVERIFIED
-
