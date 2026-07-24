@@ -100,8 +100,6 @@ class TestSessionTTL:
         yield
 
     async def test_expired_session_returns_empty(self):
-        import time
-
         history = [{"role": "user", "text": "hello"}]
         await self.store.save_history("chat-1", history)
         # TTL=0 means already expired — load should return empty

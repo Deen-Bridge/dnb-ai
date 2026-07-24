@@ -1,213 +1,166 @@
+import os
+from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
-import os
-from dotenv import load_dotenv
-import logging
-from typing import List, Optional
-import uuid
 
-from stellar import router as stellar_router
-from store import SessionStore, history_to_dicts, dicts_to_contents
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Load environment variables
-load_dotenv()
-
-app = FastAPI(title="DeenBridge AI API")
-
-# Stellar integration: read-only zakat/balance features on the network
-# the rest of the Deen Bridge platform settles on
-app.include_router(stellar_router)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Local development
-        "https://deenbridge.vercel.app",  # Production frontend
-        "https://dnb-frontend.vercel.app",  # Your frontend domain
-        "http://localhost:8000",  # Local API
-        "https://dnb-ai.onrender.com",  # Render deployment
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from verifier import (
+    extract_and_verify_all,
+    VerificationStatus,
 )
 
-# Configure Gemini
-try:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in environment variables")
-    logger.info("Configuring Gemini API...")
-    genai.configure(api_key=api_key)
-    logger.info("Gemini API configured successfully")
-except Exception as e:
-    logger.error(f"❌ Error configuring Gemini: {str(e)}")
-    raise
+app = FastAPI(title="Deen Bridge AI Assistant", version="1.0.0")
 
-# Session store (Redis-backed, with in-memory fallback)
-session_store = SessionStore()
+# Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CITATION_VERIFY_MODE = os.getenv("CITATION_VERIFY", "annotate").lower()
 
-# Islamic context and safety instructions
-ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic knowledge and guidance.
-Your responses should:
-1. Be based on authentic Islamic sources (Quran and Hadith)
-2. Be respectful and appropriate
-3. Avoid controversial or divisive topics
-4. Focus on promoting understanding and unity
-5. Acknowledge when a question is beyond your scope
-6. Always maintain Islamic etiquette (adab) in responses
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
-Remember to:
-- Cite sources when possible
-- Be clear about what is from authentic sources vs. scholarly opinion
-- Encourage consulting with local scholars for complex matters
-- Promote positive Islamic values and character
-"""
+ISLAMIC_CONTEXT = (
+    "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
+    "Provide respectful, accurate, and context-aware responses grounded in authentic Islamic knowledge.\n\n"
+    "POLICY ON CITATIONS:\n"
+    "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
+    "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
+    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
+    "general knowledge—do NOT fabricate references."
+)
 
 
-class Message(BaseModel):
-    role: str
-    content: str
+# Response Models
+class CitationVerificationResult(BaseModel):
+    source: str  # "quran" | "hadith"
+    surah: Optional[int] = None
+    ayah: Optional[int] = None
+    collection: Optional[str] = None
+    number: Optional[str] = None
+    status: str  # "verified" | "mismatch" | "unverified" | "not_quoted"
+    reason: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
-    prompt: str
-    chat_id: Optional[str] = None
-    context: Optional[str] = None  # Additional context for specific queries
+    message: str
+    chat_id: Optional[str] = "default"
 
 
 class ChatResponse(BaseModel):
-    response: str
+    text: str
     chat_id: str
-    history: List[Message]
+    citations_verified: bool = True
+    verification_results: List[CitationVerificationResult] = []
 
 
-def get_safety_settings():
-    return [
-        {
-            "category": "HARM_CATEGORY_HARASSMENT",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        },
-        {
-            "category": "HARM_CATEGORY_HATE_SPEECH",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        },
-        {
-            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        },
-        {
-            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        }
-    ]
+# In-memory session store for demo purposes
+sessions: Dict[str, Any] = {}
 
 
-@app.get("/ping")
-async def ping():
-    logger.info("************** Ping pong ping pong *************")
-    return {"status": "ok"}
+def get_model():
+    return genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=ISLAMIC_CONTEXT,
+    )
+
+
+async def run_strict_corrective_loop(
+    chat_session,
+    user_message: str,
+    original_text: str,
+    mismatches: List[Dict[str, Any]],
+) -> str:
+    """Run exactly one corrective regeneration when a citation mismatch occurs in strict mode."""
+    corrections_text = []
+    for m in mismatches:
+        if m.get("source") == "quran" and "correct_text" in m:
+            corrections_text.append(
+                f"- Surah {m['surah']}:{m['ayah']} text in corpus is: '{m['correct_text']}'. "
+                f"Your quote did not match."
+            )
+        elif m.get("reason"):
+            corrections_text.append(f"- {m['reason']}")
+
+    correction_prompt = (
+        "Your previous response had citation errors:\n"
+        + "\n".join(corrections_text)
+        + "\n\nPlease regenerate your response correcting the quotes/references, or remove any unverified references entirely."
+    )
+
+    corrective_response = chat_session.send_message(correction_prompt)
+    return corrective_response.text
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    try:
-        logger.info(f"Received chat request: {request.prompt[:100]}...")
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured.")
 
-        chat_id = request.chat_id or str(uuid.uuid4())
+    chat_id = request.chat_id or "default"
+    if chat_id not in sessions:
+        model = get_model()
+        sessions[chat_id] = model.start_chat(history=[])
 
-        # Load persisted history (empty list for new sessions)
-        history_dicts = await session_store.load_history(chat_id)
-        if history_dicts:
-            logger.info("Loaded %d prior turns for chat %s", len(history_dicts) // 2, chat_id)
-        else:
-            logger.info("Creating new chat session: %s", chat_id)
+    chat_session = sessions[chat_id]
+    response = chat_session.send_message(request.message)
+    response_text = response.text
 
-        model = genai.GenerativeModel(
-            'gemini-2.5-flash-preview-05-20',
-            system_instruction=ISLAMIC_CONTEXT,
-            safety_settings=get_safety_settings()
-        )
-
-        # Rebuild chat session from persisted history
-        contents = dicts_to_contents(history_dicts)
-        chat = model.start_chat(history=contents)
-
-        # Prepare the prompt with context if provided
-        full_prompt = request.prompt
-        if request.context:
-            full_prompt = f"Context: {request.context}\n\nQuestion: {request.prompt}"
-
-        # Send message and get response
-        logger.info("Sending message to chat...")
-        response = chat.send_message(
-            full_prompt,
-            generation_config={
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 2048,
-            }
-        )
-
-        if not response.text:
-            logger.error("Empty response received from model")
-            raise HTTPException(status_code=500, detail="Empty response from AI model")
-
-        # Persist the updated history (Gemini SDK has appended the new turn)
-        await session_store.save_history(chat_id, history_to_dicts(chat.history))
-
-        # Build response history
-        history = []
-        for message in chat.history:
-            try:
-                if hasattr(message, 'parts') and message.parts:
-                    content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
-                else:
-                    content = str(message)
-
-                history.append(Message(
-                    role="user" if message.role == "user" else "model",
-                    content=content
-                ))
-            except Exception as e:
-                logger.warning(f"Error processing message in history: {str(e)}")
-                continue
-
-        logger.info("Chat response generated successfully")
+    # Mode: off -> return verbatim without verification
+    if CITATION_VERIFY_MODE == "off":
         return ChatResponse(
-            response=response.text,
+            text=response_text,
             chat_id=chat_id,
-            history=history
+            citations_verified=True,
+            verification_results=[],
         )
 
-    except Exception as e:
-        error_msg = f"❌ Chat API Error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+    # Verification Step
+    verification_results = extract_and_verify_all(response_text)
+    mismatches = [
+        res for res in verification_results if res.get("status") == VerificationStatus.MISMATCH
+    ]
+
+    # Strict Mode: Run single corrective loop if mismatches are found
+    if CITATION_VERIFY_MODE == "strict" and mismatches:
+        response_text = await run_strict_corrective_loop(
+            chat_session, request.message, response_text, mismatches
+        )
+        # Re-verify updated text
+        verification_results = extract_and_verify_all(response_text)
+        mismatches = [
+            res for res in verification_results if res.get("status") == VerificationStatus.MISMATCH
+        ]
+
+    citations_verified = len(mismatches) == 0
+
+    formatted_results = [
+        CitationVerificationResult(
+            source=res["source"],
+            surah=res.get("surah"),
+            ayah=res.get("ayah"),
+            collection=res.get("collection"),
+            number=res.get("number"),
+            status=res["status"],
+            reason=res.get("reason"),
+        )
+        for res in verification_results
+    ]
+
+    return ChatResponse(
+        text=response_text,
+        chat_id=chat_id,
+        citations_verified=citations_verified,
+        verification_results=formatted_results,
+    )
 
 
 @app.delete("/chat/{chat_id}")
 async def delete_chat(chat_id: str):
-    try:
-        existed = await session_store.delete_session(chat_id)
-        if existed:
-            logger.info(f"Deleted chat session: {chat_id}")
-            return {"message": "Chat session deleted successfully"}
-        return {"message": "Chat session not found"}
-    except Exception as e:
-        error_msg = f"❌ Error deleting chat: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+    if chat_id in sessions:
+        del sessions[chat_id]
+        return {"status": "success", "message": f"Session {chat_id} deleted."}
+    raise HTTPException(status_code=404, detail="Session not found.")
 
-if __name__ == "__main__":
-    import uvicorn
-    logger.info("Starting server...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+@app.get("/ping")
+async def ping():
+    return {"status": "ok"}
