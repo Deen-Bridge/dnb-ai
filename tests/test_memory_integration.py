@@ -6,7 +6,7 @@ All tests run offline — Gemini calls are mocked.
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import BackgroundTasks
@@ -103,7 +103,6 @@ class TestRememberFalse:
         await store.save_profile("u1", profile)
 
         loaded_profile = None
-        remember = False
         user_id = "u1"
 
         if user_id:

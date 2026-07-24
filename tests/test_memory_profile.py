@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,17 +16,14 @@ from pydantic import ValidationError
 
 from memory.models import (
     MAX_FACT_LENGTH,
-    MAX_FACTS,
     MAX_SUMMARY_LENGTH,
     MAX_TOPIC_LENGTH,
-    MAX_TOPICS,
     ChatSummary,
     FactEntry,
     TopicEntry,
     UserProfile,
 )
 from memory.store import (
-    MEMORY_TTL_SECONDS,
     InMemoryMemoryStore,
     RedisMemoryStore,
 )
