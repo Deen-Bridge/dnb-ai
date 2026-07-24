@@ -9,7 +9,12 @@ import logging
 from typing import Any, List, Optional
 import uuid
 
-from stellar import router as stellar_router
+from stellar import (
+    ZakatInfo,
+    build_chat_zakat_context,
+    redact_secret_keys,
+    router as stellar_router,
+)
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 from semantic_cache import (
     SEMANTIC_CACHE_ENABLED,
@@ -138,6 +143,7 @@ class ChatResponse(BaseModel):
     hadith_references: Optional[List[HadithReference]] = None
     tafsir: Optional[TafsirInfo] = None
     confidence: Optional[ConfidenceAssessment] = None
+    zakat: Optional[ZakatInfo] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -189,6 +195,15 @@ async def tafsir_retriever(prompt: str, language: str) -> Optional[TafsirContext
         return None
 
 
+async def zakat_retriever(prompt: str, context: Optional[str]):
+    """Compute zakat for a chat turn; never fail the turn over the lookup."""
+    try:
+        return await build_chat_zakat_context(prompt, context)
+    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
+        logger.warning("Zakat lookup failed; answering without it: %s", exc)
+        return None
+
+
 def get_safety_settings():
     return [
         {
@@ -219,33 +234,46 @@ async def ping():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
     try:
-        logger.info(f"Received chat request: {request.prompt[:100]}...")
-
         chat_id = request.chat_id or str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
 
+        # A user who pastes a Stellar secret key must not have it forwarded to
+        # the model provider or written into stored history. Everything
+        # downstream works from the redacted text; the zakat layer separately
+        # detects that one was present and warns the user.
+        prompt = redact_secret_keys(request.prompt)
+        extra_context = redact_secret_keys(request.context)
+        logger.info(f"Received chat request: {prompt[:100]}...")
+
         # --- Fiqh classification & madhhab ---
         madhhab = normalize_madhhab(request.madhhab)
-        is_fiqh = classify_fiqh(request.prompt)
+        is_fiqh = classify_fiqh(prompt)
         fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
 
         # --- Tafsir retrieval for verse-explanation questions ---
         # Detection is offline (regex + the bundled surah index), so a
         # non-tafsir prompt costs nothing.
         tafsir_context = await tafsir_retriever(
-            request.prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
+            prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
         )
         tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
 
-        # A grounded tafsir answer is built from retrieved passages, so it does
-        # not go through the semantic response cache — the expensive part, the
-        # tafsir text itself, is already cached by exact ayah key in
-        # semantic_cache.KeyedCache.
+        # --- Zakat calculation for wallet questions ---
+        # Detection is offline (keywords plus a key-shaped match), so an
+        # ordinary prompt never touches Horizon or the gold-price API.
+        zakat_context = await zakat_retriever(request.prompt, request.context)
+        zakat_info = zakat_context.info if zakat_context else None
+
+        # Neither a tafsir-grounded answer nor a zakat answer goes through the
+        # semantic response cache: the first is built from retrieved passages
+        # (already cached by ayah key), and the second contains one user's real
+        # balance, which must never be replayed to anyone else.
         is_cacheable = (
             is_new_chat
             and request.context is None
             and tafsir_context is None
+            and zakat_context is None
             and SEMANTIC_CACHE_ENABLED
         )
 
@@ -253,7 +281,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         embedding: Any = None
         normalized: Optional[str] = None
         if is_cacheable and not is_bypass:
-            normalized = normalize_text(request.prompt)
+            normalized = normalize_text(prompt)
             embedding = embed_text(normalized)
             cached = semantic_cache.get(embedding)
             if cached is not None:
@@ -263,11 +291,11 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     safety_settings=get_safety_settings(),
                 )
                 chat_session = model.start_chat(history=[
-                    {"role": "user", "parts": [{"text": request.prompt}]},
+                    {"role": "user", "parts": [{"text": prompt}]},
                     {"role": "model", "parts": [{"text": cached.response}]},
                 ])
                 active_chats[chat_id] = chat_session
-                logger.info("Semantic cache HIT for prompt: %s", request.prompt[:80])
+                logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
                 return ChatResponse(
                     response=cached.response,
                     chat_id=chat_id,
@@ -295,7 +323,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
             if tafsir_context is not None:
                 system_context += tafsir_system_context(tafsir_context)
-            context = f"Additional context: {request.context}\n\n" if request.context else ""
+            if zakat_context is not None:
+                system_context += zakat_context.prompt_block
+            context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
             response = active_chats[chat_id].send_message(
@@ -313,10 +343,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
         if enabled:
-            safety_result = await safety_pipeline.run_async(request.prompt, generate)
+            safety_result = await safety_pipeline.run_async(prompt, generate)
         else:
             safety_result = None
-            generated_text = generate(request.prompt)
+            generated_text = generate(prompt)
 
         logger.info(
             "safety=%s",
@@ -375,7 +405,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             # question reached a scholar if it actually did.
             try:
                 item = await enqueue_for_review(
-                    question=request.prompt,
+                    question=prompt,
                     answer=answer_before_policy,
                     score=assessment.score,
                     band=assessment.band.value,
@@ -406,10 +436,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         is_cacheable = is_cacheable and assessment.band is ConfidenceBand.CONFIDENT
         if is_cacheable and (safety_result is None or safety_result.generator_called):
             if embedding is None:
-                normalized = normalize_text(request.prompt)
+                normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
             semantic_cache.put(embedding, response_text, chat_id, history)
-            logger.info("Semantic cache WRITE for prompt: %s", request.prompt[:80])
+            logger.info("Semantic cache WRITE for prompt: %s", prompt[:80])
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
@@ -426,6 +456,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             hadith_references=hadith_refs,
             tafsir=tafsir_info,
             confidence=assessment,
+            zakat=zakat_info,
         )
 
     except Exception as e:
