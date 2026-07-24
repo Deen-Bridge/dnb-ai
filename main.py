@@ -270,10 +270,11 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         extra_context = redact_secret_keys(request.context)
         logger.info(f"Received chat request: {prompt[:100]}...")
 
-        # --- Fiqh classification & madhhab ---
-        madhhab = normalize_madhhab(request.madhhab)
-        is_fiqh = classify_fiqh(prompt)
-        fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+        # --- Fiqh/intent classification & madhhab ---
+        with trace.span("classification"):
+            madhhab = normalize_madhhab(request.madhhab)
+            is_fiqh = classify_fiqh(prompt)
+            fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
 
         # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
@@ -382,6 +383,11 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 safety_result = None
                 generated_text = generate(prompt)
 
+        # Everything from here (history extraction, hadith grading, confidence
+        # assessment, and the scholar-review enqueue, which does I/O) is timed
+        # as one post-processing stage so a slow tail is attributable.
+        _pp_start = time.perf_counter()
+
         logger.info(
             "safety=%s",
             {
@@ -477,6 +483,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
+        trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
         logger.info("Chat response generated successfully")
         _finalize()
         return ChatResponse(
@@ -500,7 +507,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         )
         error_msg = f"❌ Chat API Error: {str(e)}"
         logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        # Carry the trace id on the error response too, so a failed request can
+        # still be correlated with its server-side spans and logs.
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg,
+            headers={"X-Trace-Id": trace.trace_id},
+        )
     finally:
         telemetry.current_trace.reset(_ctx_token)
 

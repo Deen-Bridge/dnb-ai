@@ -200,18 +200,23 @@ class Trace:
             "model_calls": len(self.calls),
         }
 
+    def add_span(self, name: str, duration_ms: float) -> None:
+        """Record a completed stage. Used by ``span`` and for manual timing of
+        blocks that are awkward to wrap in a context manager."""
+        rounded = round(duration_ms, 2)
+        self.spans.append(Span(name=name, duration_ms=rounded))
+        logger.info(
+            "span=%s",
+            {"trace_id": self.trace_id, "stage": name, "duration_ms": rounded},
+        )
+
     @contextmanager
     def span(self, name: str) -> Iterator[None]:
         start = time.perf_counter()
         try:
             yield
         finally:
-            duration_ms = (time.perf_counter() - start) * 1000.0
-            self.spans.append(Span(name=name, duration_ms=round(duration_ms, 2)))
-            logger.info(
-                "span=%s",
-                {"trace_id": self.trace_id, "stage": name, "duration_ms": round(duration_ms, 2)},
-            )
+            self.add_span(name, (time.perf_counter() - start) * 1000.0)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -257,8 +262,6 @@ class MetricsRegistry:
         self.output_tokens = 0
         self.total_tokens = 0
         self.cost_usd = 0.0
-        self.cache_hits = 0
-        self.cache_misses = 0
         self._handler_latencies: List[float] = []
         self._model_latencies: List[float] = []
         self._by_model: Dict[str, Dict[str, float]] = {}
@@ -279,17 +282,11 @@ class MetricsRegistry:
             bucket["total_tokens"] += call.total_tokens
             bucket["cost_usd"] = round(bucket["cost_usd"] + call.cost_usd, 8)
 
-    def record_request(
-        self, handler_latency_ms: float, error: bool = False, cache_hit: Optional[bool] = None
-    ) -> None:
+    def record_request(self, handler_latency_ms: float, error: bool = False) -> None:
         with self._lock:
             self.request_count += 1
             if error:
                 self.error_count += 1
-            if cache_hit is True:
-                self.cache_hits += 1
-            elif cache_hit is False:
-                self.cache_misses += 1
             self._handler_latencies.append(handler_latency_ms)
             self._trim(self._handler_latencies)
 
@@ -299,7 +296,6 @@ class MetricsRegistry:
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
-            cache_total = self.cache_hits + self.cache_misses
             return {
                 "requests": {
                     "total": self.request_count,
@@ -319,13 +315,6 @@ class MetricsRegistry:
                     "handler_p95": _percentile(self._handler_latencies, 95),
                     "model_p50": _percentile(self._model_latencies, 50),
                     "model_p95": _percentile(self._model_latencies, 95),
-                },
-                "cache": {
-                    "hits": self.cache_hits,
-                    "misses": self.cache_misses,
-                    "hit_rate": round(self.cache_hits / cache_total, 4)
-                    if cache_total
-                    else 0.0,
                 },
                 "by_model": {
                     model: {

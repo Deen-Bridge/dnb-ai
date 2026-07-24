@@ -126,6 +126,11 @@ class TestRegistry:
         assert snap["latency_ms"]["handler_p50"] == 30.0
         assert snap["latency_ms"]["handler_p95"] >= 40.0
 
+    def test_snapshot_has_no_dead_cache_block(self, fresh_registry):
+        # Cache hit-rate is served from the semantic cache's own counters, not
+        # this registry; the registry must not emit a misleading zeroed block.
+        assert "cache" not in fresh_registry.snapshot()
+
 
 class TestSpans:
     def test_span_emitted_per_stage(self):
@@ -137,6 +142,12 @@ class TestSpans:
         stages = [s.name for s in trace.spans]
         assert stages == ["retrieval", "generation"]
         assert all(s.duration_ms >= 0 for s in trace.spans)
+
+    def test_add_span_records_manual_timing(self):
+        trace = Trace(trace_id="manual")
+        trace.add_span("post_processing", 42.0)
+        assert trace.spans[0].name == "post_processing"
+        assert trace.spans[0].duration_ms == 42.0
 
     def test_request_totals_sum_calls(self, fresh_registry):
         trace = Trace(trace_id="totals")
