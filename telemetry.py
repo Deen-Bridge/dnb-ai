@@ -43,9 +43,14 @@ logger = logging.getLogger(__name__)
 # extend the defaults, e.g.
 #   LLM_PRICE_TABLE='{"gemini-2.5-flash-preview-05-20": {"input": 0.000075,
 #                                                        "output": 0.0003}}'
+# The model this service currently calls. Shared so main.py and the price
+# table cannot drift apart: a rename in only one place would silently unprice
+# the model (priced=False / $0) instead of erroring.
+GEMINI_MODEL = "gemini-2.5-flash-preview-05-20"
+
 _DEFAULT_PRICE_TABLE: Dict[str, Dict[str, float]] = {
     # Gemini 2.5 Flash (preview): the model this service currently calls.
-    "gemini-2.5-flash-preview-05-20": {"input": 0.000075, "output": 0.0003},
+    GEMINI_MODEL: {"input": 0.000075, "output": 0.0003},
     # A couple of likely alternates so a model swap does not silently unprice.
     "gemini-2.5-flash": {"input": 0.000075, "output": 0.0003},
     "gemini-2.5-pro": {"input": 0.00125, "output": 0.01},
@@ -327,8 +332,20 @@ class MetricsRegistry:
             }
 
     def reset(self) -> None:
+        # Reset fields in place under the existing lock. Re-running __init__
+        # here would replace self._lock with a new object while a thread may
+        # still be blocked on the old one, letting two critical sections run at
+        # once against the same instance.
         with self._lock:
-            self.__init__(max_samples=self._max_samples)  # type: ignore[misc]
+            self.request_count = 0
+            self.error_count = 0
+            self.input_tokens = 0
+            self.output_tokens = 0
+            self.total_tokens = 0
+            self.cost_usd = 0.0
+            self._handler_latencies.clear()
+            self._model_latencies.clear()
+            self._by_model.clear()
 
 
 # Process-wide registry the app records into and /metrics reads from.

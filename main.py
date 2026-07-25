@@ -159,7 +159,7 @@ def classify_for_safety(prompt: str, candidate_ids: List[str]):
         f"{candidate_ids}"
     )
     model = genai.GenerativeModel(
-        "gemini-2.5-flash-preview-05-20",
+        telemetry.GEMINI_MODEL,
         system_instruction=classifier_instruction,
     )
     _t0 = time.perf_counter()
@@ -173,7 +173,7 @@ def classify_for_safety(prompt: str, candidate_ids: List[str]):
     )
     telemetry.record_model_call(
         response,
-        "gemini-2.5-flash-preview-05-20",
+        telemetry.GEMINI_MODEL,
         (time.perf_counter() - _t0) * 1000.0,
         stage="classification",
     )
@@ -312,7 +312,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             if cached is not None:
                 fastapi_response.headers["X-Semantic-Cache"] = "hit"
                 model = genai.GenerativeModel(
-                    'gemini-2.5-flash-preview-05-20',
+                    telemetry.GEMINI_MODEL,
                     safety_settings=get_safety_settings(),
                 )
                 chat_session = model.start_chat(history=[
@@ -337,7 +337,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
                 model = genai.GenerativeModel(
-                    'gemini-2.5-flash-preview-05-20',
+                    telemetry.GEMINI_MODEL,
                     safety_settings=get_safety_settings()
                 )
                 active_chats[chat_id] = model.start_chat(history=[])
@@ -366,7 +366,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             )
             telemetry.record_model_call(
                 response,
-                'gemini-2.5-flash-preview-05-20',
+                telemetry.GEMINI_MODEL,
                 (time.perf_counter() - _t0) * 1000.0,
                 stage="generation",
                 trace=trace,
@@ -485,8 +485,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
         logger.info("Chat response generated successfully")
-        _finalize()
-        return ChatResponse(
+        # Build the response before finalizing, so a construction/validation
+        # failure is handled only by the error path and the request is not
+        # counted as both a success (here) and an error (except block).
+        response_obj = ChatResponse(
             response=response_text,
             chat_id=chat_id,
             history=history,
@@ -500,6 +502,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             confidence=assessment,
             zakat=zakat_info,
         )
+        _finalize()
+        return response_obj
 
     except Exception as e:
         telemetry.registry.record_request(
@@ -513,7 +517,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             status_code=500,
             detail=error_msg,
             headers={"X-Trace-Id": trace.trace_id},
-        )
+        ) from e
     finally:
         telemetry.current_trace.reset(_ctx_token)
 

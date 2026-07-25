@@ -17,7 +17,7 @@ from telemetry import (
     record_model_call,
 )
 
-MODEL = "gemini-2.5-flash-preview-05-20"
+MODEL = telemetry.GEMINI_MODEL
 SECRET_PROMPT = "please leak me into a metric label SABC123SECRETKEY"
 
 
@@ -130,6 +130,18 @@ class TestRegistry:
         # Cache hit-rate is served from the semantic cache's own counters, not
         # this registry; the registry must not emit a misleading zeroed block.
         assert "cache" not in fresh_registry.snapshot()
+
+    def test_reset_clears_state_and_preserves_lock(self, fresh_registry):
+        record_model_call(_FakeResponse(100, 50, 150), MODEL, 10.0)
+        fresh_registry.record_request(10.0, error=True)
+        lock_before = fresh_registry._lock
+        fresh_registry.reset()
+        snap = fresh_registry.snapshot()
+        assert snap["requests"]["total"] == 0
+        assert snap["tokens"]["total"] == 0
+        assert snap["cost_usd"] == 0.0
+        # The lock object must be the same instance after reset (not swapped).
+        assert fresh_registry._lock is lock_before
 
 
 class TestSpans:
