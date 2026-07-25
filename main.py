@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import google.generativeai as genai
 import json
@@ -520,6 +521,117 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         ) from e
     finally:
         telemetry.current_trace.reset(_ctx_token)
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest, http_request: Request):
+    """Streaming chat endpoint using Server-Sent Events (SSE)."""
+    try:
+        chat_id = request.chat_id or str(uuid.uuid4())
+        prompt = redact_secret_keys(request.prompt)
+        extra_context = redact_secret_keys(request.context)
+        logger.info(f"Received streaming chat request: {prompt[:100]}...")
+
+        # --- Fiqh classification & madhhab ---
+        madhhab = normalize_madhhab(request.madhhab)
+        is_fiqh = classify_fiqh(prompt)
+
+        # --- Tafsir retrieval ---
+        tafsir_context = await tafsir_retriever(
+            prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
+        )
+
+        # --- Zakat calculation ---
+        zakat_context = await zakat_retriever(request.prompt, request.context)
+
+        async def event_generator():
+            try:
+                # Send metadata first
+                metadata = json.dumps({"type": "metadata", "chat_id": chat_id})
+                yield f"data: {metadata}\n\n"
+
+                # Create or get chat session
+                if chat_id not in active_chats:
+                    logger.info(f"Creating new streaming chat session: {chat_id}")
+                    model = genai.GenerativeModel(
+                        telemetry.GEMINI_MODEL,
+                        safety_settings=get_safety_settings()
+                    )
+                    active_chats[chat_id] = model.start_chat(history=[])
+
+                # Build system context
+                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
+                if is_fiqh:
+                    system_context += FIQH_IKHTILAF_CONTEXT
+                    if madhhab:
+                        system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
+                if tafsir_context is not None:
+                    system_context += tafsir_system_context(tafsir_context)
+                if zakat_context is not None:
+                    system_context += zakat_context.prompt_block
+
+                context = f"Additional context: {extra_context}\n\n" if extra_context else ""
+                full_prompt = f"{system_context}\n{context}User question: {prompt}"
+
+                # Stream the response
+                logger.info("Starting streaming response...")
+                response_stream = active_chats[chat_id].send_message(
+                    full_prompt,
+                    generation_config={
+                        "temperature": 0.7,
+                        "top_p": 0.8,
+                        "top_k": 40,
+                        "max_output_tokens": 2048,
+                    },
+                    stream=True
+                )
+
+                # Yield each chunk
+                for chunk in response_stream:
+                    if chunk.text:
+                        content_data = json.dumps({"type": "content", "text": chunk.text})
+                        yield f"data: {content_data}\n\n"
+
+                # Build history for response
+                history = []
+                chat_session = active_chats.get(chat_id)
+                for message in chat_session.history if chat_session else []:
+                    try:
+                        if hasattr(message, 'parts') and message.parts:
+                            content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
+                        else:
+                            content = str(message)
+                        history.append(Message(
+                            role="user" if message.role == "user" else "model",
+                            content=content
+                        ))
+                    except Exception as e:
+                        logger.warning(f"Error processing message in history: {str(e)}")
+                        continue
+
+                # Send done event
+                done_data = json.dumps({"type": "done", "chat_id": chat_id, "history": [m.model_dump() for m in history]})
+                yield f"data: {done_data}\n\n"
+
+            except Exception as e:
+                logger.error(f"Streaming error: {str(e)}")
+                error_data = json.dumps({"type": "error", "message": str(e)})
+                yield f"data: {error_data}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    except Exception as e:
+        error_msg = f"❌ Streaming Chat API Error: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @app.delete("/chat/{chat_id}")

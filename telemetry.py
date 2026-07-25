@@ -41,18 +41,20 @@ logger = logging.getLogger(__name__)
 # estimates and are meant to be overridden per deployment: set the
 # LLM_PRICE_TABLE env var to a JSON object of the same shape to replace or
 # extend the defaults, e.g.
-#   LLM_PRICE_TABLE='{"gemini-2.5-flash-preview-05-20": {"input": 0.000075,
-#                                                        "output": 0.0003}}'
+#   LLM_PRICE_TABLE='{"gemini-2.5-flash": {"input": 0.000075,
+#                                          "output": 0.0003}}'
 # The model this service currently calls. Shared so main.py and the price
 # table cannot drift apart: a rename in only one place would silently unprice
 # the model (priced=False / $0) instead of erroring.
-GEMINI_MODEL = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 _DEFAULT_PRICE_TABLE: Dict[str, Dict[str, float]] = {
-    # Gemini 2.5 Flash (preview): the model this service currently calls.
+    # Gemini 2.5 Flash: the model this service currently calls.
     GEMINI_MODEL: {"input": 0.000075, "output": 0.0003},
-    # A couple of likely alternates so a model swap does not silently unprice.
-    "gemini-2.5-flash": {"input": 0.000075, "output": 0.0003},
+    # The superseded preview alias, kept priced so telemetry replayed from
+    # before the rename does not report priced=False / $0.
+    "gemini-2.5-flash-preview-05-20": {"input": 0.000075, "output": 0.0003},
+    # A likely alternate so a model swap does not silently unprice.
     "gemini-2.5-pro": {"input": 0.00125, "output": 0.01},
 }
 
