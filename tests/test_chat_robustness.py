@@ -18,7 +18,14 @@ from main import app
 @pytest.fixture(autouse=True)
 def setup_env(monkeypatch):
     monkeypatch.setattr(main, "GEMINI_API_KEY", "test-key")
+    main.genai.configure(api_key="test-key")
     monkeypatch.setattr(main, "sessions", {})
+    monkeypatch.setattr(main, "active_chats", {})
+    monkeypatch.setenv("SAFETY_PIPELINE_ENABLED", "false")
+    monkeypatch.setattr(main, "SEMANTIC_CACHE_ENABLED", False)
+    monkeypatch.setattr(main, "zakat_retriever", AsyncMock(return_value=None))
+    monkeypatch.setattr(main, "tafsir_retriever", AsyncMock(return_value=None))
+    monkeypatch.setattr(main, "enqueue_for_review", AsyncMock())
 
 
 @pytest.mark.asyncio
@@ -43,8 +50,8 @@ async def test_concurrent_chat_requests_do_not_block_event_loop(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         start_time = time.monotonic()
-        req1 = client.post("/chat", json={"message": "Hello 1", "chat_id": "c1"})
-        req2 = client.post("/chat", json={"message": "Hello 2", "chat_id": "c2"})
+        req1 = client.post("/chat", json={"prompt": "Hello 1", "chat_id": "c1"})
+        req2 = client.post("/chat", json={"prompt": "Hello 2", "chat_id": "c2"})
 
         res1, res2 = await asyncio.gather(req1, req2)
         elapsed = time.monotonic() - start_time
@@ -70,7 +77,7 @@ async def test_quota_exceeded_returns_429(monkeypatch):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/chat", json={"message": "Hi"})
+        res = await client.post("/chat", json={"prompt": "Hi"})
 
     assert res.status_code == 429
     data = res.json()
@@ -93,7 +100,7 @@ async def test_timeout_returns_504(monkeypatch):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/chat", json={"message": "Hi"})
+        res = await client.post("/chat", json={"prompt": "Hi"})
 
     assert res.status_code == 504
     data = res.json()
@@ -116,7 +123,7 @@ async def test_invalid_argument_returns_400(monkeypatch):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/chat", json={"message": "Hi"})
+        res = await client.post("/chat", json={"prompt": "Hi"})
 
     assert res.status_code == 400
     data = res.json()
@@ -139,7 +146,7 @@ async def test_generic_exception_returns_500_without_leaking_details(monkeypatch
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/chat", json={"message": "Hi"})
+        res = await client.post("/chat", json={"prompt": "Hi"})
 
     assert res.status_code == 500
     data = res.json()
@@ -150,7 +157,7 @@ async def test_generic_exception_returns_500_without_leaking_details(monkeypatch
 
 @pytest.mark.asyncio
 async def test_safety_blocked_response_returns_graceful_200(monkeypatch):
-    """Safety-blocked response raising ValueError on response.text returns 200 with respectful message."""
+    """Safety-blocked response raising ValueError on response.text returns 200 with respectful prompt."""
     mock_session = MagicMock()
     fake_response = MagicMock()
     # Accessing .text on safety block raises ValueError in google-generativeai
@@ -168,7 +175,7 @@ async def test_safety_blocked_response_returns_graceful_200(monkeypatch):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/chat", json={"message": "Harmful prompt"})
+        res = await client.post("/chat", json={"prompt": "Harmful prompt"})
 
     assert res.status_code == 200
     data = res.json()
@@ -203,12 +210,9 @@ async def test_retry_on_transient_failure_and_history_integrity(monkeypatch):
     mock_model.start_chat.return_value = mock_session
     monkeypatch.setattr(main, "get_model", lambda: mock_model)
 
-    # Patch asyncio.sleep to speed up tests
-    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
-
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/chat", json={"message": "Hi"})
+        res = await client.post("/chat", json={"prompt": "Hi"})
 
     assert res.status_code == 200
     assert call_count == 2

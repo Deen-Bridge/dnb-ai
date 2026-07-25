@@ -1,14 +1,21 @@
+import asyncio
+import json
+import logging
+import os
+from typing import Any, Dict, List, Optional
+import uuid
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import google.generativeai as genai
-import json
-import os
-from dotenv import load_dotenv
-import logging
-from typing import Any, List, Optional
-import uuid
+from google.api_core.exceptions import (
+    ResourceExhausted,
+    InvalidArgument,
+    DeadlineExceeded,
+    ServiceUnavailable,
+)
 
 from stellar import (
     ZakatInfo,
@@ -56,6 +63,10 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
 app = FastAPI(title="DeenBridge AI API")
 
 # Stellar integration: read-only zakat/balance features on the network
@@ -102,15 +113,21 @@ class ChatRequest(BaseModel):
     language: Optional[str] = None  # Preferred language for retrieved tafsir
 
 
+class Message(BaseModel):
+    role: str
+    content: str
+
+
 class Moderation(BaseModel):
     category_id: Optional[str] = None
     action: str
 
 
 class ChatResponse(BaseModel):
-    text: str
+    response: Optional[str] = None
+    text: Optional[str] = None
     chat_id: str
-    history: List[Message]
+    history: List[Message] = []
     moderation: Optional[Moderation] = None
     fiqh: Optional[FiqhInfo] = None
     hadith_references: Optional[List[HadithReference]] = None
@@ -200,6 +217,17 @@ def get_safety_settings():
 
 # In-memory session store for demo purposes
 sessions: Dict[str, Any] = {}
+active_chats: Dict[str, Any] = {}
+
+ISLAMIC_CONTEXT = (
+    "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
+    "Provide respectful, accurate, and context-aware responses grounded in authentic Islamic knowledge.\n\n"
+    "POLICY ON CITATIONS:\n"
+    "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
+    "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
+    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
+    "general knowledge—do NOT fabricate references.\n"
+)
 
 
 def get_model():
@@ -207,6 +235,9 @@ def get_model():
         model_name="gemini-1.5-flash",
         system_instruction=ISLAMIC_CONTEXT,
     )
+
+
+GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "30"))
 
 
 def extract_text_safely(response: Any) -> Optional[str]:
@@ -242,6 +273,7 @@ def extract_text_safely(response: Any) -> Optional[str]:
 async def send_message_with_retry(
     chat_session: Any,
     message: str,
+    generation_config: Optional[Dict[str, Any]] = None,
     timeout: int = GEMINI_TIMEOUT,
     max_retries: int = 2,
 ) -> Any:
@@ -258,9 +290,12 @@ async def send_message_with_retry(
             else 0
         )
         try:
+            kwargs: Dict[str, Any] = {"request_options": {"timeout": timeout}}
+            if generation_config:
+                kwargs["generation_config"] = generation_config
             response = await chat_session.send_message_async(
                 message,
-                request_options={"timeout": timeout},
+                **kwargs,
             )
             return response
         except (ServiceUnavailable, DeadlineExceeded, asyncio.TimeoutError) as exc:
@@ -397,13 +432,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             semantic_cache.bypasses += 1
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
-        def generate(safety_prompt: str) -> str:
+        async def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
-                model = genai.GenerativeModel(
-                    'gemini-2.5-flash',
-                    safety_settings=get_safety_settings()
-                )
+                model = get_model()
                 active_chats[chat_id] = model.start_chat(history=[])
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
@@ -418,25 +450,27 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
-            response = active_chats[chat_id].send_message(
+            response = await send_message_with_retry(
+                active_chats[chat_id],
                 full_prompt,
                 generation_config={
                     "temperature": 0.7,
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_output_tokens": 2048,
-                }
+                },
             )
-            if not response.text:
+            text = extract_text_safely(response)
+            if not text:
                 raise HTTPException(status_code=500, detail="Empty response from AI model")
-            return response.text
+            return text
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
         if enabled:
             safety_result = await safety_pipeline.run_async(prompt, generate)
         else:
             safety_result = None
-            generated_text = generate(prompt)
+            generated_text = await generate(prompt)
 
         logger.info(
             "safety=%s",
@@ -549,51 +583,38 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             zakat=zakat_info,
         )
 
-    # Verification Step
-    verification_results = extract_and_verify_all(response_text)
-    mismatches = [
-        res for res in verification_results if res.get("status") == VerificationStatus.MISMATCH
-    ]
-
-    # Strict Mode: Run single corrective loop if mismatches are found
-    if CITATION_VERIFY_MODE == "strict" and mismatches:
-        try:
-            response_text = await run_strict_corrective_loop(
-                chat_session, request.message, response_text, mismatches
-            )
-        except Exception as exc:
-            logger.warning(
-                "Strict corrective loop failed: %s; falling back to original response",
-                exc,
-            )
-
-        # Re-verify updated text
-        verification_results = extract_and_verify_all(response_text)
-        mismatches = [
-            res for res in verification_results if res.get("status") == VerificationStatus.MISMATCH
-        ]
-
-    citations_verified = len(mismatches) == 0
-
-    formatted_results = [
-        CitationVerificationResult(
-            source=res["source"],
-            surah=res.get("surah"),
-            ayah=res.get("ayah"),
-            collection=res.get("collection"),
-            number=res.get("number"),
-            status=res["status"],
-            reason=res.get("reason"),
+    except ResourceExhausted as exc:
+        logger.warning("Gemini rate limit exceeded for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Please try again later.",
         )
-        for res in verification_results
-    ]
-
-    return ChatResponse(
-        text=response_text,
-        chat_id=chat_id,
-        citations_verified=citations_verified,
-        verification_results=formatted_results,
-    )
+    except InvalidArgument as exc:
+        logger.warning("Invalid argument for Gemini call in chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid request parameters.",
+        )
+    except (DeadlineExceeded, asyncio.TimeoutError) as exc:
+        logger.warning("Gemini API call timed out for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=504,
+            detail="AI service timed out.",
+        )
+    except ServiceUnavailable as exc:
+        logger.warning("Gemini service unavailable for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="AI service temporarily unavailable.",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error in /chat handler for session %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail="AI service error",
+        )
 
 
 @app.post("/chat/stream")
