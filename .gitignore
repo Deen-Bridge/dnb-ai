@@ -38,3 +38,5 @@ ENV/
 *.log 
 # Scholar-review export (contains user questions)
 data/review/
+venv/
+.DS_Store
