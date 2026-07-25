@@ -1,19 +1,30 @@
+import asyncio
+import logging
 import os
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import google.generativeai as genai
+from google.api_core.exceptions import (
+    ResourceExhausted,
+    InvalidArgument,
+    DeadlineExceeded,
+    ServiceUnavailable,
+)
 
 from verifier import (
     extract_and_verify_all,
     VerificationStatus,
 )
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Deen Bridge AI Assistant", version="1.0.0")
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CITATION_VERIFY_MODE = os.getenv("CITATION_VERIFY", "annotate").lower()
+GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "30"))
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -63,6 +74,90 @@ def get_model():
     )
 
 
+def extract_text_safely(response: Any) -> Optional[str]:
+    """Safely extract text from Gemini response, handling safety blocks gracefully."""
+    if not response:
+        return None
+
+    # Check candidates for finish reason / safety blocks
+    if hasattr(response, "candidates") and response.candidates:
+        candidate = response.candidates[0]
+        finish_reason = getattr(candidate, "finish_reason", None)
+        if finish_reason is not None:
+            reason_name = getattr(finish_reason, "name", str(finish_reason)).upper()
+            if reason_name in ("SAFETY", "BLOCKED", "PROMPT_FEEDBACK", "RECITATION", "SPII"):
+                return None
+
+    # Check prompt feedback
+    if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+        block_reason = getattr(response.prompt_feedback, "block_reason", None)
+        if block_reason:
+            return None
+
+    # Access text property safely (raises ValueError if response has no text/candidate)
+    try:
+        text = response.text
+        if not text:
+            return None
+        return text
+    except (ValueError, AttributeError):
+        return None
+
+
+async def send_message_with_retry(
+    chat_session: Any,
+    message: str,
+    timeout: int = GEMINI_TIMEOUT,
+    max_retries: int = 2,
+) -> Any:
+    """Send message asynchronously with retries for transient upstream errors.
+
+    Preserves chat history integrity by cleaning up un-responded user messages
+    if an upstream call fails.
+    """
+    attempt = 0
+    while True:
+        history_len_before = (
+            len(chat_session.history)
+            if hasattr(chat_session, "history") and chat_session.history is not None
+            else 0
+        )
+        try:
+            response = await chat_session.send_message_async(
+                message,
+                request_options={"timeout": timeout},
+            )
+            return response
+        except (ServiceUnavailable, DeadlineExceeded, asyncio.TimeoutError) as exc:
+            if hasattr(chat_session, "history") and chat_session.history is not None:
+                if len(chat_session.history) > history_len_before:
+                    chat_session.history = chat_session.history[:history_len_before]
+
+            attempt += 1
+            if attempt > max_retries:
+                logger.warning(
+                    "Gemini send_message_async failed after %d retries: %s",
+                    max_retries,
+                    exc,
+                )
+                raise exc
+
+            backoff = 0.5 * (2 ** (attempt - 1))
+            logger.info(
+                "Transient Gemini error (%s). Retrying in %.1fs (attempt %d/%d)...",
+                exc,
+                backoff,
+                attempt,
+                max_retries,
+            )
+            await asyncio.sleep(backoff)
+        except Exception as exc:
+            if hasattr(chat_session, "history") and chat_session.history is not None:
+                if len(chat_session.history) > history_len_before:
+                    chat_session.history = chat_session.history[:history_len_before]
+            raise exc
+
+
 async def run_strict_corrective_loop(
     chat_session,
     user_message: str,
@@ -86,8 +181,9 @@ async def run_strict_corrective_loop(
         + "\n\nPlease regenerate your response correcting the quotes/references, or remove any unverified references entirely."
     )
 
-    corrective_response = chat_session.send_message(correction_prompt)
-    return corrective_response.text
+    corrective_response = await send_message_with_retry(chat_session, correction_prompt)
+    safe_text = extract_text_safely(corrective_response)
+    return safe_text or original_text
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -101,8 +197,50 @@ async def chat(request: ChatRequest):
         sessions[chat_id] = model.start_chat(history=[])
 
     chat_session = sessions[chat_id]
-    response = chat_session.send_message(request.message)
-    response_text = response.text
+
+    try:
+        response = await send_message_with_retry(chat_session, request.message)
+    except ResourceExhausted as exc:
+        logger.warning("Gemini rate limit exceeded for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Please try again later.",
+        )
+    except InvalidArgument as exc:
+        logger.warning("Invalid argument for Gemini call in chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid request parameters.",
+        )
+    except (DeadlineExceeded, asyncio.TimeoutError) as exc:
+        logger.warning("Gemini API call timed out for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=504,
+            detail="AI service timed out.",
+        )
+    except ServiceUnavailable as exc:
+        logger.warning("Gemini service unavailable for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="AI service temporarily unavailable.",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error in /chat handler for session %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail="AI service error",
+        )
+
+    response_text = extract_text_safely(response)
+    if response_text is None:
+        return ChatResponse(
+            text="I cannot fulfill this request due to safety guidelines.",
+            chat_id=chat_id,
+            citations_verified=True,
+            verification_results=[],
+        )
 
     # Mode: off -> return verbatim without verification
     if CITATION_VERIFY_MODE == "off":
@@ -121,9 +259,16 @@ async def chat(request: ChatRequest):
 
     # Strict Mode: Run single corrective loop if mismatches are found
     if CITATION_VERIFY_MODE == "strict" and mismatches:
-        response_text = await run_strict_corrective_loop(
-            chat_session, request.message, response_text, mismatches
-        )
+        try:
+            response_text = await run_strict_corrective_loop(
+                chat_session, request.message, response_text, mismatches
+            )
+        except Exception as exc:
+            logger.warning(
+                "Strict corrective loop failed: %s; falling back to original response",
+                exc,
+            )
+
         # Re-verify updated text
         verification_results = extract_and_verify_all(response_text)
         mismatches = [
