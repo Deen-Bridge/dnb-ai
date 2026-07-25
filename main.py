@@ -1,6 +1,8 @@
+import json
 import os
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import google.generativeai as genai
 
@@ -150,6 +152,55 @@ async def chat(request: ChatRequest):
         chat_id=chat_id,
         citations_verified=citations_verified,
         verification_results=formatted_results,
+    )
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured.")
+
+    chat_id = request.chat_id or "default"
+    if chat_id not in sessions:
+        model = get_model()
+        sessions[chat_id] = model.start_chat(history=[])
+
+    chat_session = sessions[chat_id]
+
+    async def event_stream():
+        full_text_parts: List[str] = []
+        try:
+            response_stream = None
+            if hasattr(chat_session, "send_message_async"):
+                response_stream = await chat_session.send_message_async(request.message, stream=True)
+            else:
+                response_stream = chat_session.send_message(request.message, stream=True)
+
+            async for chunk in response_stream:
+                text = getattr(chunk, "text", None)
+                if text is None and isinstance(chunk, dict):
+                    text = chunk.get("text")
+                if text is None:
+                    continue
+
+                full_text_parts.append(text)
+                payload = json.dumps({"delta": text})
+                yield f"event: delta\ndata: {payload}\n\n"
+        except Exception as exc:  # pragma: no cover - defensive path
+            error_payload = json.dumps({"error": str(exc)})
+            yield f"event: error\ndata: {error_payload}\n\n"
+            return
+
+        final_payload = json.dumps({"chat_id": chat_id, "text": "".join(full_text_parts)})
+        yield f"event: done\ndata: {final_payload}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
