@@ -32,6 +32,7 @@ The platform is composed of three services:
 ## ✨ Features
 
 - 🤖 **Islamic context-aware responses** grounded in a curated system prompt
+- 🌍 **Multilingual support** — Arabic, English, Urdu, Malay, French, and more; always quotes Quran in Arabic script with translation
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
 - 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
@@ -110,6 +111,42 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+
+### Multilingual support (language field)
+
+Pass a `language` field (BCP-47 code) in `ChatRequest` to get a response in that
+language. When omitted, the model auto-detects and responds in the user's
+language.
+
+```jsonc
+{
+  "prompt": "ما هي أركان الإسلام؟",
+  "language": "ar"
+}
+```
+
+Quran quotations are always rendered in **Arabic script** with a translation in
+the response language and a `surah:ayah` reference, regardless of which language
+the response is in.
+
+| Code | Language |
+|------|----------|
+| `ar` | Arabic |
+| `en` | English |
+| `ur` | Urdu |
+| `ms` | Malay |
+| `fr` | French |
+| `tr` | Turkish |
+| `id` | Indonesian |
+| `bn` | Bengali |
+| `fa` | Persian |
+| `ha` | Hausa |
+| `sw` | Swahili |
+| `tl` | Tagalog |
+
+An unrecognized code falls back to auto-detection (warns in logs, never 422).
+The effective language is echoed in `ChatResponse.language` so the frontend can
+set `dir="rtl"` correctly.
 
 ### Confidence, abstention, and scholar review
 

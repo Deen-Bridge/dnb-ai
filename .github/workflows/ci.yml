@@ -28,7 +28,7 @@ jobs:
           pip install pytest flake8
 
       - name: Run linting
-        run: flake8 main.py stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py tests/test_zakat.py tests/test_telemetry.py scripts/build_hadith_data.py scripts/build_surah_index.py --max-line-length=120 --ignore=E501,W503
+        run: flake8 main.py stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py tests/test_zakat.py tests/test_telemetry.py tests/test_multilingual.py scripts/build_hadith_data.py scripts/build_surah_index.py --max-line-length=120 --ignore=E501,W503
 
       - name: Check syntax
         run: python -m compileall -q main.py stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py scripts/build_hadith_data.py scripts/build_surah_index.py
@@ -62,3 +62,6 @@ jobs:
 
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
+
+      - name: Run multilingual support tests
+        run: pytest -q tests/test_multilingual.py
