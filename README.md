@@ -40,6 +40,8 @@ The platform is composed of three services:
 
 ## 🔗 API
 
+All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Limiting](#authentication--rate-limiting)).
+
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
@@ -82,11 +84,23 @@ uvicorn main:app --reload
 
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
+#### Authentication & Rate Limiting
+
+Protected endpoints (`POST /chat`, `POST /chat/stream`, `DELETE /chat/{chat_id}`) require a valid `X-API-Key` header. The key is validated against the `SERVICE_API_KEY` environment variable. Requests without a valid key receive a `401` response.
+
+Per-client rate limiting is enforced at **20 requests/minute** on `/chat` and `/chat/stream`. The rate limit key is derived from the `X-API-Key` header, falling back to the client IP (via `X-Forwarded-For`). Exceeding the limit returns `429` with a `Retry-After` header.
+
+Health endpoints (`GET /ping`, `GET /cache/stats`, `GET /confidence/policy`) remain unauthenticated so Render health checks and the keep-awake workflow continue to work.
+
+For local development without a key, set `AUTH_DISABLED=true` in your `.env` file.
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | Google Gemini API key | — |
+| `SERVICE_API_KEY` | Shared secret for API-key auth; required in production. Clients must send `X-API-Key` header. | — |
+| `AUTH_DISABLED` | Set to `true` to skip API-key auth (local development only) | `false` |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |

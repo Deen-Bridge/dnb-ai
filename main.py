@@ -1,14 +1,19 @@
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 import google.generativeai as genai
 import json
 import os
+import secrets
 from dotenv import load_dotenv
 import logging
 from typing import Any, List, Optional
 import uuid
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from stellar import (
     ZakatInfo,
@@ -59,6 +64,73 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 app = FastAPI(title="DeenBridge AI API")
+
+# --- Service API-key authentication ---
+# A shared secret between the DeenBridge backend/frontend and this service.
+# In production the key MUST be set; set AUTH_DISABLED=true to opt out locally.
+SERVICE_API_KEY = os.getenv("SERVICE_API_KEY", "")
+AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "yes"}
+
+if not AUTH_DISABLED and not SERVICE_API_KEY:
+    if os.getenv("ENVIRONMENT", "production").lower() not in {"development", "local", "test"}:
+        raise RuntimeError(
+            "SERVICE_API_KEY must be set in production. "
+            "Set AUTH_DISABLED=true to run without authentication locally."
+        )
+    else:
+        logger.warning(
+            "SERVICE_API_KEY is not set and AUTH_DISABLED is not enabled; "
+            "authenticated endpoints will reject all requests."
+        )
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(
+    request: Request,
+    api_key: Optional[str] = Security(api_key_header),
+) -> str:
+    """Dependency that enforces X-API-Key on protected routes.
+
+    Returns the validated key on success, or raises 401.
+    """
+    if AUTH_DISABLED:
+        return ""
+    if not api_key or not secrets.compare_digest(api_key, SERVICE_API_KEY):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+    return api_key
+
+
+# --- Per-client rate limiting ---
+# Default: 20 requests/minute per API key (falls back to client IP).
+# Render sits behind a proxy; use X-Forwarded-For for IP-based limiting.
+# NOTE: in-memory storage is fine for single-instance Render.  A shared Redis
+# backend is needed if multi-instance support is added (see session-persistence
+# issue).
+
+
+def _rate_limit_key(request: Request) -> str:
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        return f"key:{api_key}"
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    retry_after = getattr(exc, "retry_after", 60)
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
@@ -233,7 +305,8 @@ async def ping():
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
+@limiter.limit("20/minute")
+async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response, _key: str = Security(verify_api_key)):
     try:
         chat_id = request.chat_id or str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
@@ -467,7 +540,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest, http_request: Request):
+@limiter.limit("20/minute")
+async def chat_stream(request: ChatRequest, http_request: Request, _key: str = Security(verify_api_key)):
     """Streaming chat endpoint using Server-Sent Events (SSE)."""
     try:
         chat_id = request.chat_id or str(uuid.uuid4())
@@ -578,7 +652,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str):
+async def delete_chat(chat_id: str, _key: str = Security(verify_api_key)):
     try:
         if chat_id in active_chats:
             del active_chats[chat_id]
