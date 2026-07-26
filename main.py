@@ -999,7 +999,7 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
     if key_configured:
         return {"status": "ok", "version": app.version, "checks": checks}, 200
     return {
-        "status" : "unhealthy",
+        "status": "unhealthy",
         "version": app.version,
         "checks": checks,
         "failing_check": "gemini_api_key_configured",
