@@ -83,6 +83,40 @@ uvicorn main:app --reload
 
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
+### Docker
+
+The included `Dockerfile` produces a production-ready image with Python 3.12,
+non-root user, cached dependency layer, and a health-check on `/ping`.
+
+```bash
+# Build
+docker build -t deenbridge-ai .
+
+# Run — pass your Gemini API key via .env file
+docker run --env-file .env -p 8000:8000 deenbridge-ai
+
+# …or inline
+docker run -e GEMINI_API_KEY=your_key_here -p 8000:8000 deenbridge-ai
+```
+
+The container listens on `PORT` (default `8000`), matching Render's runtime
+behaviour.  A `HEALTHCHECK` hits `GET /ping` every 30 seconds.
+
+To switch Render from the Python buildpack to Docker, change `render.yaml`:
+
+```yaml
+services:
+  - type: web
+    name: deenbridge-ai
+    runtime: docker          # was: env: python
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+```
+
+> **Note:** this PR does **not** flip production to Docker — that is a
+> deliberate post-merge step for the team.
+
 ### Environment Variables
 
 | Variable | Description | Default |

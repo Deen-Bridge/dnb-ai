@@ -65,3 +65,20 @@ jobs:
 
       - name: Run multilingual support tests
         run: pytest -q tests/test_multilingual.py
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t deenbridge-ai:ci .
+
+      - name: Verify container starts and /ping returns 200
+        run: |
+          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
+          sleep 5
+          curl -sf http://localhost:8000/ping
+          docker stop test-ai
