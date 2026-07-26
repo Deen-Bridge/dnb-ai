@@ -32,11 +32,13 @@ The platform is composed of three services:
 ## ✨ Features
 
 - 🤖 **Islamic context-aware responses** grounded in a curated system prompt
+- 🌍 **Multilingual support** — Arabic, English, Urdu, Malay, French, and more; always quotes Quran in Arabic script with translation
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
 - 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
 - 🧠 **Per-user long-term memory** — user profiles (knowledge level, madhhab, topics studied, remembered facts) extracted from conversations and injected across sessions; privacy controls with GET/DELETE endpoints and `remember` opt-out per request
 - 📋 **Conversation summarization** — compaction API ready for token-budget-triggered eviction; merges and recompresses summaries when history exceeds budget
+- 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
@@ -49,6 +51,8 @@ The platform is composed of three services:
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Health check |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
+| `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
+| `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
@@ -83,6 +87,40 @@ uvicorn main:app --reload
 
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
+### Docker
+
+The included `Dockerfile` produces a production-ready image with Python 3.12,
+non-root user, cached dependency layer, and a health-check on `/ping`.
+
+```bash
+# Build
+docker build -t deenbridge-ai .
+
+# Run — pass your Gemini API key via .env file
+docker run --env-file .env -p 8000:8000 deenbridge-ai
+
+# …or inline
+docker run -e GEMINI_API_KEY=your_key_here -p 8000:8000 deenbridge-ai
+```
+
+The container listens on `PORT` (default `8000`), matching Render's runtime
+behaviour.  A `HEALTHCHECK` hits `GET /ping` every 30 seconds.
+
+To switch Render from the Python buildpack to Docker, change `render.yaml`:
+
+```yaml
+services:
+  - type: web
+    name: deenbridge-ai
+    runtime: docker          # was: env: python
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+```
+
+> **Note:** this PR does **not** flip production to Docker — that is a
+> deliberate post-merge step for the team.
+
 ### Environment Variables
 
 | Variable | Description | Default |
@@ -104,6 +142,51 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | `REDIS_URL` | Makes the scholar-review queue and memory store durable across restarts | — (in-memory) |
 | `MEMORY_TTL_DAYS` | Time-to-live for stored user profiles and chat summaries in days | `90` |
 | `MEMORY_EXTRACTION_ENABLED` | Background memory extraction from conversation turns | `true` |
+| `STELLAR_NETWORK` | Stellar network for zakat lookups (`testnet` or `public`) | `testnet` |
+| `ZAKAT_NISAB_USD` | Fallback nisab when no gold price can be fetched | `6000` |
+| `NISAB_CACHE_TTL_SECONDS` | How long a fetched gold price is reused | `21600` (6h) |
+| `GOLD_PRICE_TIMEOUT` | Gold price request timeout in seconds | `8` |
+| `QURAN_API_BASE` | Base URL for tafsir/ayah retrieval | `https://api.quran.com/api/v4` |
+| `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
+| `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
+| `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
+| `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+
+### Multilingual support (language field)
+
+Pass a `language` field (BCP-47 code) in `ChatRequest` to get a response in that
+language. When omitted, the model auto-detects and responds in the user's
+language.
+
+```jsonc
+{
+  "prompt": "ما هي أركان الإسلام؟",
+  "language": "ar"
+}
+```
+
+Quran quotations are always rendered in **Arabic script** with a translation in
+the response language and a `surah:ayah` reference, regardless of which language
+the response is in.
+
+| Code | Language |
+|------|----------|
+| `ar` | Arabic |
+| `en` | English |
+| `ur` | Urdu |
+| `ms` | Malay |
+| `fr` | French |
+| `tr` | Turkish |
+| `id` | Indonesian |
+| `bn` | Bengali |
+| `fa` | Persian |
+| `ha` | Hausa |
+| `sw` | Swahili |
+| `tl` | Tagalog |
+
+An unrecognized code falls back to auto-detection (warns in logs, never 422).
+The effective language is echoed in `ChatResponse.language` so the frontend can
+set `dir="rtl"` correctly.
 
 ### Confidence, abstention, and scholar review
 
@@ -178,6 +261,123 @@ valuable eval case.
 
 `ChatResponse` gains an optional `confidence: {score, band, abstained, queued,
 signals, review_id}` block. It is additive; existing clients are unaffected.
+### Tafsir (ayah explanation)
+
+`POST /tafsir` explains an ayah from **named** tafsir works instead of from the
+model's memory. Every passage is returned with the work, its author, and the
+language the text is actually in — attribution comes from the source's own
+response, never from the service's recollection of who wrote what.
+
+```bash
+curl -X POST http://localhost:8000/tafsir \
+  -H 'Content-Type: application/json' \
+  -d '{"reference": "103:1-3", "tafsirs": ["ibn-kathir", "tabari", "saadi"], "language": "en"}'
+```
+
+```jsonc
+{
+  "reference": "103:1-3",
+  "language": "en",
+  "ayat": [
+    {
+      "ayah": "103:1",
+      "surah_name": "Al-'Asr",
+      "arabic": "وَٱلْعَصْرِ",
+      "translation": "By time,",
+      "tafsirs": [
+        {"key": "ibn-kathir", "name": "Ibn Kathir (Abridged)", "author": "Ibn Kathir (d. 774 AH)",
+         "language": "english", "text": "…", "verse_range": "103:1-3"}
+      ],
+      "unavailable": [
+        {"key": "qurtubi", "name": "Al-Jami' li-Ahkam al-Qur'an (Tafsir al-Qurtubi)",
+         "author": "Al-Qurtubi (d. 671 AH)", "reason": "No entry for 103:1 in this tafsir."}
+      ]
+    }
+  ],
+  "disclaimer": "Tafsir text is retrieved verbatim from the works named above and is presented for study. …"
+}
+```
+
+- **References** accept `103:1`, a range `103:1-3`, or a surah name (`Al-Asr 1-3`).
+  Bounds are checked offline against [`data/quran/surah_index.json`](data/quran/surah_index.json),
+  so `2:300` is a `400` naming Al-Baqarah's 286 ayat — never an invented verse.
+- **Language**: tafsirs published in the requested language are served in it. A
+  work with no such edition falls back to its original language and is labelled
+  with it (set `allow_language_fallback: false` to omit it instead).
+- **Degradation**: a work with no entry for the ayah appears under `unavailable`
+  with a reason; the rest of the response is unaffected.
+- **Latency**: ayat, and the works within an ayah, are fetched concurrently, and
+  retrieval inside `/chat` is bounded by `TAFSIR_CHAT_TIMEOUT` — a slow upstream
+  costs the turn its grounding, never its response.
+- **Caching**: tafsir text is immutable per ayah, so it is cached by exact ayah
+  key through `semantic_cache.KeyedCache` — the keyed sibling of the semantic
+  response cache, sharing its TTL and eviction settings rather than adding a
+  second cache system.
+
+In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
+"explain 2:255") is detected offline and answered from the same retrieved
+passages, with the model instructed to attribute each claim to a named mufassir
+and to surface — not flatten — points where the mufassirun differ. The response
+carries a `tafsir` block naming the works whose text actually backed the answer.
+
+### Zakat (on-chain, with a live nisab)
+
+`POST /zakat` computes zakat on a wallet's on-chain USDC balance — 2.5% of the
+whole balance once it reaches the nisab, nothing below it.
+
+```bash
+curl -sX POST http://localhost:8000/zakat \
+  -H 'Content-Type: application/json' \
+  -d '{"public_key": "GABC..."}'
+```
+
+**The nisab is live.** It is the value of **85g of gold**, so it moves with the
+gold market and a hardcoded figure quietly goes wrong in both directions. It is
+derived from a spot price fetched from [gold-api.com](https://api.gold-api.com/price/XAU),
+falling back to CoinGecko's [PAX Gold](https://www.coingecko.com/en/coins/pax-gold)
+price (PAXG is redeemable one-for-one for a troy ounce of allocated gold) and
+then to `ZAKAT_NISAB_USD`. Neither source needs an API key. The price is cached
+for `NISAB_CACHE_TTL_SECONDS`, and a price outside a plausible range is refused
+rather than used — a source that changes its units should degrade, not produce a
+nisab off by an order of magnitude.
+
+Every response reports where its threshold came from, so a live figure is never
+mistaken for a stale default:
+
+```jsonc
+{
+  "usdc_balance": "10000.0000000",
+  "nisab_usd": "11112.17",
+  "zakat_due": "0",
+  "message": "Your USDC balance of 10000.0000000 is below the nisab threshold of 11112.17 USD (live gold price via gold-api.com), so no zakat is due on this balance alone.",
+  "nisab": {
+    "live": true,
+    "source": "gold-api.com",
+    "basis": "85g gold",
+    "gold_price_usd_per_ounce": "4066.199951",
+    "as_of": "2026-07-24T15:00:00+00:00"
+  },
+  "disclaimer": "This is an automated estimate based on your on-chain USDC balance only. ..."
+}
+```
+
+Pass `nisab_usd` to override the threshold; the response then reports it as a
+caller override rather than a market figure.
+
+**In chat.** Asking a zakat question with a public key — "how much zakat do I
+owe on my wallet GABC…?" — reads the real balance and answers with the actual
+figures, keeping the scholar disclaimer. The key may also arrive in the request's
+`context` field. Asking without a key gets an explanation of how zakat is
+calculated and an invitation to share a **public** key. Detection is offline
+(keywords plus a key-shaped match), so an ordinary message never touches Horizon
+or the price API, and a zakat answer is never written to the response cache —
+it contains one user's real balance. The answer carries a `zakat` block with the
+figures used.
+
+**Strictly read-only.** Only public keys are ever accepted; secret keys fail
+validation like any other malformed input, so one can never reach Horizon. If a
+message looks like it contains a secret key, the assistant refuses to use it and
+warns the user to treat it as compromised — without repeating it back.
 
 ### Content-safety testing
 
