@@ -866,6 +866,12 @@ async def delete_chat(chat_id: str):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
+@app.get("/ping")
+async def ping():
+    """Lightweight liveness probe for container healthchecks and keep-alive pings."""
+    return {"status": "ok"}
+
+
 @app.get("/cache/stats")
 async def cache_stats():
     return semantic_cache.get_stats()
