@@ -32,6 +32,7 @@ The platform is composed of three services:
 ## ✨ Features
 
 - 🤖 **Islamic context-aware responses** grounded in a curated system prompt
+- 🌍 **Multilingual support** — Arabic, English, Urdu, Malay, French, and more; always quotes Quran in Arabic script with translation
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
 - 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
@@ -84,15 +85,39 @@ uvicorn main:app --reload
 
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
-#### Authentication & Rate Limiting
+### Docker
 
-Protected endpoints (`POST /chat`, `POST /chat/stream`, `DELETE /chat/{chat_id}`) require a valid `X-API-Key` header. The key is validated against the `SERVICE_API_KEY` environment variable. Requests without a valid key receive a `401` response.
+The included `Dockerfile` produces a production-ready image with Python 3.12,
+non-root user, cached dependency layer, and a health-check on `/ping`.
 
-Per-client rate limiting is enforced at **20 requests/minute** on `/chat` and `/chat/stream`. The rate limit key is derived from the `X-API-Key` header, falling back to the client IP (via `X-Forwarded-For`). Exceeding the limit returns `429` with a `Retry-After` header.
+```bash
+# Build
+docker build -t deenbridge-ai .
 
-Health endpoints (`GET /ping`, `GET /cache/stats`, `GET /confidence/policy`) remain unauthenticated so Render health checks and the keep-awake workflow continue to work.
+# Run — pass your Gemini API key via .env file
+docker run --env-file .env -p 8000:8000 deenbridge-ai
 
-For local development without a key, set `AUTH_DISABLED=true` in your `.env` file.
+# …or inline
+docker run -e GEMINI_API_KEY=your_key_here -p 8000:8000 deenbridge-ai
+```
+
+The container listens on `PORT` (default `8000`), matching Render's runtime
+behaviour.  A `HEALTHCHECK` hits `GET /ping` every 30 seconds.
+
+To switch Render from the Python buildpack to Docker, change `render.yaml`:
+
+```yaml
+services:
+  - type: web
+    name: deenbridge-ai
+    runtime: docker          # was: env: python
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+```
+
+> **Note:** this PR does **not** flip production to Docker — that is a
+> deliberate post-merge step for the team.
 
 ### Environment Variables
 
@@ -124,6 +149,42 @@ For local development without a key, set `AUTH_DISABLED=true` in your `.env` fil
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+
+### Multilingual support (language field)
+
+Pass a `language` field (BCP-47 code) in `ChatRequest` to get a response in that
+language. When omitted, the model auto-detects and responds in the user's
+language.
+
+```jsonc
+{
+  "prompt": "ما هي أركان الإسلام؟",
+  "language": "ar"
+}
+```
+
+Quran quotations are always rendered in **Arabic script** with a translation in
+the response language and a `surah:ayah` reference, regardless of which language
+the response is in.
+
+| Code | Language |
+|------|----------|
+| `ar` | Arabic |
+| `en` | English |
+| `ur` | Urdu |
+| `ms` | Malay |
+| `fr` | French |
+| `tr` | Turkish |
+| `id` | Indonesian |
+| `bn` | Bengali |
+| `fa` | Persian |
+| `ha` | Hausa |
+| `sw` | Swahili |
+| `tl` | Tagalog |
+
+An unrecognized code falls back to auto-detection (warns in logs, never 422).
+The effective language is echoed in `ChatResponse.language` so the frontend can
+set `dir="rtl"` correctly.
 
 ### Confidence, abstention, and scholar review
 

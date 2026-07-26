@@ -184,7 +184,7 @@ class ChatRequest(BaseModel):
     chat_id: Optional[str] = None
     context: Optional[str] = None  # Additional context for specific queries
     madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
-    language: Optional[str] = None  # Preferred language for retrieved tafsir
+    language: Optional[str] = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
 
 
 class Message(BaseModel):
@@ -208,6 +208,7 @@ class ChatResponse(BaseModel):
     tafsir: Optional[TafsirInfo] = None
     confidence: Optional[ConfidenceAssessment] = None
     zakat: Optional[ZakatInfo] = None
+    language: Optional[str] = None
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -309,6 +310,53 @@ ISLAMIC_CONTEXT = (
     "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
     "general knowledge—do NOT fabricate references.\n"
 )
+
+SUPPORTED_LANGUAGES = {
+    "ar": "Arabic",
+    "en": "English",
+    "ur": "Urdu",
+    "ms": "Malay",
+    "fr": "French",
+    "tr": "Turkish",
+    "id": "Indonesian",
+    "bn": "Bengali",
+    "fa": "Persian",
+    "ha": "Hausa",
+    "sw": "Swahili",
+    "tl": "Tagalog",
+}
+
+LANGUAGE_INSTRUCTIONS = (
+    "\n\nLANGUAGE POLICY:\n"
+    "- When a response_language code is provided, respond entirely in that language.\n"
+    "- When no response_language is provided (auto mode), respond in the same language as the user's question.\n"
+    "- ALWAYS quote Quran in the original Arabic script (e.g. بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ) "
+    "followed by a translation in the response language, with the surah:ayah reference.\n"
+    "- Use standard transliteration for core Islamic terms (e.g. salat, zakat, hajj, shahada) "
+    "when writing in Latin-script languages.\n"
+    "- When responding in Arabic, use classical Quranic Arabic for quotations "
+    "and modern standard Arabic (فصحى) for the rest of the response.\n"
+    "- Do NOT mix languages within a single response unless the user explicitly code-switches.\n"
+)
+
+
+def normalize_language(lang: Optional[str]) -> Optional[str]:
+    """Validate a BCP-47 language code against SUPPORTED_LANGUAGES.
+
+    Returns the lowercase code if valid, or None to signal auto-detection.
+    An unrecognized code is not an error — it falls back to auto-detection
+    so an unexpected locale degrades gracefully instead of failing with 422.
+    """
+    if not lang:
+        return None
+    code = lang.strip().lower()
+    if code in SUPPORTED_LANGUAGES:
+        return code
+    base = code.split("-")[0]
+    if base in SUPPORTED_LANGUAGES:
+        return base
+    logger.warning("Unrecognized language code %r; falling back to auto-detection", lang)
+    return None
 
 
 def get_model():
@@ -473,6 +521,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             madhhab = normalize_madhhab(request.madhhab)
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+            effective_language = normalize_language(request.language)
 
         # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
@@ -527,6 +576,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     history=cached.history,
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(cached.response),
+                    language=effective_language,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -699,6 +749,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             tafsir=tafsir_info,
             confidence=assessment,
             zakat=zakat_info,
+            language=effective_language,
         )
         _finalize()
         _succeeded = True
@@ -767,6 +818,7 @@ async def chat_stream(request: ChatRequest, http_request: Request, _key: str = S
         # --- Fiqh classification & madhhab ---
         madhhab = normalize_madhhab(request.madhhab)
         is_fiqh = classify_fiqh(prompt)
+        effective_language = normalize_language(request.language)
 
         # --- Tafsir retrieval ---
         tafsir_context = await tafsir_retriever(
@@ -779,7 +831,7 @@ async def chat_stream(request: ChatRequest, http_request: Request, _key: str = S
         async def event_generator():
             try:
                 # Send metadata first
-                metadata = json.dumps({"type": "metadata", "chat_id": chat_id})
+                metadata = json.dumps({"type": "metadata", "chat_id": chat_id, "language": effective_language})
                 yield f"data: {metadata}\n\n"
 
                 # Create or get chat session
@@ -793,6 +845,12 @@ async def chat_stream(request: ChatRequest, http_request: Request, _key: str = S
 
                 # Build system context
                 system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
+                if effective_language:
+                    system_context += LANGUAGE_INSTRUCTIONS
+                    system_context += f"\nresponse_language: {effective_language}"
+                else:
+                    system_context += LANGUAGE_INSTRUCTIONS
+                    system_context += "\nresponse_language: auto (respond in the user's language)"
                 if is_fiqh:
                     system_context += FIQH_IKHTILAF_CONTEXT
                     if madhhab:
@@ -878,6 +936,12 @@ async def delete_chat(chat_id: str, _key: str = Security(verify_api_key)):
         error_msg = f"❌ Error deleting chat: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@app.get("/ping")
+async def ping():
+    """Lightweight liveness probe for container healthchecks and keep-alive pings."""
+    return {"status": "ok"}
 
 
 @app.get("/cache/stats")
