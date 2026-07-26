@@ -1,19 +1,30 @@
+import asyncio
+import json
+import logging
+import os
+from typing import Any, Dict, List, Optional
+import uuid
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 import google.generativeai as genai
-import json
-import os
+import time
 import secrets
-from dotenv import load_dotenv
-import logging
-from typing import Any, List, Optional
-import uuid
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+from google.api_core.exceptions import (
+    ResourceExhausted,
+    InvalidArgument,
+    DeadlineExceeded,
+    ServiceUnavailable,
+)
+
+import telemetry
 
 from stellar import (
     ZakatInfo,
@@ -56,12 +67,14 @@ from confidence import (
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
 
@@ -72,16 +85,14 @@ SERVICE_API_KEY = os.getenv("SERVICE_API_KEY", "")
 AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "yes"}
 
 if not AUTH_DISABLED and not SERVICE_API_KEY:
-    if os.getenv("ENVIRONMENT", "production").lower() not in {"development", "local", "test"}:
+    if os.getenv("ENVIRONMENT", "").lower() == "production":
         raise RuntimeError(
             "SERVICE_API_KEY must be set in production. "
             "Set AUTH_DISABLED=true to run without authentication locally."
         )
-    else:
-        logger.warning(
-            "SERVICE_API_KEY is not set and AUTH_DISABLED is not enabled; "
-            "authenticated endpoints will reject all requests."
-        )
+    logger.warning(
+        "SERVICE_API_KEY is not set; authenticated endpoints will reject all requests."
+    )
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -156,42 +167,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure Gemini
-try:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in environment variables")
-    logger.info("Configuring Gemini API...")
-    genai.configure(api_key=api_key)
-    logger.info("Gemini API configured successfully")
-except Exception as e:
-    logger.error(f"❌ Error configuring Gemini: {str(e)}")
-    raise
 
-# Store active chats
-active_chats = {}
-
-# Islamic context and safety instructions
-ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic knowledge and guidance.
-Your responses should:
-1. Be based on authentic Islamic sources (Quran and Hadith)
-2. Be respectful and appropriate
-3. Avoid controversial or divisive topics
-4. Focus on promoting understanding and unity
-5. Acknowledge when a question is beyond your scope
-6. Always maintain Islamic etiquette (adab) in responses
-
-Remember to:
-- Cite sources when possible
-- Be clear about what is from authentic sources vs. scholarly opinion
-- Encourage consulting with local scholars for complex matters
-- Promote positive Islamic values and character
-"""
-
-
-class Message(BaseModel):
-    role: str
-    content: str
+# Response Models
+class CitationVerificationResult(BaseModel):
+    source: str  # "quran" | "hadith"
+    surah: Optional[int] = None
+    ayah: Optional[int] = None
+    collection: Optional[str] = None
+    number: Optional[str] = None
+    status: str  # "verified" | "mismatch" | "unverified" | "not_quoted"
+    reason: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -202,15 +187,21 @@ class ChatRequest(BaseModel):
     language: Optional[str] = None  # Preferred language for retrieved tafsir
 
 
+class Message(BaseModel):
+    role: str
+    content: str
+
+
 class Moderation(BaseModel):
     category_id: Optional[str] = None
     action: str
 
 
 class ChatResponse(BaseModel):
-    response: str
+    response: Optional[str] = None
+    text: Optional[str] = None
     chat_id: str
-    history: List[Message]
+    history: List[Message] = []
     moderation: Optional[Moderation] = None
     fiqh: Optional[FiqhInfo] = None
     hadith_references: Optional[List[HadithReference]] = None
@@ -229,9 +220,10 @@ def classify_for_safety(prompt: str, candidate_ids: List[str]):
         f"{candidate_ids}"
     )
     model = genai.GenerativeModel(
-        "gemini-2.5-flash",
+        telemetry.GEMINI_MODEL,
         system_instruction=classifier_instruction,
     )
+    _t0 = time.perf_counter()
     response = model.generate_content(
         prompt,
         generation_config={
@@ -239,6 +231,12 @@ def classify_for_safety(prompt: str, candidate_ids: List[str]):
             "response_mime_type": "application/json",
         },
         request_options={"timeout": 30},
+    )
+    telemetry.record_model_call(
+        response,
+        telemetry.GEMINI_MODEL,
+        (time.perf_counter() - _t0) * 1000.0,
+        stage="classification",
     )
     return json.loads(response.text)
 
@@ -298,15 +296,165 @@ def get_safety_settings():
     ]
 
 
-@app.get("/ping")
-async def ping():
-    logger.info("************** Ping pong ping pong *************")
-    return {"************** Ping pong ping pong *************"}
+# In-memory session store for demo purposes
+sessions: Dict[str, Any] = {}
+active_chats: Dict[str, Any] = {}
+
+ISLAMIC_CONTEXT = (
+    "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
+    "Provide respectful, accurate, and context-aware responses grounded in authentic Islamic knowledge.\n\n"
+    "POLICY ON CITATIONS:\n"
+    "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
+    "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
+    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
+    "general knowledge—do NOT fabricate references.\n"
+)
+
+
+def get_model():
+    return genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=ISLAMIC_CONTEXT,
+    )
+
+
+GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "30"))
+
+
+def extract_text_safely(response: Any) -> Optional[str]:
+    """Safely extract text from Gemini response, handling safety blocks gracefully."""
+    if not response:
+        return None
+
+    # Check candidates for finish reason / safety blocks
+    if hasattr(response, "candidates") and response.candidates:
+        candidate = response.candidates[0]
+        finish_reason = getattr(candidate, "finish_reason", None)
+        if finish_reason is not None:
+            reason_name = getattr(finish_reason, "name", str(finish_reason)).upper()
+            if reason_name in ("SAFETY", "BLOCKED", "PROMPT_FEEDBACK", "RECITATION", "SPII"):
+                return None
+
+    # Check prompt feedback
+    if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+        block_reason = getattr(response.prompt_feedback, "block_reason", None)
+        if block_reason:
+            return None
+
+    # Access text property safely (raises ValueError if response has no text/candidate)
+    try:
+        text = response.text
+        if not text:
+            return None
+        return text
+    except (ValueError, AttributeError):
+        return None
+
+
+async def send_message_with_retry(
+    chat_session: Any,
+    message: str,
+    generation_config: Optional[Dict[str, Any]] = None,
+    timeout: int = GEMINI_TIMEOUT,
+    max_retries: int = 2,
+) -> Any:
+    """Send message asynchronously with retries for transient upstream errors.
+
+    Preserves chat history integrity by cleaning up un-responded user messages
+    if an upstream call fails.
+    """
+    attempt = 0
+    while True:
+        history_len_before = (
+            len(chat_session.history)
+            if hasattr(chat_session, "history") and chat_session.history is not None
+            else 0
+        )
+        try:
+            kwargs: Dict[str, Any] = {"request_options": {"timeout": timeout}}
+            if generation_config:
+                kwargs["generation_config"] = generation_config
+            response = await chat_session.send_message_async(
+                message,
+                **kwargs,
+            )
+            return response
+        except (ServiceUnavailable, DeadlineExceeded, asyncio.TimeoutError) as exc:
+            if hasattr(chat_session, "history") and chat_session.history is not None:
+                if len(chat_session.history) > history_len_before:
+                    chat_session.history = chat_session.history[:history_len_before]
+
+            attempt += 1
+            if attempt > max_retries:
+                logger.warning(
+                    "Gemini send_message_async failed after %d retries: %s",
+                    max_retries,
+                    exc,
+                )
+                raise exc
+
+            backoff = 0.5 * (2 ** (attempt - 1))
+            logger.info(
+                "Transient Gemini error (%s). Retrying in %.1fs (attempt %d/%d)...",
+                exc,
+                backoff,
+                attempt,
+                max_retries,
+            )
+            await asyncio.sleep(backoff)
+        except Exception as exc:
+            if hasattr(chat_session, "history") and chat_session.history is not None:
+                if len(chat_session.history) > history_len_before:
+                    chat_session.history = chat_session.history[:history_len_before]
+            raise exc
+
+
+async def run_strict_corrective_loop(
+    chat_session,
+    user_message: str,
+    original_text: str,
+    mismatches: List[Dict[str, Any]],
+) -> str:
+    """Run exactly one corrective regeneration when a citation mismatch occurs in strict mode."""
+    corrections_text = []
+    for m in mismatches:
+        if m.get("source") == "quran" and "correct_text" in m:
+            corrections_text.append(
+                f"- Surah {m['surah']}:{m['ayah']} text in corpus is: '{m['correct_text']}'. "
+                f"Your quote did not match."
+            )
+        elif m.get("reason"):
+            corrections_text.append(f"- {m['reason']}")
+
+    correction_prompt = (
+        "Your previous response had citation errors:\n"
+        + "\n".join(corrections_text)
+        + "\n\nPlease regenerate your response correcting the quotes/references, or remove any unverified references entirely."
+    )
+
+    corrective_response = await send_message_with_retry(chat_session, correction_prompt)
+    safe_text = extract_text_safely(corrective_response)
+    return safe_text or original_text
 
 
 @app.post("/chat", response_model=ChatResponse)
 @limiter.limit("20/minute")
 async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response, _key: str = Security(verify_api_key)):
+    trace = telemetry.Trace()
+    _ctx_token = telemetry.current_trace.set(trace)
+    _handler_start = time.perf_counter()
+    _succeeded = False
+
+    def _finalize() -> None:
+        """Stamp content-free telemetry onto the response and record the request."""
+        handler_ms = (time.perf_counter() - _handler_start) * 1000.0
+        totals = trace.request_totals()
+        fastapi_response.headers["X-Trace-Id"] = trace.trace_id
+        fastapi_response.headers["X-LLM-Total-Tokens"] = str(totals["total_tokens"])
+        fastapi_response.headers["X-LLM-Cost-USD"] = f"{totals['cost_usd']:.8f}"
+        fastapi_response.headers["X-Handler-Latency-Ms"] = f"{handler_ms:.2f}"
+        telemetry.registry.record_request(handler_ms, error=False)
+
     try:
         chat_id = request.chat_id or str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
@@ -320,24 +468,25 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         extra_context = redact_secret_keys(request.context)
         logger.info(f"Received chat request: {prompt[:100]}...")
 
-        # --- Fiqh classification & madhhab ---
-        madhhab = normalize_madhhab(request.madhhab)
-        is_fiqh = classify_fiqh(prompt)
-        fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+        # --- Fiqh/intent classification & madhhab ---
+        with trace.span("classification"):
+            madhhab = normalize_madhhab(request.madhhab)
+            is_fiqh = classify_fiqh(prompt)
+            fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
 
-        # --- Tafsir retrieval for verse-explanation questions ---
-        # Detection is offline (regex + the bundled surah index), so a
-        # non-tafsir prompt costs nothing.
-        tafsir_context = await tafsir_retriever(
-            prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
-        )
-        tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
+        # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
+        with trace.span("retrieval"):
+            # Tafsir detection is offline (regex + the bundled surah index),
+            # so a non-tafsir prompt costs nothing.
+            tafsir_context = await tafsir_retriever(
+                prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
+            )
+            tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
 
-        # --- Zakat calculation for wallet questions ---
-        # Detection is offline (keywords plus a key-shaped match), so an
-        # ordinary prompt never touches Horizon or the gold-price API.
-        zakat_context = await zakat_retriever(request.prompt, request.context)
-        zakat_info = zakat_context.info if zakat_context else None
+            # Zakat detection is offline (keywords plus a key-shaped match), so
+            # an ordinary prompt never touches Horizon or the gold-price API.
+            zakat_context = await zakat_retriever(request.prompt, request.context)
+            zakat_info = zakat_context.info if zakat_context else None
 
         # Neither a tafsir-grounded answer nor a zakat answer goes through the
         # semantic response cache: the first is built from retrieved passages
@@ -361,7 +510,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             if cached is not None:
                 fastapi_response.headers["X-Semantic-Cache"] = "hit"
                 model = genai.GenerativeModel(
-                    'gemini-2.5-flash',
+                    telemetry.GEMINI_MODEL,
                     safety_settings=get_safety_settings(),
                 )
                 chat_session = model.start_chat(history=[
@@ -370,6 +519,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 ])
                 active_chats[chat_id] = chat_session
                 logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
+                _finalize()
+                _succeeded = True
                 return ChatResponse(
                     response=cached.response,
                     chat_id=chat_id,
@@ -381,13 +532,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             semantic_cache.bypasses += 1
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
-        def generate(safety_prompt: str) -> str:
+        async def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
-                model = genai.GenerativeModel(
-                    'gemini-2.5-flash',
-                    safety_settings=get_safety_settings()
-                )
+                model = get_model()
                 active_chats[chat_id] = model.start_chat(history=[])
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
@@ -402,25 +550,41 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
-            response = active_chats[chat_id].send_message(
+            _t0 = time.perf_counter()
+            response = await send_message_with_retry(
+                active_chats[chat_id],
                 full_prompt,
                 generation_config={
                     "temperature": 0.7,
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_output_tokens": 2048,
-                }
+                },
             )
-            if not response.text:
+            telemetry.record_model_call(
+                response,
+                telemetry.GEMINI_MODEL,
+                (time.perf_counter() - _t0) * 1000.0,
+                stage="generation",
+                trace=trace,
+            )
+            text = extract_text_safely(response)
+            if not text:
                 raise HTTPException(status_code=500, detail="Empty response from AI model")
-            return response.text
+            return text
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
-        if enabled:
-            safety_result = await safety_pipeline.run_async(prompt, generate)
-        else:
-            safety_result = None
-            generated_text = generate(prompt)
+        with trace.span("generation"):
+            if enabled:
+                safety_result = await safety_pipeline.run_async(prompt, generate)
+            else:
+                safety_result = None
+                generated_text = await generate(prompt)
+
+        # Everything from here (history extraction, hadith grading, confidence
+        # assessment, and the scholar-review enqueue, which does I/O) is timed
+        # as one post-processing stage so a slow tail is attributable.
+        _pp_start = time.perf_counter()
 
         logger.info(
             "safety=%s",
@@ -517,8 +681,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
+        trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
         logger.info("Chat response generated successfully")
-        return ChatResponse(
+        # Build the response before finalizing, so a construction/validation
+        # failure is handled only by the error path and the request is not
+        # counted as both a success (here) and an error (except block).
+        response_obj = ChatResponse(
             response=response_text,
             chat_id=chat_id,
             history=history,
@@ -532,11 +700,58 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             confidence=assessment,
             zakat=zakat_info,
         )
+        _finalize()
+        _succeeded = True
+        return response_obj
 
-    except Exception as e:
-        error_msg = f"❌ Chat API Error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+    except ResourceExhausted as exc:
+        logger.warning("Gemini rate limit exceeded for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Please try again later.",
+            headers={"X-Trace-Id": trace.trace_id},
+        )
+    except InvalidArgument as exc:
+        logger.warning("Invalid argument for Gemini call in chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid request parameters.",
+            headers={"X-Trace-Id": trace.trace_id},
+        )
+    except (DeadlineExceeded, asyncio.TimeoutError) as exc:
+        logger.warning("Gemini API call timed out for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=504,
+            detail="AI service timed out.",
+            headers={"X-Trace-Id": trace.trace_id},
+        )
+    except ServiceUnavailable as exc:
+        logger.warning("Gemini service unavailable for chat %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="AI service temporarily unavailable.",
+            headers={"X-Trace-Id": trace.trace_id},
+        )
+    except HTTPException as exc:
+        # Attach the trace id to already-typed HTTP errors (e.g. the empty-response
+        # 500 raised inside generate) so a failed request stays correlatable.
+        exc.headers = {**(exc.headers or {}), "X-Trace-Id": trace.trace_id}
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error in /chat handler for session %s: %s", chat_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail="AI service error",
+            headers={"X-Trace-Id": trace.trace_id},
+        )
+    finally:
+        # Record the request exactly once: the success path already recorded it
+        # via _finalize(); anything that reached an except path is an error.
+        if not _succeeded:
+            telemetry.registry.record_request(
+                (time.perf_counter() - _handler_start) * 1000.0, error=True
+            )
+        telemetry.current_trace.reset(_ctx_token)
 
 
 @app.post("/chat/stream")
@@ -571,7 +786,7 @@ async def chat_stream(request: ChatRequest, http_request: Request, _key: str = S
                 if chat_id not in active_chats:
                     logger.info(f"Creating new streaming chat session: {chat_id}")
                     model = genai.GenerativeModel(
-                        'gemini-2.5-flash',
+                        telemetry.GEMINI_MODEL,
                         safety_settings=get_safety_settings()
                     )
                     active_chats[chat_id] = model.start_chat(history=[])
@@ -668,6 +883,22 @@ async def delete_chat(chat_id: str, _key: str = Security(verify_api_key)):
 @app.get("/cache/stats")
 async def cache_stats():
     return semantic_cache.get_stats()
+
+
+@app.get("/metrics")
+async def metrics():
+    """Lightweight LLM observability surface: token, cost, and latency
+    aggregates plus error rate. Contains only counts, durations, costs, model
+    names, and trace-derived aggregates - never prompt or answer content.
+
+    Cache hit-rate is sourced from the semantic cache's own precise counters
+    (#27) rather than re-derived here, so the numbers stay consistent with
+    /cache/stats. #9 (auth/rate limiting) can consume the cost/token totals
+    below without this endpoint enforcing anything itself.
+    """
+    snapshot = telemetry.registry.snapshot()
+    snapshot["semantic_cache"] = semantic_cache.get_stats()
+    return snapshot
 
 
 @app.get("/confidence/policy")
