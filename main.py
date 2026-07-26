@@ -991,6 +991,7 @@ async def delete_memory(user_id: str):
         return {"message": "Memory deleted successfully"}
     return {"message": "Memory not found"}
 
+
 def get_health_status(deep: bool = False) -> tuple[dict, int]:
     key_configured = bool(GEMINI_API_KEY)
     checks = {"gemini_api_key_configured": "ok" if key_configured else "fail"}
@@ -1004,6 +1005,7 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
         "checks": checks,
         "failing_check": "gemini_api_key_configured",
     }, 503
+
 
 @app.get("/health")
 async def health(deep: bool = False):
