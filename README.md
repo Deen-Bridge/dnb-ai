@@ -36,6 +36,8 @@ The platform is composed of three services:
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
 - 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
+- 🧠 **Per-user long-term memory** — user profiles (knowledge level, madhhab, topics studied, remembered facts) extracted from conversations and injected across sessions; privacy controls with GET/DELETE endpoints and `remember` opt-out per request
+- 📋 **Conversation summarization** — compaction API ready for token-budget-triggered eviction; merges and recompresses summaries when history exceeds budget
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
@@ -45,6 +47,8 @@ The platform is composed of three services:
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
+| `GET` | `/memory/{user_id}` | Retrieve a stored user profile (transparency) |
+| `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Health check |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
@@ -135,7 +139,9 @@ services:
 | `CONFIDENCE_UNVERIFIED_CEILING` | Cap when nothing external corroborated the answer | `0.65` |
 | `SCHOLAR_REVIEW_TOKEN` | Enables the reviewer endpoints; required as `X-Review-Token` | — (endpoints disabled) |
 | `REVIEW_EXPORT_PATH` | JSONL export of reviewed answers | `data/review/reviewed.jsonl` |
-| `REDIS_URL` | Makes the scholar-review queue durable across restarts | — (in-memory) |
+| `REDIS_URL` | Makes the scholar-review queue and memory store durable across restarts | — (in-memory) |
+| `MEMORY_TTL_DAYS` | Time-to-live for stored user profiles and chat summaries in days | `90` |
+| `MEMORY_EXTRACTION_ENABLED` | Background memory extraction from conversation turns | `true` |
 | `STELLAR_NETWORK` | Stellar network for zakat lookups (`testnet` or `public`) | `testnet` |
 | `ZAKAT_NISAB_USD` | Fallback nisab when no gold price can be fetched | `6000` |
 | `NISAB_CACHE_TTL_SECONDS` | How long a fetched gold price is reused | `21600` (6h) |

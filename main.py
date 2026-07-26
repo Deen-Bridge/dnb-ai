@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import google.generativeai as genai
 import time
 
@@ -61,6 +61,15 @@ from confidence import (
 )
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
+
+from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
+from memory.extraction import (
+    MEMORY_EXTRACTION_ENABLED,
+    apply_updates,
+    extract_updates,
+    merge_summaries,
+    summarize_conversation_turns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +124,8 @@ class ChatRequest(BaseModel):
     context: Optional[str] = None  # Additional context for specific queries
     madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
     language: Optional[str] = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
+    user_id: Optional[str] = Field(default=None, max_length=128)  # Opaque user identifier for personalization
+    remember: bool = True           # When False, existing memory is read but no new data persisted
 
 
 class Message(BaseModel):
@@ -182,6 +193,11 @@ semantic_cache = get_cache()
 
 # Durable queue for low-confidence religious answers awaiting a scholar
 review_store = get_review_store()
+
+# Per-user memory store (Redis-backed or in-memory)
+memory_store = create_memory_store()
+
+MAX_CHAT_HISTORY_TURNS = 20
 
 # Tafsir retrieval seam: returns None for prompts that are not
 # verse-explanation questions. Offline tests replace this with a stub.
@@ -466,6 +482,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             zakat_context = await zakat_retriever(request.prompt, request.context)
             zakat_info = zakat_context.info if zakat_context else None
 
+        # --- Memory lookup ---
+        profile: Optional[UserProfile] = None
+        summary: Optional[ChatSummary] = None
+        if request.user_id:
+            profile = await memory_store.get_profile(request.user_id)
+            summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
+
         # Neither a tafsir-grounded answer nor a zakat answer goes through the
         # semantic response cache: the first is built from retrieved passages
         # (already cached by ayah key), and the second contains one user's real
@@ -475,6 +498,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             and request.context is None
             and tafsir_context is None
             and zakat_context is None
+            and request.user_id is None
             and SEMANTIC_CACHE_ENABLED
         )
 
@@ -526,6 +550,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += tafsir_system_context(tafsir_context)
             if zakat_context is not None:
                 system_context += zakat_context.prompt_block
+            memory_block = render_user_context(profile, summary)
+            if memory_block:
+                system_context += f"\n\n{memory_block}"
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
@@ -682,6 +709,33 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         )
         _finalize()
         _succeeded = True
+
+        # --- Background memory extraction and summarization ---
+        # Runs as fire-and-forget tasks after the response is sent.
+        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+            asyncio.create_task(
+                _extract_and_update_memory(
+                    request.user_id, prompt, response_text, chat_id, summary, memory_store,
+                )
+            )
+            logger.info("Memory extraction scheduled for user %s", request.user_id[:8])
+
+        # --- Summary eviction ---
+        # After enough turns accumulate, summarize old history and persist.
+        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+            chat_session = active_chats.get(chat_id)
+            if chat_session and hasattr(chat_session, "history") and chat_session.history:
+                if len(chat_session.history) >= MAX_CHAT_HISTORY_TURNS:
+                    asyncio.create_task(
+                        _summarize_history(
+                            f"{request.user_id}:{chat_id}",
+                            chat_session.history,
+                            summary,
+                            memory_store,
+                        )
+                    )
+                    logger.info("History summarization triggered for %s", request.user_id[:8])
+
         return response_obj
 
     except ResourceExhausted as exc:
@@ -732,6 +786,47 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 (time.perf_counter() - _handler_start) * 1000.0, error=True
             )
         telemetry.current_trace.reset(_ctx_token)
+
+
+async def _extract_and_update_memory(
+    user_id: str, prompt: str, response: str, chat_id: str,
+    existing_summary: Optional[ChatSummary],
+    store: Any,
+) -> None:
+    """Fire-and-forget memory extraction. Runs via asyncio.create_task."""
+    try:
+        updates = await extract_updates(prompt, response)
+        if updates.get("none"):
+            return
+        profile = await store.get_profile(user_id)
+        if profile is None:
+            profile = UserProfile(user_id=user_id)
+        profile = apply_updates(profile, updates)
+        await store.save_profile(user_id, profile)
+        logger.debug("Memory updated for user %s", user_id[:8])
+    except Exception:
+        logger.warning("Memory extraction failed for user %s", user_id[:8], exc_info=True)
+
+
+async def _summarize_history(
+    chat_id: str, history: list, existing_summary: Optional[ChatSummary],
+    store: Any,
+) -> None:
+    """Summarize accumulated conversation turns and persist."""
+    try:
+        turns = [
+            {"role": m.role, "text": m.parts[0].text if m.parts else ""}
+            for m in history
+        ]
+        new_summary_text = await summarize_conversation_turns(turns)
+        if existing_summary:
+            merged = await merge_summaries(existing_summary.content, new_summary_text)
+        else:
+            merged = new_summary_text
+        summary = ChatSummary(chat_id=chat_id, content=merged, turn_count=len(history))
+        await store.save_chat_summary(chat_id, summary)
+    except Exception:
+        logger.warning("History summarization failed for %s", chat_id[:8], exc_info=True)
 
 
 @app.post("/chat/stream")
@@ -847,9 +942,8 @@ async def chat_stream(request: ChatRequest, http_request: Request):
         )
 
     except Exception as e:
-        error_msg = f"❌ Streaming Chat API Error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        logger.error("Streaming Chat API Error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.delete("/chat/{chat_id}")
@@ -861,15 +955,41 @@ async def delete_chat(chat_id: str):
             return {"message": "Chat session deleted successfully"}
         return {"message": "Chat session not found"}
     except Exception as e:
-        error_msg = f"❌ Error deleting chat: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        logger.error("Error deleting chat", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/ping")
 async def ping():
     """Lightweight liveness probe for container healthchecks and keep-alive pings."""
     return {"status": "ok"}
+
+
+@app.get("/memory/{user_id}")
+async def get_memory(user_id: str):
+    """Retrieve the stored user profile for transparency.
+
+    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    can currently read another user's memory.
+    """
+    profile = await memory_store.get_profile(user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return profile.model_dump()
+
+
+@app.delete("/memory/{user_id}")
+async def delete_memory(user_id: str):
+    """Completely erase the stored user profile.
+
+    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    can currently erase another user's memory.
+    """
+    existed = await memory_store.delete_profile(user_id)
+    if existed:
+        logger.info("Deleted memory for user %s", user_id[:8])
+        return {"message": "Memory deleted successfully"}
+    return {"message": "Memory not found"}
 
 
 @app.get("/cache/stats")
