@@ -1012,6 +1012,7 @@ async def health(deep: bool = False):
     body, code = get_health_status(deep=deep)
     return JSONResponse(content=body, status_code=code)
 
+
 @app.get("/cache/stats")
 async def cache_stats():
     return semantic_cache.get_stats()
