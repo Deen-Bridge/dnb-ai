@@ -1,10 +1,10 @@
+import os
 import asyncio
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional
 import uuid
-from dotenv import load_dotenv
+from config import get_settings
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -64,12 +64,11 @@ from review_store import get_review_store
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
+settings = get_settings()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+GEMINI_API_KEY = settings.gemini_api_key
+
+genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
 
@@ -85,13 +84,7 @@ app.include_router(review_router)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Local development
-        "https://deenbridge.vercel.app",  # Production frontend
-        "https://dnb-frontend.vercel.app",  # Your frontend domain
-        "http://localhost:8000",  # Local API
-        "https://dnb-ai.onrender.com",  # Render deployment
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -243,12 +236,12 @@ ISLAMIC_CONTEXT = (
 
 def get_model():
     return genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
     )
 
 
-GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "30"))
+GEMINI_TIMEOUT = settings.gemini_timeout
 
 
 def extract_text_safely(response: Any) -> Optional[str]:
@@ -484,10 +477,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 active_chats[chat_id],
                 full_prompt,
                 generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                    "max_output_tokens": 2048,
+                    "temperature": settings.temperature,
+                    "top_p": settings.top_p,
+                    "top_k": settings.top_k,
+                    "max_output_tokens": settings.max_output_tokens,
                 },
             )
             telemetry.record_model_call(
@@ -738,12 +731,12 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 response_stream = active_chats[chat_id].send_message(
                     full_prompt,
                     generation_config={
-                        "temperature": 0.7,
-                        "top_p": 0.8,
-                        "top_k": 40,
-                        "max_output_tokens": 2048,
+                        "temperature": settings.temperature,
+                        "top_p": settings.top_p,
+                        "top_k": settings.top_k,
+                        "max_output_tokens": settings.max_output_tokens,
                     },
-                    stream=True
+                    stream=True,
                 )
 
                 # Yield each chunk
@@ -841,4 +834,4 @@ async def confidence_policy():
 if __name__ == "__main__":
     import uvicorn
     logger.info("Starting server...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=settings.port)
