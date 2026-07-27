@@ -138,6 +138,12 @@ services:
 | `GEMINI_API_KEY` | Google Gemini API key | — |
 | `SERVICE_API_KEY` | Shared secret for API-key auth; required in production. Clients must send `X-API-Key` header. | — |
 | `AUTH_DISABLED` | Set to `true` to skip API-key auth (local development only) | `false` |
+| `MODEL_NAME` | Gemini model used by the application | gemini-1.5-flash |
+| `TEMPERATURE` | Model temperature | 0.7 |
+| `TOP_P` | Nucleus sampling value | 0.8 |
+| `TOP_K` | Top-K sampling value | 40 |
+| `MAX_OUTPUT_TOKENS` | Maximum response tokens | 2048 |
+| `PORT` | Server port used by Uvicorn | 8000 |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |

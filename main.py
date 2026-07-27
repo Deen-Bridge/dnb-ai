@@ -1,7 +1,7 @@
+import os
 import asyncio
 import json
 import logging
-import os
 import secrets
 import time
 import uuid
@@ -12,6 +12,7 @@ from typing import Any
 
 import google.generativeai as genai
 from dotenv import load_dotenv
+from config import get_settings
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -97,12 +98,11 @@ from tafsir import (
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
+settings = get_settings()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+GEMINI_API_KEY = settings.gemini_api_key
+
+genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
 
@@ -183,13 +183,7 @@ app.include_router(review_router)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Local development
-        "https://deenbridge.vercel.app",  # Production frontend
-        "https://dnb-frontend.vercel.app",  # Your frontend domain
-        "http://localhost:8000",  # Local API
-        "https://dnb-ai.onrender.com",  # Render deployment
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -505,12 +499,12 @@ def normalize_language(lang: str | None) -> str | None:
 
 def get_model() -> genai.GenerativeModel:
     return genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
     )
 
 
-GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "30"))
+GEMINI_TIMEOUT = settings.gemini_timeout
 
 
 def extract_text_safely(response: Any) -> str | None:
@@ -1177,7 +1171,12 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
                     stream_response = await active_chats[chat_id].send_message_async(
                         full_prompt,
-                        generation_config=GENERATION_CONFIG,
+                        generation_config={
+                            "temperature": settings.temperature,
+                            "top_p": settings.top_p,
+                            "top_k": settings.top_k,
+                            "max_output_tokens": settings.max_output_tokens,
+                        },
                         stream=True,
                     )
 
@@ -1597,4 +1596,4 @@ if __name__ == "__main__":
     import uvicorn
 
     logger.info("Starting server...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=settings.port)
