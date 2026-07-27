@@ -53,6 +53,28 @@ FEEDBACK_TAXONOMY = {
 
 COMMENT_MAX_CHARS = 1000
 
+
+def env_int(name: str, default: int, minimum: int = 1) -> int:
+    """Read a positive int from the environment, falling back on nonsense.
+
+    A malformed tuning value must not crash boot: main.py imports this module,
+    so an unguarded ``int(os.getenv(...))`` here would take the whole app down
+    with a traceback instead of degrading to a sane default.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r is not an integer; using %s", name, raw, default)
+        return default
+    if value < minimum:
+        logger.warning("%s=%s is below the minimum %s; using %s", name, value, minimum, default)
+        return default
+    return value
+
+
 # Redis TTL for feedback records (30 days).
 REDIS_TTL_SECONDS = 60 * 60 * 24 * 30
 
@@ -60,8 +82,8 @@ REDIS_TTL_SECONDS = 60 * 60 * 24 * 30
 SQLITE_MAX_RECORDS = 50_000
 
 # Rate limiting: max submissions per IP per window.
-RATE_LIMIT_MAX = int(os.getenv("FEEDBACK_RATE_LIMIT_MAX", "20"))
-RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("FEEDBACK_RATE_LIMIT_WINDOW", "60"))
+RATE_LIMIT_MAX = env_int("FEEDBACK_RATE_LIMIT_MAX", 20)
+RATE_LIMIT_WINDOW_SECONDS = env_int("FEEDBACK_RATE_LIMIT_WINDOW", 60)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +108,7 @@ class RateLimiter:
         now = time.monotonic()
         cutoff = now - self._window
         with self._lock:
+            self._sweep(cutoff)
             bucket = self._buckets[ip]
             while bucket and bucket[0] < cutoff:
                 bucket.popleft()
@@ -93,6 +116,19 @@ class RateLimiter:
                 return False
             bucket.append(now)
             return True
+
+    def _sweep(self, cutoff: float) -> None:
+        """Drop buckets whose newest timestamp is outside the window.
+
+        Without this, one entry accumulates per distinct IP and is never
+        reclaimed. The key comes from a client-controlled X-Forwarded-For, so
+        an attacker could otherwise grow this dict without bound. A bucket
+        whose most-recent hit is older than the window can hold nothing live,
+        so it is safe to drop entirely.
+        """
+        stale = [ip for ip, bucket in self._buckets.items() if not bucket or bucket[-1] < cutoff]
+        for ip in stale:
+            del self._buckets[ip]
 
     def reset(self) -> None:
         """Clear all buckets. Used by tests so limiter state never leaks between them."""
@@ -341,9 +377,17 @@ class SQLiteFeedbackStore(FeedbackStore):
             bucket = model_counts.setdefault(name, {"up": 0, "down": 0})
             bucket[r["rating"]] = r["cnt"]
 
+        # Limit distinct *days*, not grouped rows: GROUP BY day, rating yields
+        # up to two rows per day, so a plain LIMIT 14 would return as few as
+        # seven days when both ratings occur.
         day_rows = conn.execute(
             "SELECT substr(created_at,1,10) as day, rating, COUNT(*) as cnt "
-            "FROM feedback GROUP BY day, rating ORDER BY day DESC LIMIT 14"
+            "FROM feedback "
+            "WHERE substr(created_at,1,10) IN ("
+            "  SELECT DISTINCT substr(created_at,1,10) FROM feedback "
+            "  ORDER BY 1 DESC LIMIT 14"
+            ") "
+            "GROUP BY day, rating ORDER BY day DESC"
         ).fetchall()
         by_day: Dict[str, Dict[str, int]] = {}
         for r in day_rows:
@@ -385,12 +429,25 @@ class RedisFeedbackStore(FeedbackStore):
     def upsert(self, record: FeedbackRecord) -> None:
         key = self._record_key(record.chat_id, record.message_id)
         ts = time.time()
+
+        # Idempotent overwrite must also fix the indexes: a re-rating (down->up)
+        # or a changed category set would otherwise leave the key in the old
+        # rating/category sorted sets forever, so list_records and stats would
+        # double-count it. Remove the previous memberships before re-adding.
+        previous = self.get(record.chat_id, record.message_id)
+
         data = record.to_dict()
         data["categories"] = json.dumps(data["categories"])
         data["generation_config"] = (
             json.dumps(data["generation_config"]) if data["generation_config"] else ""
         )
         pipe = self._r.pipeline()
+        if previous is not None:
+            pipe.zrem(f"{self._PREFIX}:index:rating:{previous.rating}", key)
+            for cat in previous.categories:
+                pipe.zrem(f"{self._PREFIX}:index:cat:{cat}", key)
+            pipe.zrem(f"{self._PREFIX}:index:model:{previous.model_name or 'unknown'}", key)
+
         pipe.hset(key, mapping={k: (v if v is not None else "") for k, v in data.items()})
         pipe.expire(key, REDIS_TTL_SECONDS)
         pipe.zadd(f"{self._PREFIX}:index:rating:{record.rating}", {key: ts})

@@ -175,6 +175,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # A negative --limit reaches SQLite as "no limit" and loads the whole table
+    # before dedup; a negative --min-categories is meaningless. Reject both.
+    if args.limit < 0:
+        parser.error("--limit must be a non-negative integer")
+    if args.min_categories < 0:
+        parser.error("--min-categories must be a non-negative integer")
+
     count = export(
         output_path=args.output,
         min_categories=args.min_categories,

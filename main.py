@@ -70,6 +70,7 @@ from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
     FeedbackRecord,
+    env_int,
     rate_limiter,
     store as feedback_store,
 )
@@ -167,14 +168,17 @@ class ChatResponse(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    chat_id: str
-    message_id: str
+    chat_id: str = Field(..., max_length=200)
+    message_id: str = Field(..., max_length=200)
     rating: str = Field(..., description="'up' or 'down'")
-    categories: Optional[List[str]] = None
-    comment: Optional[str] = None
-    # Supplied by the client when the session is no longer in memory (restart).
-    prompt: Optional[str] = None
-    answer: Optional[str] = None
+    # At most one tag per taxonomy category; a caller cannot pad the list.
+    categories: Optional[List[str]] = Field(None, max_length=len(FEEDBACK_TAXONOMY))
+    comment: Optional[str] = Field(None, max_length=COMMENT_MAX_CHARS)
+    # Supplied by the client when the snapshot is gone (restart). Bounded so an
+    # anonymous caller cannot fill the store with multi-megabyte bodies — the
+    # rate limiter caps request count, not request size.
+    prompt: Optional[str] = Field(None, max_length=8000)
+    answer: Optional[str] = Field(None, max_length=16000)
 
     @field_validator("rating")
     @classmethod
@@ -193,15 +197,6 @@ class FeedbackRequest(BaseModel):
             raise ValueError(
                 f"Unknown categories: {sorted(invalid)}. "
                 f"Valid choices: {sorted(FEEDBACK_TAXONOMY)}"
-            )
-        return v
-
-    @field_validator("comment")
-    @classmethod
-    def comment_length(cls, v: Optional[str]) -> Optional[str]:
-        if v and len(v) > COMMENT_MAX_CHARS:
-            raise ValueError(
-                f"comment must not exceed {COMMENT_MAX_CHARS} characters (got {len(v)})"
             )
         return v
 
@@ -321,8 +316,13 @@ chat_message_ids: Dict[str, List[str]] = {}
 # is the displayed text (post safety/hadith/abstention shaping), not the raw
 # model output. Bounded LRU — on a free-tier restart it is empty, which is why
 # the feedback endpoint also accepts a client-supplied prompt/answer.
-FEEDBACK_SNAPSHOT_MAX = int(os.getenv("FEEDBACK_SNAPSHOT_MAX", "5000"))
+FEEDBACK_SNAPSHOT_MAX = env_int("FEEDBACK_SNAPSHOT_MAX", 5000)
 answer_snapshots: "OrderedDict[tuple, Dict[str, str]]" = OrderedDict()
+
+# Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
+# control; otherwise any client can rotate the header to mint a fresh rate-limit
+# bucket on every request and defeat the only control on the write endpoint.
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
 
 
 def _record_answer(chat_id: str, prompt: str, answer: str) -> str:
@@ -358,7 +358,9 @@ async def require_admin(token: Optional[str] = Depends(_admin_header)) -> None:
             status_code=503,
             detail="ADMIN_TOKEN is not configured on this server.",
         )
-    if not token or not secrets.compare_digest(token, ADMIN_TOKEN):
+    # Compare as bytes: secrets.compare_digest raises on non-ASCII str, which
+    # would turn a crafted header into a 500 instead of a clean 403.
+    if not token or not secrets.compare_digest(token.encode("utf-8"), ADMIN_TOKEN.encode("utf-8")):
         raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
 
 ISLAMIC_CONTEXT = (
@@ -676,12 +678,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             response = await send_message_with_retry(
                 active_chats[chat_id],
                 full_prompt,
-                generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                    "max_output_tokens": 2048,
-                },
+                generation_config=GENERATION_CONFIG,
             )
             telemetry.record_model_call(
                 response,
@@ -1092,9 +1089,19 @@ async def delete_chat(chat_id: str):
 # ---------------------------------------------------------------------------
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Best-effort client IP for rate limiting.
+
+    X-Forwarded-For is honored only when TRUST_PROXY_HEADERS is set — otherwise
+    a client can rotate the header to get a fresh bucket every request. Even
+    when trusted, take the rightmost hop (the address our proxy saw) rather than
+    the leftmost, which the client controls.
+    """
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -1148,7 +1155,7 @@ async def submit_feedback(request: Request, body: FeedbackRequest):
         await run_in_threadpool(feedback_store.upsert, record)
     except Exception as exc:
         logger.error("Failed to store feedback: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to store feedback.")
+        raise HTTPException(status_code=500, detail="Failed to store feedback.") from exc
 
     logger.info(
         "Feedback stored: chat_id=%s message_id=%s rating=%s",
@@ -1167,7 +1174,7 @@ async def feedback_stats():
         return await run_in_threadpool(feedback_store.stats)
     except Exception as exc:
         logger.error("Failed to fetch feedback stats: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to fetch stats.")
+        raise HTTPException(status_code=500, detail="Failed to fetch stats.") from exc
 
 
 @app.get("/feedback/records", dependencies=[Depends(require_admin)])
@@ -1196,7 +1203,7 @@ async def feedback_records(
         return {"records": [r.to_dict() for r in records]}
     except Exception as exc:
         logger.error("Failed to fetch feedback records: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to fetch records.")
+        raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
 
 
 @app.get("/ping")

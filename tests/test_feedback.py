@@ -16,8 +16,10 @@ import feedback
 from feedback import (
     FeedbackRecord,
     RateLimiter,
+    RedisFeedbackStore,
     SQLiteFeedbackStore,
     build_store,
+    env_int,
 )
 
 
@@ -137,6 +139,123 @@ class TestRateLimiter:
         limiter.reset()
         assert limiter.is_allowed("a") is True
 
+    def test_stale_buckets_are_reclaimed(self):
+        """A flood of one-shot IPs must not grow _buckets without bound."""
+        limiter = RateLimiter(max_calls=5, window_seconds=0.05)
+        for i in range(50):
+            limiter.is_allowed(f"ip-{i}")
+        assert len(limiter._buckets) == 50
+        import time
+
+        time.sleep(0.06)
+        # One more call sweeps everything now outside the window.
+        limiter.is_allowed("fresh")
+        assert len(limiter._buckets) == 1
+
+
+class TestEnvInt:
+    def test_reads_a_valid_value(self, monkeypatch):
+        monkeypatch.setenv("SOME_KNOB", "42")
+        assert env_int("SOME_KNOB", 10) == 42
+
+    @pytest.mark.parametrize("raw", ["not-a-number", "", "0", "-3"])
+    def test_bad_value_falls_back_instead_of_raising(self, monkeypatch, raw):
+        monkeypatch.setenv("SOME_KNOB", raw)
+        assert env_int("SOME_KNOB", 10) == 10
+
+    def test_unset_uses_default(self, monkeypatch):
+        monkeypatch.delenv("SOME_KNOB", raising=False)
+        assert env_int("SOME_KNOB", 7) == 7
+
+
+class FakeRedisPipeline:
+    def __init__(self, client):
+        self._client = client
+        self._ops = []
+
+    def hset(self, key, mapping):
+        self._ops.append(("hset", key, mapping))
+        return self
+
+    def expire(self, key, ttl):
+        self._ops.append(("expire", key, ttl))
+        return self
+
+    def zadd(self, key, mapping):
+        self._ops.append(("zadd", key, mapping))
+        return self
+
+    def zrem(self, key, member):
+        self._ops.append(("zrem", key, member))
+        return self
+
+    def execute(self):
+        for op in self._ops:
+            if op[0] == "hset":
+                self._client.hashes[op[1]] = dict(op[2])
+            elif op[0] == "zadd":
+                self._client.zsets.setdefault(op[1], {}).update(op[2])
+            elif op[0] == "zrem":
+                self._client.zsets.get(op[1], {}).pop(op[2], None)
+        self._ops.clear()
+
+
+class FakeRedis:
+    """Just enough Redis for RedisFeedbackStore's index bookkeeping."""
+
+    def __init__(self):
+        self.hashes = {}
+        self.zsets = {}
+
+    def pipeline(self):
+        return FakeRedisPipeline(self)
+
+    def hgetall(self, key):
+        return dict(self.hashes.get(key, {}))
+
+    def zcard(self, key):
+        return len(self.zsets.get(key, {}))
+
+    def zrevrange(self, key, start, stop):
+        members = sorted(self.zsets.get(key, {}).items(), key=lambda kv: kv[1], reverse=True)
+        return [m for m, _ in members][start:stop + 1]
+
+
+class TestRedisIndexHygiene:
+    """Re-rating and re-tagging must not leave dangling index memberships."""
+
+    def _store(self):
+        return RedisFeedbackStore(FakeRedis())
+
+    def test_rerating_moves_the_index_membership(self):
+        store = self._store()
+        store.upsert(make_record(rating="down"))
+        assert store._r.zcard("feedback:index:rating:down") == 1
+        assert store._r.zcard("feedback:index:rating:up") == 0
+
+        store.upsert(make_record(rating="up"))
+        # The old down membership is gone; not counted in both.
+        assert store._r.zcard("feedback:index:rating:down") == 0
+        assert store._r.zcard("feedback:index:rating:up") == 1
+
+    def test_removed_category_is_dropped_from_its_index(self):
+        store = self._store()
+        store.upsert(make_record(categories=["too_long", "too_vague"]))
+        assert store._r.zcard("feedback:index:cat:too_long") == 1
+
+        store.upsert(make_record(categories=["too_vague"]))
+        assert store._r.zcard("feedback:index:cat:too_long") == 0
+        assert store._r.zcard("feedback:index:cat:too_vague") == 1
+
+    def test_stats_are_not_double_counted_after_rerating(self):
+        store = self._store()
+        store.upsert(make_record(rating="down"))
+        store.upsert(make_record(rating="up"))
+        stats = store.stats()
+        assert stats["total"] == 1
+        assert stats["down"] == 0
+        assert stats["up"] == 1
+
     def test_window_expiry_frees_slots(self):
         limiter = RateLimiter(max_calls=1, window_seconds=0.05)
         assert limiter.is_allowed("a") is True
@@ -226,6 +345,17 @@ class TestExport:
         exp = self._export_module()
         monkeypatch.setattr(exp, "build_store", lambda: live)
         assert exp.export(output_path=None, db_path=None) == 1
+
+    @pytest.mark.parametrize("argv", [
+        ["--limit", "-1"],
+        ["--min-categories", "-2"],
+    ])
+    def test_cli_rejects_negative_values(self, argv, monkeypatch):
+        exp = self._export_module()
+        monkeypatch.setattr(exp.sys, "argv", ["export_eval_candidates.py", *argv])
+        with pytest.raises(SystemExit) as excinfo:
+            exp.main()
+        assert excinfo.value.code != 0
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +479,10 @@ class TestFeedbackEndpoint:
         ({"rating": "sideways"}, "rating"),
         ({"rating": "down", "categories": ["not_a_category"]}, "categories"),
         ({"rating": "down", "comment": "x" * 1001}, "comment"),
+        # Oversized snapshot fields must be rejected at the boundary, not stored.
+        ({"rating": "down", "prompt": "x" * 8001}, "prompt"),
+        ({"rating": "down", "answer": "x" * 16001}, "answer"),
+        ({"rating": "down", "categories": ["other"] * 50}, "categories"),
     ])
     async def test_invalid_body_is_422(self, client, payload, field):
         async with client:
@@ -395,6 +529,44 @@ class TestFeedbackEndpoint:
             statuses = [(await client.post("/feedback", json=body)).status_code for _ in range(5)]
             assert 429 in statuses
 
+    async def test_forwarded_header_ignored_unless_proxy_trusted(self, client, monkeypatch):
+        """Header rotation must not mint fresh buckets when proxy is untrusted."""
+        import main
+        monkeypatch.setattr(main, "TRUST_PROXY_HEADERS", False)
+        monkeypatch.setattr(main.rate_limiter, "_max", 2)
+        async with client:
+            chat_id, message_id = await self._one_answer(client)
+            body = {"chat_id": chat_id, "message_id": message_id, "rating": "up"}
+            statuses = []
+            for i in range(4):
+                resp = await client.post(
+                    "/feedback", json=body, headers={"X-Forwarded-For": f"9.9.9.{i}"}
+                )
+                statuses.append(resp.status_code)
+            # A rotating X-Forwarded-For gave no new buckets, so the limit bit.
+            assert 429 in statuses
+
+    async def test_trusted_proxy_uses_rightmost_hop(self, client, monkeypatch):
+        import main
+        monkeypatch.setattr(main, "TRUST_PROXY_HEADERS", True)
+        captured = {}
+        real_is_allowed = main.rate_limiter.is_allowed
+
+        def spy(ip):
+            captured["ip"] = ip
+            return real_is_allowed(ip)
+
+        monkeypatch.setattr(main.rate_limiter, "is_allowed", spy)
+        async with client:
+            chat_id, message_id = await self._one_answer(client)
+            await client.post(
+                "/feedback",
+                json={"chat_id": chat_id, "message_id": message_id, "rating": "up"},
+                headers={"X-Forwarded-For": "1.1.1.1, 2.2.2.2, 3.3.3.3"},
+            )
+            # Rightmost hop (what our proxy saw), not the client-controlled left.
+            assert captured["ip"] == "3.3.3.3"
+
 
 @pytest.mark.asyncio
 class TestAdminEndpoints:
@@ -410,6 +582,21 @@ class TestAdminEndpoints:
         async with client:
             resp = await client.get("/feedback/stats", headers={"X-Admin-Token": "wrong"})
             assert resp.status_code == 403
+
+    async def test_non_ascii_token_is_403_not_500(self, monkeypatch):
+        """compare_digest raises on non-ASCII str; the bytes compare must not.
+
+        Starlette decodes headers as latin-1, so a non-ASCII token can reach
+        require_admin as a str. httpx itself won't send such a header, so this
+        exercises the dependency directly.
+        """
+        import main
+        from fastapi import HTTPException
+
+        monkeypatch.setattr(main, "ADMIN_TOKEN", ADMIN_TOKEN)
+        with pytest.raises(HTTPException) as exc:
+            await main.require_admin(token="tøken-ünicode")
+        assert exc.value.status_code == 403
 
     async def test_unconfigured_token_disables_admin(self, client, monkeypatch):
         import main
