@@ -46,6 +46,7 @@ The platform is composed of three services:
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
+| `POST` | `/chat/stream` | Stream chat responses as Server-Sent Events |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
 | `GET` | `/memory/{user_id}` | Retrieve a stored user profile (transparency) |
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
@@ -87,6 +88,17 @@ uvicorn main:app --reload
 
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
+### Streaming chat endpoint
+
+Use the streaming endpoint to receive incremental chat output as Server-Sent Events:
+
+```bash
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "Explain the concept of tawakkul in Islam", "chat_id": "demo"}'
+```
+
+Each `delta` event contains a JSON payload like `{"delta": "..."}` and the terminal `done` event contains the `chat_id` and the completed text.
 ### Docker
 
 The included `Dockerfile` produces a production-ready image with Python 3.12,
