@@ -40,3 +40,10 @@ ENV/
 data/review/
 venv/
 .DS_Store
+
+# Local feedback database (SQLite fallback store)
+feedback.db
+feedback.db-*
+
+# Committed virtual environments are machine-specific — never commit them
+venv_linux/

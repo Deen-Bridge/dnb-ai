@@ -2,13 +2,18 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime, timezone
+from collections import OrderedDict
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field, field_validator
 import google.generativeai as genai
 import time
 
@@ -61,6 +66,14 @@ from confidence import (
 )
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
+from feedback import (
+    COMMENT_MAX_CHARS,
+    FEEDBACK_TAXONOMY,
+    FeedbackRecord,
+    env_int,
+    rate_limiter,
+    store as feedback_store,
+)
 
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
@@ -131,6 +144,7 @@ class ChatRequest(BaseModel):
 class Message(BaseModel):
     role: str
     content: str
+    message_id: Optional[str] = None  # present on model turns, for feedback
 
 
 class Moderation(BaseModel):
@@ -142,6 +156,7 @@ class ChatResponse(BaseModel):
     response: Optional[str] = None
     text: Optional[str] = None
     chat_id: str
+    message_id: Optional[str] = None  # stable id of the answer just returned
     history: List[Message] = []
     moderation: Optional[Moderation] = None
     fiqh: Optional[FiqhInfo] = None
@@ -150,6 +165,40 @@ class ChatResponse(BaseModel):
     confidence: Optional[ConfidenceAssessment] = None
     zakat: Optional[ZakatInfo] = None
     language: Optional[str] = None
+
+
+class FeedbackRequest(BaseModel):
+    chat_id: str = Field(..., max_length=200)
+    message_id: str = Field(..., max_length=200)
+    rating: str = Field(..., description="'up' or 'down'")
+    # At most one tag per taxonomy category; a caller cannot pad the list.
+    categories: Optional[List[str]] = Field(None, max_length=len(FEEDBACK_TAXONOMY))
+    comment: Optional[str] = Field(None, max_length=COMMENT_MAX_CHARS)
+    # Supplied by the client when the snapshot is gone (restart). Bounded so an
+    # anonymous caller cannot fill the store with multi-megabyte bodies — the
+    # rate limiter caps request count, not request size.
+    prompt: Optional[str] = Field(None, max_length=8000)
+    answer: Optional[str] = Field(None, max_length=16000)
+
+    @field_validator("rating")
+    @classmethod
+    def rating_must_be_valid(cls, v: str) -> str:
+        if v not in ("up", "down"):
+            raise ValueError("rating must be 'up' or 'down'")
+        return v
+
+    @field_validator("categories")
+    @classmethod
+    def categories_must_be_valid(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return v
+        invalid = set(v) - FEEDBACK_TAXONOMY
+        if invalid:
+            raise ValueError(
+                f"Unknown categories: {sorted(invalid)}. "
+                f"Valid choices: {sorted(FEEDBACK_TAXONOMY)}"
+            )
+        return v
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -246,6 +295,73 @@ def get_safety_settings():
 # In-memory session store for demo purposes
 sessions: Dict[str, Any] = {}
 active_chats: Dict[str, Any] = {}
+
+# --- Feedback support ------------------------------------------------------
+# The generation config captured into a feedback record so a flagged answer is
+# reproducible evidence, kept beside the model name telemetry already tracks.
+GENERATION_CONFIG: Dict[str, Any] = {
+    "temperature": 0.7,
+    "top_p": 0.8,
+    "top_k": 40,
+    "max_output_tokens": 2048,
+}
+
+# Stable ids for model answers, so the frontend can address one turn and the
+# feedback endpoint can locate what was said. Kept parallel to active_chats
+# rather than restructuring it: chat_id -> [message_id per model turn, in order].
+chat_message_ids: Dict[str, List[str]] = {}
+
+# Faithful snapshot of what the user was actually shown for each answered turn,
+# keyed by (chat_id, message_id). Feedback reads from here so the stored answer
+# is the displayed text (post safety/hadith/abstention shaping), not the raw
+# model output. Bounded LRU — on a free-tier restart it is empty, which is why
+# the feedback endpoint also accepts a client-supplied prompt/answer.
+FEEDBACK_SNAPSHOT_MAX = env_int("FEEDBACK_SNAPSHOT_MAX", 5000)
+answer_snapshots: "OrderedDict[tuple, Dict[str, str]]" = OrderedDict()
+
+# Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
+# control; otherwise any client can rotate the header to mint a fresh rate-limit
+# bucket on every request and defeat the only control on the write endpoint.
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
+
+
+def _record_answer(chat_id: str, prompt: str, answer: str) -> str:
+    """Assign a message id to a fresh answer, snapshot it, and return the id."""
+    message_id = str(uuid.uuid4())
+    chat_message_ids.setdefault(chat_id, []).append(message_id)
+    answer_snapshots[(chat_id, message_id)] = {"prompt": prompt, "answer": answer}
+    while len(answer_snapshots) > FEEDBACK_SNAPSHOT_MAX:
+        answer_snapshots.popitem(last=False)
+    return message_id
+
+
+def _tag_history_with_message_ids(chat_id: str, history: List["Message"]) -> None:
+    """Attach each model turn's stable id to the history returned to the client."""
+    ids = chat_message_ids.get(chat_id, [])
+    model_turn = 0
+    for message in history:
+        if message.role == "model":
+            if model_turn < len(ids):
+                message.message_id = ids[model_turn]
+            model_turn += 1
+
+
+# --- Admin auth (stopgap until real auth/rate-limiting infrastructure) ------
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+_admin_header = APIKeyHeader(name="X-Admin-Token", auto_error=False)
+
+
+async def require_admin(token: Optional[str] = Depends(_admin_header)) -> None:
+    """Gate admin endpoints on ADMIN_TOKEN; closed by default when unset."""
+    if not ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_TOKEN is not configured on this server.",
+        )
+    # Compare as bytes: secrets.compare_digest raises on non-ASCII str, which
+    # would turn a crafted header into a 500 instead of a clean 403.
+    if not token or not secrets.compare_digest(token.encode("utf-8"), ADMIN_TOKEN.encode("utf-8")):
+        raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
 
 ISLAMIC_CONTEXT = (
     "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
@@ -521,11 +637,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 ])
                 active_chats[chat_id] = chat_session
                 logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
+                cached_message_id = _record_answer(chat_id, prompt, cached.response)
                 _finalize()
                 _succeeded = True
                 return ChatResponse(
                     response=cached.response,
                     chat_id=chat_id,
+                    message_id=cached_message_id,
                     history=cached.history,
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(cached.response),
@@ -560,12 +678,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             response = await send_message_with_retry(
                 active_chats[chat_id],
                 full_prompt,
-                generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                    "max_output_tokens": 2048,
-                },
+                generation_config=GENERATION_CONFIG,
             )
             telemetry.record_model_call(
                 response,
@@ -687,6 +800,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
+        # Assign this answer a stable id and snapshot the displayed text, so a
+        # later /feedback call can reference exactly this turn and store what
+        # the user actually saw (post safety/hadith/abstention shaping).
+        message_id = _record_answer(chat_id, prompt, response_text)
+        _tag_history_with_message_ids(chat_id, history)
+
         trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
         logger.info("Chat response generated successfully")
         # Build the response before finalizing, so a construction/validation
@@ -695,6 +814,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         response_obj = ChatResponse(
             response=response_text,
             chat_id=chat_id,
+            message_id=message_id,
             history=history,
             moderation=Moderation(
                 category_id=safety_result.category_id,
@@ -949,14 +1069,141 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 @app.delete("/chat/{chat_id}")
 async def delete_chat(chat_id: str):
     try:
-        if chat_id in active_chats:
-            del active_chats[chat_id]
+        existed = chat_id in active_chats
+        active_chats.pop(chat_id, None)
+        # Drop this session's feedback bookkeeping too, so the message-id list
+        # and answer snapshots do not outlive the conversation they describe.
+        for message_id in chat_message_ids.pop(chat_id, []):
+            answer_snapshots.pop((chat_id, message_id), None)
+        if existed:
             logger.info(f"Deleted chat session: {chat_id}")
             return {"message": "Chat session deleted successfully"}
         return {"message": "Chat session not found"}
     except Exception as e:
         logger.error("Error deleting chat", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+# ---------------------------------------------------------------------------
+# Feedback: capture and admin views
+# ---------------------------------------------------------------------------
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP for rate limiting.
+
+    X-Forwarded-For is honored only when TRUST_PROXY_HEADERS is set — otherwise
+    a client can rotate the header to get a fresh bucket every request. Even
+    when trusted, take the rightmost hop (the address our proxy saw) rather than
+    the leftmost, which the client controls.
+    """
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
+    return request.client.host if request.client else "unknown"
+
+
+@app.post("/feedback", status_code=200)
+async def submit_feedback(request: Request, body: FeedbackRequest):
+    """Attach a rating and optional failure categories to one model answer.
+
+    The prompt/answer snapshot is resolved server-side from what the user was
+    shown for that (chat_id, message_id). If the snapshot is gone — a free-tier
+    restart evicts it — the client MUST supply prompt and answer, or the
+    request is rejected with 422.
+
+    Rate-limited per IP (in-process sliding window). Idempotent: resubmitting
+    for the same (chat_id, message_id) overwrites the earlier record.
+    """
+    if not rate_limiter.is_allowed(_client_ip(request)):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many feedback submissions. Please wait before trying again.",
+        )
+
+    snapshot = answer_snapshots.get((body.chat_id, body.message_id))
+    prompt_text = snapshot["prompt"] if snapshot else body.prompt
+    answer_text = snapshot["answer"] if snapshot else body.answer
+
+    if snapshot is None and (not prompt_text or not answer_text):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "This answer is no longer in memory. Please supply 'prompt' and "
+                "'answer' in the request body so the feedback has context."
+            ),
+        )
+
+    record = FeedbackRecord(
+        feedback_id=str(uuid.uuid4()),
+        chat_id=body.chat_id,
+        message_id=body.message_id,
+        rating=body.rating,
+        categories=body.categories or [],
+        comment=body.comment,
+        prompt=prompt_text,
+        answer=answer_text,
+        model_name=telemetry.GEMINI_MODEL,
+        generation_config=GENERATION_CONFIG,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    try:
+        # SQLite/Redis I/O is synchronous; keep it off the event loop.
+        await run_in_threadpool(feedback_store.upsert, record)
+    except Exception as exc:
+        logger.error("Failed to store feedback: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to store feedback.") from exc
+
+    logger.info(
+        "Feedback stored: chat_id=%s message_id=%s rating=%s",
+        body.chat_id, body.message_id, body.rating,
+    )
+    return {"status": "ok", "feedback_id": record.feedback_id}
+
+
+@app.get("/feedback/stats", dependencies=[Depends(require_admin)])
+async def feedback_stats():
+    """Aggregate quality metrics: rating ratios, per-category, per-model, by day.
+
+    Requires the X-Admin-Token header.
+    """
+    try:
+        return await run_in_threadpool(feedback_store.stats)
+    except Exception as exc:
+        logger.error("Failed to fetch feedback stats: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch stats.") from exc
+
+
+@app.get("/feedback/records", dependencies=[Depends(require_admin)])
+async def feedback_records(
+    rating: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 50,
+):
+    """Recent flagged records, filterable by rating and category.
+
+    Requires the X-Admin-Token header.
+    """
+    if rating and rating not in ("up", "down"):
+        raise HTTPException(status_code=422, detail="rating must be 'up' or 'down'")
+    if category and category not in FEEDBACK_TAXONOMY:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown category. Valid: {sorted(FEEDBACK_TAXONOMY)}",
+        )
+    if not (1 <= limit <= 500):
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    try:
+        records = await run_in_threadpool(
+            feedback_store.list_records, rating, category, limit
+        )
+        return {"records": [r.to_dict() for r in records]}
+    except Exception as exc:
+        logger.error("Failed to fetch feedback records: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
 
 
 @app.get("/ping")

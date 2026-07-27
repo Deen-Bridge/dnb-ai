@@ -63,6 +63,9 @@ The platform is composed of three services:
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
 | `GET` | `/review/{id}` | A single review item (reviewer token) |
 | `POST` | `/review/{id}/verdict` | Record approve / correct / reject (reviewer token) |
+| `POST` | `/feedback` | Rate a specific answer and flag failure categories |
+| `GET` | `/feedback/stats` | Aggregate answer-quality metrics (admin token) |
+| `GET` | `/feedback/records` | Browse flagged records, filterable (admin token) |
 
 ## 🚀 Getting Started
 
@@ -151,6 +154,10 @@ services:
 | `ZAKAT_NISAB_USD` | Fallback nisab when no gold price can be fetched | `6000` |
 | `NISAB_CACHE_TTL_SECONDS` | How long a fetched gold price is reused | `21600` (6h) |
 | `GOLD_PRICE_TIMEOUT` | Gold price request timeout in seconds | `8` |
+| `ADMIN_TOKEN` | Enables the feedback admin endpoints; required as `X-Admin-Token` | — (endpoints disabled) |
+| `FEEDBACK_DB_PATH` | SQLite path for the feedback store (when Redis is not used) | `feedback.db` |
+| `FEEDBACK_RATE_LIMIT_MAX` | Max feedback submissions per IP per window | `20` |
+| `FEEDBACK_RATE_LIMIT_WINDOW` | Feedback rate-limit window in seconds | `60` |
 | `QURAN_API_BASE` | Base URL for tafsir/ayah retrieval | `https://api.quran.com/api/v4` |
 | `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
@@ -383,6 +390,60 @@ figures used.
 validation like any other malformed input, so one can never reach Horizon. If a
 message looks like it contains a secret key, the assistant refuses to use it and
 warns the user to treat it as compromised — without repeating it back.
+
+### Answer feedback & the quality loop
+
+Every chat answer carries a stable `message_id`, so the frontend can rate a
+specific turn. `POST /feedback` attaches an up/down rating and optional failure
+categories to that answer:
+
+```bash
+curl -sX POST http://localhost:8000/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{"chat_id": "…", "message_id": "…", "rating": "down",
+       "categories": ["wrong_or_missing_citation"], "comment": "Ayah number is off"}'
+```
+
+- **Snapshot resolution.** The prompt and the *displayed* answer (after any
+  safety, hadith, or confidence shaping) are resolved server-side from what the
+  user actually saw — the client never has to be trusted for them. On a
+  free-tier restart the snapshot is gone; the client then supplies `prompt` and
+  `answer`, and a request missing both is a `422`.
+- **Validation.** `rating` must be `up`/`down`, categories are checked against a
+  fixed taxonomy, and `comment` is length-capped — bad input is a `422`.
+- **Idempotent.** Resubmitting for the same `(chat_id, message_id)` overwrites,
+  so a user changing their mind never double-counts.
+- **Rate-limited** per IP (in-process sliding window), and durably stored in
+  SQLite locally or Redis when `REDIS_URL` is set — the same store direction the
+  session and scholar-review work use, not a parallel one.
+
+Maintainers read the aggregate signal through two **admin** endpoints, gated on
+`X-Admin-Token` and disabled entirely until `ADMIN_TOKEN` is set:
+
+```bash
+curl -s http://localhost:8000/feedback/stats   -H "X-Admin-Token: $ADMIN_TOKEN"
+curl -s "http://localhost:8000/feedback/records?rating=down&category=too_vague" \
+     -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+#### Eval-candidate export
+
+Down-rated answers become candidates for the evaluation dataset (issue #16
+format). Each carries `needs_review: true` and an `answer_draft` for the
+reviewer to judge — the script **never** fabricates an expected answer for
+religious content:
+
+```bash
+# Reads whichever store the service is configured to use (Redis or SQLite):
+python scripts/export_eval_candidates.py --output candidates.jsonl
+REDIS_URL=redis://localhost:6379 python scripts/export_eval_candidates.py --output candidates.jsonl
+
+# …or force a specific SQLite file:
+python scripts/export_eval_candidates.py --db feedback.db --output candidates.jsonl
+```
+
+Near-duplicate prompts are deduplicated; approved candidates feed the harness
+and, via #56, the semantic cache.
 
 ### Content-safety testing
 
