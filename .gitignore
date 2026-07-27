@@ -38,3 +38,10 @@ ENV/
 *.log 
 # Scholar-review export (contains user questions)
 data/review/
+
+# Local feedback database (SQLite fallback store)
+feedback.db
+feedback.db-*
+
+# Committed virtual environments are machine-specific — never commit them
+venv_linux/
