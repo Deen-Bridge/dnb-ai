@@ -25,16 +25,69 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest flake8
+          pip install pytest flake8 pytest-asyncio
 
       - name: Run linting
-        run: flake8 . --exclude=venv,.venv --max-line-length=120 --ignore=E501,W503
+        run: flake8 main.py memory stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py tests/test_zakat.py tests/test_telemetry.py tests/test_multilingual.py tests/test_memory_profile.py tests/test_memory_extraction.py tests/test_memory_integration.py scripts/build_hadith_data.py scripts/build_surah_index.py --max-line-length=120 --ignore=E501,W503
 
       - name: Check syntax
-        run: |
-          python -m py_compile main.py
-          python -m py_compile corpus.py
-          python -m py_compile verifier.py
+        run: python -m compileall -q main.py memory stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py scripts/build_hadith_data.py scripts/build_surah_index.py
 
-      - name: Run offline unit tests
-        run: pytest
+      - name: Run offline safety and red-team tests
+        run: pytest -q tests/redteam
+
+      - name: Run study generator tests
+        run: pytest -q tests/test_study.py
+
+      - name: Run semantic cache tests
+        run: pytest -q tests/test_semantic_cache.py
+
+      - name: Run fiqh tests
+        run: pytest -q tests/test_fiqh.py
+
+      - name: Run hadith grading tests
+        run: pytest -q tests/test_hadith.py
+
+      - name: Run confidence and abstention tests
+        run: pytest -q tests/test_confidence.py
+
+      - name: Run scholar-review queue tests
+        run: pytest -q tests/test_review_queue.py
+
+      - name: Run tafsir tests
+        run: pytest -q tests/test_tafsir.py
+
+      - name: Run zakat and nisab tests
+        run: pytest -q tests/test_zakat.py
+
+      - name: Run LLM telemetry tests
+        run: pytest -q tests/test_telemetry.py
+
+      - name: Run multilingual support tests
+        run: pytest -q tests/test_multilingual.py
+
+      - name: Run memory profile tests
+        run: pytest -q tests/test_memory_profile.py
+
+      - name: Run memory extraction tests
+        run: pytest -q tests/test_memory_extraction.py
+
+      - name: Run memory integration tests
+        run: pytest -q tests/test_memory_integration.py
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t deenbridge-ai:ci .
+
+      - name: Verify container starts and /ping returns 200
+        run: |
+          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
+          sleep 5
+          curl -sf http://localhost:8000/ping
+          docker stop test-ai
