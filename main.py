@@ -951,42 +951,97 @@ async def _summarize_history(
 
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest, http_request: Request):
-    """Streaming chat endpoint using Server-Sent Events (SSE)."""
+    """Streaming chat endpoint using Server-Sent Events (SSE).
+
+    Returns incremental ``data:`` events carrying text deltas as JSON
+    (``{"type": "content", "delta": "..."}``), followed by a terminal
+    ``{"type": "done", ...}`` event with chat_id, history, and metadata.
+    Mid-stream upstream errors terminate the stream with an explicit error
+    event rather than silently truncating.
+
+    Session behaviour matches the non-streaming ``/chat`` endpoint:
+    streamed turns end up in the same ``active_chats`` history, and a
+    follow-up non-streamed message in the same ``chat_id`` sees the
+    streamed answer as context.
+
+    Accepts the same request schema as ``POST /chat``.
+    """
+    trace = telemetry.Trace()
+    _ctx_token = telemetry.current_trace.set(trace)
+    _handler_start = time.perf_counter()
+
     try:
         chat_id = request.chat_id or str(uuid.uuid4())
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
-        logger.info(f"Received streaming chat request: {prompt[:100]}...")
+        logger.info("Received streaming chat request: %s...", prompt[:100])
 
-        # --- Fiqh classification & madhhab ---
-        madhhab = normalize_madhhab(request.madhhab)
-        is_fiqh = classify_fiqh(prompt)
-        effective_language = normalize_language(request.language)
+        # --- Fiqh/intent classification & madhhab ---
+        with trace.span("classification"):
+            madhhab = normalize_madhhab(request.madhhab)
+            is_fiqh = classify_fiqh(prompt)
+            fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
+            effective_language = normalize_language(request.language)
 
-        # --- Tafsir retrieval ---
-        tafsir_context = await tafsir_retriever(
-            prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
-        )
+        # --- Tafsir and zakat retrieval ---
+        with trace.span("retrieval"):
+            tafsir_context = await tafsir_retriever(
+                prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
+            )
+            tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
+            zakat_context = await zakat_retriever(request.prompt, request.context)
+            zakat_info = zakat_context.info if zakat_context else None
 
-        # --- Zakat calculation ---
-        zakat_context = await zakat_retriever(request.prompt, request.context)
+        combined_text: str = ""  # accumulated full response for post-processing
+        chat_session = None
+
+        safety_enabled = os.getenv(
+            "SAFETY_PIPELINE_ENABLED", "true"
+        ).lower() not in {"0", "false", "off"}
 
         async def event_generator():
+            """SSE generator: metadata → content deltas → done/error."""
+            nonlocal combined_text, chat_session
+
+            # Track the Gemini streaming response for disconnect handling
+            stream_response: Any = None
+            decision: Any = None
+            hadith_refs: List[HadithReference] = []
+            assessment: Optional[ConfidenceAssessment] = None
+
             try:
-                # Send metadata first
-                metadata = json.dumps({"type": "metadata", "chat_id": chat_id, "language": effective_language})
-                yield f"data: {metadata}\n\n"
+                # --- Metadata event ---
+                meta = json.dumps({"type": "metadata", "chat_id": chat_id, "language": effective_language})
+                yield f"data: {meta}\n\n"
 
-                # Create or get chat session
+                # --- Safety input gate ---
+                if safety_enabled:
+                    with trace.span("safety_input"):
+                        decision = await safety_pipeline.input_gate.evaluate_async(prompt)
+
+                    if decision.action == "refuse":
+                        err = json.dumps({
+                            "type": "error",
+                            "message": "Your message was not processed due to content policy.",
+                        })
+                        yield f"data: {err}\n\n"
+                        return
+
+                    if decision.action == "allow_with_guidance":
+                        generation_prompt = f"{decision.guidance}\n\nUser question: {prompt}"
+                    else:
+                        generation_prompt = prompt
+                else:
+                    generation_prompt = prompt
+
+                # --- Create or get chat session ---
                 if chat_id not in active_chats:
-                    logger.info(f"Creating new streaming chat session: {chat_id}")
-                    model = genai.GenerativeModel(
-                        telemetry.GEMINI_MODEL,
-                        safety_settings=get_safety_settings()
-                    )
-                    active_chats[chat_id] = model.start_chat(history=[])
+                    logger.info("Creating new streaming chat session: %s", chat_id)
+                    active_chats[chat_id] = get_model().start_chat(history=[])
 
-                # Build system context
+                chat_session = active_chats[chat_id]
+
+                # --- Build system context + prompt ---
                 system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
                 if effective_language:
                     system_context += LANGUAGE_INSTRUCTIONS
@@ -997,59 +1052,166 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 if is_fiqh:
                     system_context += FIQH_IKHTILAF_CONTEXT
                     if madhhab:
-                        system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
+                        system_context += MADHHAB_LEAD_INSTRUCTION.format(
+                            madhhab=madhhab
+                        )
                 if tafsir_context is not None:
                     system_context += tafsir_system_context(tafsir_context)
                 if zakat_context is not None:
                     system_context += zakat_context.prompt_block
 
-                context = f"Additional context: {extra_context}\n\n" if extra_context else ""
-                full_prompt = f"{system_context}\n{context}User question: {prompt}"
+                ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
+                full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
 
-                # Stream the response
-                logger.info("Starting streaming response...")
-                response_stream = active_chats[chat_id].send_message(
-                    full_prompt,
-                    generation_config={
-                        "temperature": 0.7,
-                        "top_p": 0.8,
-                        "top_k": 40,
-                        "max_output_tokens": 2048,
+                # --- Async streaming generation ---
+                with trace.span("generation"):
+                    logger.info("Starting async streaming response...")
+                    _t0 = time.perf_counter()
+
+                    stream_response = await active_chats[chat_id].send_message_async(
+                        full_prompt,
+                        generation_config=GENERATION_CONFIG,
+                        stream=True,
+                    )
+
+                    async for chunk in stream_response:
+                        if chunk.text:
+                            combined_text += chunk.text
+                            delta = json.dumps({
+                                "type": "content",
+                                "delta": chunk.text,
+                            })
+                            yield f"data: {delta}\n\n"
+
+                    telemetry.record_model_call(
+                        stream_response,
+                        telemetry.GEMINI_MODEL,
+                        (time.perf_counter() - _t0) * 1000.0,
+                        stage="generation",
+                        trace=trace,
+                    )
+
+                # If there was an accumulated text (should always be the case
+                # after the loop), run post-processing.
+                _pp_start = time.perf_counter()
+
+                # --- Safety output check on the final text ---
+                if safety_enabled and combined_text:
+                    output_result = safety_pipeline.output_check.enforce(
+                        combined_text,
+                        decision if safety_enabled else None,
+                    )
+                    combined_text = output_result.text
+
+                # --- Hadith authenticity grading ---
+                hadith_refs = annotate_hadith(combined_text)
+                caution = build_caution_note(combined_text, hadith_refs)
+                if caution:
+                    combined_text = f"{combined_text.rstrip()}\n\n{caution}"
+
+                # --- Confidence assessment & scholar review ---
+                signals = build_signals(
+                    combined_text,
+                    is_religious=is_fiqh or bool(hadith_refs),
+                    is_high_stakes=is_fiqh,
+                )
+                assessment = assess(signals)
+
+                if assessment.queued:
+                    try:
+                        item = await enqueue_for_review(
+                            question=prompt,
+                            answer=combined_text,
+                            score=assessment.score,
+                            band=assessment.band.value,
+                            signals=assessment.signals,
+                            chat_id=chat_id,
+                        )
+                        assessment.review_id = item.id
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error(
+                            "Could not queue streaming answer for review: %s", exc
+                        )
+                        assessment.queued = False
+
+                combined_text = apply_policy(combined_text, assessment)
+
+                logger.info(
+                    "confidence=%s",
+                    {
+                        "score": assessment.score,
+                        "band": assessment.band.value,
+                        "signals": assessment.signals_used,
+                        "queued": assessment.queued,
                     },
-                    stream=True
                 )
 
-                # Yield each chunk
-                for chunk in response_stream:
-                    if chunk.text:
-                        content_data = json.dumps({"type": "content", "text": chunk.text})
-                        yield f"data: {content_data}\n\n"
-
-                # Build history for response
-                history = []
-                chat_session = active_chats.get(chat_id)
-                for message in chat_session.history if chat_session else []:
+                # --- Build history ---
+                history: List[Message] = []
+                for msg in chat_session.history if chat_session else []:
                     try:
-                        if hasattr(message, 'parts') and message.parts:
-                            content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
+                        if hasattr(msg, "parts") and msg.parts:
+                            content = (
+                                msg.parts[0].text
+                                if hasattr(msg.parts[0], "text")
+                                else str(msg.parts[0])
+                            )
                         else:
-                            content = str(message)
+                            content = str(msg)
                         history.append(Message(
-                            role="user" if message.role == "user" else "model",
-                            content=content
+                            role="user" if msg.role == "user" else "model",
+                            content=content,
                         ))
-                    except Exception as e:
-                        logger.warning(f"Error processing message in history: {str(e)}")
+                    except Exception as exc:
+                        logger.warning("Error processing message in history: %s", exc)
                         continue
 
-                # Send done event
-                done_data = json.dumps({"type": "done", "chat_id": chat_id, "history": [m.model_dump() for m in history]})
-                yield f"data: {done_data}\n\n"
+                trace.add_span(
+                    "post_processing",
+                    (time.perf_counter() - _pp_start) * 1000.0,
+                )
 
-            except Exception as e:
-                logger.error(f"Streaming error: {str(e)}")
-                error_data = json.dumps({"type": "error", "message": str(e)})
-                yield f"data: {error_data}\n\n"
+                # --- Terminal done event ---
+                done = json.dumps({
+                    "type": "done",
+                    "chat_id": chat_id,
+                    "history": [m.model_dump() for m in history],
+                    "text": combined_text,
+                    "confidence": assessment.model_dump() if assessment else None,
+                    "hadith_references": (
+                        [r.model_dump() for r in hadith_refs] if hadith_refs else None
+                    ),
+                    "fiqh": fiqh_info.model_dump() if fiqh_info else None,
+                    "tafsir": tafsir_info.model_dump() if tafsir_info else None,
+                    "zakat": zakat_info.model_dump() if zakat_info else None,
+                }, ensure_ascii=False)
+                yield f"data: {done}\n\n"
+
+                logger.info("Streaming chat response completed for %s", chat_id)
+
+            except asyncio.CancelledError:
+                # Client disconnected mid-stream. Consume remaining chunks
+                # (if any) so the Gemini SDK finalises chat.history and a
+                # follow-up message in this session isn't left broken.
+                logger.info("Client disconnected from streaming chat %s", chat_id)
+                if stream_response is not None:
+                    try:
+                        await stream_response.resolve()
+                    except Exception:
+                        pass
+                raise
+
+            except Exception as exc:
+                logger.error("Streaming error for %s: %s", chat_id, exc)
+                err = json.dumps({
+                    "type": "error",
+                    "message": "An error occurred during response generation.",
+                })
+                try:
+                    yield f"data: {err}\n\n"
+                except Exception:
+                    # Client may have already disconnected; nothing to do.
+                    pass
 
         return StreamingResponse(
             event_generator(),
@@ -1058,12 +1220,24 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
-            }
+            },
         )
 
-    except Exception as e:
-        logger.error("Streaming Chat API Error", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+    except Exception as exc:
+        logger.exception(
+            "Unexpected error initialising streaming chat %s: %s",
+            getattr(request, "chat_id", None),
+            exc,
+        )
+        raise HTTPException(
+            status_code=500, detail="AI service error",
+        )
+    finally:
+        telemetry.registry.record_request(
+            (time.perf_counter() - _handler_start) * 1000.0,
+            error=False,
+        )
+        telemetry.current_trace.reset(_ctx_token)
 
 
 @app.delete("/chat/{chat_id}")
