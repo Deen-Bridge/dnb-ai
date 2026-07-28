@@ -47,6 +47,8 @@ The platform is composed of three services:
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
+| `GET` | `/memory/{user_id}` | Retrieve a stored user profile (transparency) |
+| `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
