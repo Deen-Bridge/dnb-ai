@@ -6,7 +6,7 @@ import json
 import os
 from dotenv import load_dotenv
 import logging
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 import uuid
 
 from stellar import router as stellar_router
@@ -25,6 +25,15 @@ from fiqh import (
     normalize_madhhab,
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from intent import (
+    Intent,
+    ClassificationResult,
+    classify_intent,
+    get_intent_config,
+    parse_followups,
+    strip_followup_block,
+    should_clarify,
+)
 from study import router as study_router
 from tafsir import (
     TafsirContext,
@@ -92,6 +101,8 @@ except Exception as e:
 
 # Store active chats
 active_chats = {}
+# Track the last classification per session to avoid double-clarification
+_last_classifications: Dict[str, Optional[ClassificationResult]] = {}
 
 # Islamic context and safety instructions
 ISLAMIC_CONTEXT = """You are an AI assistant specialized in providing Islamic knowledge and guidance.
@@ -138,6 +149,10 @@ class ChatResponse(BaseModel):
     hadith_references: Optional[List[HadithReference]] = None
     tafsir: Optional[TafsirInfo] = None
     confidence: Optional[ConfidenceAssessment] = None
+    intent: Optional[str] = None
+    needs_clarification: bool = False
+    clarifying_question: str = ""
+    suggested_followups: List[str] = []
 
 
 def classify_for_safety(prompt: str, candidate_ids: List[str]):
@@ -230,6 +245,54 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         is_fiqh = classify_fiqh(request.prompt)
         fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
 
+        # --- Intent classification ---
+        # A lightweight classifier (deterministic short-circuit for greetings,
+        # one Gemini call for everything else) that guides answer shape, length,
+        # and whether to ask a clarifying question before answering.
+        import time
+        _intent_start = time.monotonic()
+        classifier_model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=256,
+            ),
+        )
+        classification = classify_intent(
+            request.prompt,
+            model_callable=classifier_model.generate_content,
+        )
+        logger.info(
+            "Intent: %s | chat_id=%s | ambiguous=%s | latency=%.0fms",
+            classification.intent.value,
+            chat_id,
+            classification.needs_clarification,
+            (time.monotonic() - _intent_start) * 1000,
+        )
+
+        # --- Clarify-before-answering ---
+        # When a question is genuinely ambiguous, ask one clarifying question
+        # instead of guessing. The no-double-clarification guard ensures we
+        # never ask twice in a row for the same session.
+        last_cls = _last_classifications.get(chat_id)
+        if should_clarify(classification, last_cls):
+            _last_classifications[chat_id] = classification
+            clarifying_question = classification.clarifying_question or (
+                "Could you please provide more detail so I can help you better?"
+            )
+            return ChatResponse(
+                response=clarifying_question,
+                chat_id=chat_id,
+                history=[],
+                intent=classification.intent.value,
+                needs_clarification=True,
+                clarifying_question=clarifying_question,
+            )
+        _last_classifications[chat_id] = classification
+
+        # --- Per-intent generation config ---
+        intent_config = get_intent_config(classification.intent)
+
         # --- Tafsir retrieval for verse-explanation questions ---
         # Detection is offline (regex + the bundled surah index), so a
         # non-tafsir prompt costs nothing.
@@ -274,6 +337,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     history=cached.history,
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(cached.response),
+                    intent=classification.intent.value,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -288,7 +352,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 )
                 active_chats[chat_id] = model.start_chat(history=[])
 
+            # Build system context with per-intent instruction snippet
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
+            system_context += f"\n\nINTENT-SPECIFIC GUIDANCE:\n{intent_config.instruction_snippet}"
             if is_fiqh:
                 system_context += FIQH_IKHTILAF_CONTEXT
                 if madhhab:
@@ -301,10 +367,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             response = active_chats[chat_id].send_message(
                 full_prompt,
                 generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                    "max_output_tokens": 2048,
+                    "temperature": intent_config.temperature,
+                    "top_p": intent_config.top_p,
+                    "top_k": intent_config.top_k,
+                    "max_output_tokens": intent_config.max_output_tokens,
                 }
             )
             if not response.text:
@@ -348,6 +414,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         response_text = safety_result.text if safety_result else generated_text
 
+        # --- Suggested follow-ups ---
+        # Parse follow-up questions from the model response, then strip the
+        # raw delimited block so it never leaks into the visible answer.
+        suggested_followups = parse_followups(response_text)
+        response_text = strip_followup_block(response_text)
+
         # --- Hadith authenticity grading ---
         # Baked into response_text *before* the cache write so a cached hit
         # replays the same caution the user originally saw.
@@ -359,13 +431,26 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         # --- Confidence, abstention, and scholar escalation ---
         # is_religious and is_high_stakes reuse classification that already ran
         # this turn (the fiqh classifier and the hadith annotator) rather than
-        # adding a competing classifier. self_consistency (#ai-18) and
-        # citation_verification (#40) are passed through when those components
-        # supply them; until then they are simply absent from the average.
+        # adding a competing classifier. The intent classifier enriches this:
+        # fiqh_ruling and out_of_scope are treated as high-stakes, while
+        # factual_knowledge and personal_guidance are religious content.
+        # self_consistency (#ai-18) and citation_verification (#40) are passed
+        # through when those components supply them; until then they are simply
+        # absent from the average.
+        is_high_stakes = is_fiqh or classification.intent in (
+            Intent.FIQH_RULING,
+            Intent.OUT_OF_SCOPE,
+        )
+        is_religious = (
+            is_fiqh
+            or bool(hadith_refs)
+            or classification.intent
+            in (Intent.FACTUAL_KNOWLEDGE, Intent.PERSONAL_GUIDANCE, Intent.FIQH_RULING)
+        )
         signals = build_signals(
             response_text,
-            is_religious=is_fiqh or bool(hadith_refs),
-            is_high_stakes=is_fiqh,
+            is_religious=is_religious,
+            is_high_stakes=is_high_stakes,
         )
         assessment = assess(signals)
         answer_before_policy = response_text
@@ -426,6 +511,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             hadith_references=hadith_refs,
             tafsir=tafsir_info,
             confidence=assessment,
+            intent=classification.intent.value,
+            suggested_followups=suggested_followups,
         )
 
     except Exception as e:
@@ -439,9 +526,9 @@ async def delete_chat(chat_id: str):
     try:
         if chat_id in active_chats:
             del active_chats[chat_id]
-            logger.info(f"Deleted chat session: {chat_id}")
-            return {"message": "Chat session deleted successfully"}
-        return {"message": "Chat session not found"}
+        _last_classifications.pop(chat_id, None)
+        logger.info(f"Deleted chat session: {chat_id}")
+        return {"message": "Chat session deleted successfully"}
     except Exception as e:
         error_msg = f"❌ Error deleting chat: {str(e)}"
         logger.error(error_msg)
