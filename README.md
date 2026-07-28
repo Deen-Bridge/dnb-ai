@@ -46,6 +46,7 @@ The platform is composed of three services:
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
+| `POST` | `/chat/stream` | Streaming variant of `/chat` using Server-Sent Events |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
 | `GET` | `/memory/{user_id}` | Retrieve a stored user profile (transparency) |
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
@@ -268,6 +269,82 @@ valuable eval case.
 
 `ChatResponse` gains an optional `confidence: {score, band, abstained, queued,
 signals, review_id}` block. It is additive; existing clients are unaffected.
+### Streaming chat responses (Server-Sent Events)
+
+`POST /chat/stream` is a streaming variant of the chat endpoint that returns
+tokens incrementally via Server-Sent Events (SSE). Rather than waiting for the
+entire Gemini generation to finish, text deltas are forwarded as they arrive
+— a modern chat UI shows text appearing in real-time instead of a spinner.
+
+#### Request schema
+
+The same request body as `POST /chat`:
+
+```json
+{
+  "prompt": "What does Islam say about patience?",
+  "chat_id": "optional-existing-session-id",
+  "context": "optional-additional-context",
+  "madhhab": "hanafi",
+  "language": "en"
+}
+```
+
+#### SSE event protocol
+
+Each line is a `data:` event conforming to the SSE spec. Events are separated
+by double newlines (`\n\n`):
+
+1. **Metadata** — emitted first, carries the `chat_id`:
+   ```
+   data: {"type": "metadata", "chat_id": "<uuid>"}
+   ```
+
+2. **Content deltas** — one or more events carrying incremental text. Each
+   `delta` is a newly generated token fragment that should be appended to
+   whatever the client has already received:
+   ```
+   data: {"type": "content", "delta": "In "}
+   data: {"type": "content", "delta": "the "}
+   data: {"type": "content", "delta": "name "}
+   ```
+
+3. **Done** — terminal event with the complete response, chat history, and
+   metadata (confidence, hadith references, fiqh info, tafsir info, zakat info):
+   ```json
+   data: {"type": "done", "chat_id": "<uuid>", "history": [...], "text": "...", "confidence": {...}}
+   ```
+
+4. **Error** — if an upstream error occurs mid-stream, a terminal error event
+   is emitted instead of silently truncating:
+   ```json
+   data: {"type": "error", "message": "An error occurred during response generation."}
+   ```
+
+#### Session behaviour
+
+Streamed turns are stored in the same `active_chats` session store as
+non-streamed ones. A follow-up `POST /chat` or `POST /chat/stream` request
+with the same `chat_id` will see the streamed answer as context.
+
+#### Example
+
+```bash
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "What does Islam say about patience?"}'
+```
+
+The `-N` flag disables curl's output buffering so text appears incrementally.
+
+#### Safety, telemetry, and confidence
+
+The streaming endpoint applies the same safety pipeline (InputGate before
+generation, OutputCheck on the final text), telemetry (Trace spans, model call
+recording), hadith authenticity grading, and confidence / abstention assessment
+as the non-streaming `/chat` endpoint. All metadata is included in the terminal
+`done` event.
+
 ### Tafsir (ayah explanation)
 
 `POST /tafsir` explains an ayah from **named** tafsir works instead of from the
