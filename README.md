@@ -19,7 +19,9 @@
 
 This service powers the AI assistant inside **Deen Bridge**, a platform for authentic Islamic education built on the **Stellar network** — courses and books are purchased with USDC, and creators are paid directly to their own Stellar wallets. The assistant wraps Google's Gemini model with an Islamic-knowledge system prompt, content safety filters, and per-session conversation history, exposing a simple chat API consumed by the web app.
 
-On the roadmap: Stellar-aware assistance — zakat calculation from a wallet's on-chain USDC balance via Horizon, and answering questions about the user's on-chain purchases (see the open `wave:*` issues).
+On the roadmap: further Stellar-aware assistance beyond zakat and purchase Q&A
+(see open issues). Zakat on a wallet's on-chain USDC balance and factual answers
+about the signed-in user's Stellar course/book purchases are already supported.
 
 The platform is composed of three services:
 
@@ -550,6 +552,16 @@ figures used.
 validation like any other malformed input, so one can never reach Horizon. If a
 message looks like it contains a secret key, the assistant refuses to use it and
 warns the user to treat it as compromised — without repeating it back.
+
+**Purchase history in chat.** A signed-in frontend can pass a short
+`transactions` summary (hash, amount, status, item title, date, optional memo)
+on `POST /chat`, or an `auth_token` so this service fetches
+`/api/stellar/payment/transactions` from dnb-backend. Purchase questions then
+get factual answers with a [stellar.expert](https://stellar.expert) explorer
+link per hash. Without history the assistant says it cannot see purchases;
+memos are treated as untrusted data so injection text cannot change behavior.
+Purchase answers are never written to the semantic cache and include a
+`purchases` block on the response.
 
 ### Answer feedback & the quality loop
 

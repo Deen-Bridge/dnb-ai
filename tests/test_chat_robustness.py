@@ -24,6 +24,7 @@ def setup_env(monkeypatch):
     monkeypatch.setenv("SAFETY_PIPELINE_ENABLED", "false")
     monkeypatch.setattr(main, "SEMANTIC_CACHE_ENABLED", False)
     monkeypatch.setattr(main, "zakat_retriever", AsyncMock(return_value=None))
+    monkeypatch.setattr(main, "purchase_retriever", AsyncMock(return_value=None))
     monkeypatch.setattr(main, "tafsir_retriever", AsyncMock(return_value=None))
     monkeypatch.setattr(main, "enqueue_for_review", AsyncMock())
 

@@ -27,7 +27,10 @@ from google.api_core.exceptions import (
 import telemetry
 
 from stellar import (
+    PurchaseInfo,
+    PurchaseTransaction,
     ZakatInfo,
+    build_chat_purchase_context,
     build_chat_zakat_context,
     redact_secret_keys,
     router as stellar_router,
@@ -146,6 +149,11 @@ class ChatRequest(BaseModel):
     language: Optional[str] = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
     user_id: Optional[str] = Field(default=None, max_length=128)  # Opaque user identifier for personalization
     remember: bool = True           # When False, existing memory is read but no new data persisted
+    # Optional authenticated purchase context for Stellar payment questions.
+    # Prefer a short structured summary from the signed-in frontend; otherwise
+    # pass the user's JWT so this service can fetch history from dnb-backend.
+    transactions: Optional[List[PurchaseTransaction]] = None
+    auth_token: Optional[str] = None
 
 
 class Message(BaseModel):
@@ -171,6 +179,7 @@ class ChatResponse(BaseModel):
     tafsir: Optional[TafsirInfo] = None
     confidence: Optional[ConfidenceAssessment] = None
     zakat: Optional[ZakatInfo] = None
+    purchases: Optional[PurchaseInfo] = None
     language: Optional[str] = None
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
@@ -278,6 +287,21 @@ async def zakat_retriever(prompt: str, context: Optional[str]):
         return await build_chat_zakat_context(prompt, context)
     except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
         logger.warning("Zakat lookup failed; answering without it: %s", exc)
+        return None
+
+
+async def purchase_retriever(
+    prompt: str,
+    transactions: Optional[List[PurchaseTransaction]],
+    auth_token: Optional[str],
+):
+    """Load purchase metadata for a chat turn; never fail the turn over it."""
+    try:
+        return await build_chat_purchase_context(
+            prompt, transactions=transactions, auth_token=auth_token
+        )
+    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
+        logger.warning("Purchase lookup failed; answering without it: %s", exc)
         return None
 
 
@@ -608,6 +632,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             zakat_context = await zakat_retriever(request.prompt, request.context)
             zakat_info = zakat_context.info if zakat_context else None
 
+            # Purchase detection is offline (keywords). History comes from an
+            # inline summary or a best-effort JWT fetch — never other users'.
+            purchase_context = await purchase_retriever(
+                request.prompt, request.transactions, request.auth_token
+            )
+            purchase_info = purchase_context.info if purchase_context else None
+
         # --- Memory lookup ---
         profile: Optional[UserProfile] = None
         summary: Optional[ChatSummary] = None
@@ -615,15 +646,16 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             profile = await memory_store.get_profile(request.user_id)
             summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
 
-        # Neither a tafsir-grounded answer nor a zakat answer goes through the
-        # semantic response cache: the first is built from retrieved passages
-        # (already cached by ayah key), and the second contains one user's real
-        # balance, which must never be replayed to anyone else.
+        # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
+        # through the semantic response cache: the first is built from retrieved
+        # passages (already cached by ayah key), and the others contain one
+        # user's real financial data, which must never be replayed to anyone else.
         is_cacheable = (
             is_new_chat
             and request.context is None
             and tafsir_context is None
             and zakat_context is None
+            and purchase_context is None
             and request.user_id is None
             and SEMANTIC_CACHE_ENABLED
         )
@@ -678,6 +710,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += tafsir_system_context(tafsir_context)
             if zakat_context is not None:
                 system_context += zakat_context.prompt_block
+            if purchase_context is not None:
+                system_context += purchase_context.prompt_block
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
@@ -847,6 +881,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             tafsir=tafsir_info,
             confidence=assessment,
             zakat=zakat_info,
+            purchases=purchase_info,
             language=effective_language,
             citations=citation_extraction.citations,
         )
@@ -1022,6 +1057,11 @@ async def chat_stream(request: ChatRequest, http_request: Request):
             "SAFETY_PIPELINE_ENABLED", "true"
         ).lower() not in {"0", "false", "off"}
 
+        # --- Purchase history ---
+        purchase_context = await purchase_retriever(
+            request.prompt, request.transactions, request.auth_token
+        )
+
         async def event_generator():
             """SSE generator: metadata → content deltas → done/error."""
             nonlocal combined_text, chat_session
@@ -1083,6 +1123,8 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                     system_context += tafsir_system_context(tafsir_context)
                 if zakat_context is not None:
                     system_context += zakat_context.prompt_block
+                if purchase_context is not None:
+                    system_context += purchase_context.prompt_block
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
