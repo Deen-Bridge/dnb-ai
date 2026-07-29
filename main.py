@@ -66,6 +66,13 @@ from confidence import (
 )
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
+from citations import (
+    CITATION_BLOCK_CONTEXT,
+    Citation,
+    CitationExtraction,
+    CitationStreamFilter,
+    extract_citations,
+)
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -165,6 +172,9 @@ class ChatResponse(BaseModel):
     confidence: Optional[ConfidenceAssessment] = None
     zakat: Optional[ZakatInfo] = None
     language: Optional[str] = None
+    # Structured references parsed out of the answer (#15). Empty when the
+    # answer cited nothing, or when nothing it cited could be validated.
+    citations: List[Citation] = []
 
 
 class FeedbackRequest(BaseModel):
@@ -659,7 +669,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 model = get_model()
                 active_chats[chat_id] = model.start_chat(history=[])
 
-            system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
+            system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
             if is_fiqh:
                 system_context += FIQH_IKHTILAF_CONTEXT
                 if madhhab:
@@ -735,6 +745,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         response_text = safety_result.text if safety_result else generated_text
 
+        # --- Structured citations (#15) ---
+        # Parsed off before hadith annotation and before the cache write, so
+        # the block never reaches the user and a cached answer replays exactly
+        # the prose the original asker saw. Parsing is total: a malformed or
+        # truncated block costs the citations, never the answer.
+        response_text, citation_extraction = extract_citations(response_text)
+
         # --- Hadith authenticity grading ---
         # Baked into response_text *before* the cache write so a cached hit
         # replays the same caution the user originally saw.
@@ -746,13 +763,18 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         # --- Confidence, abstention, and scholar escalation ---
         # is_religious and is_high_stakes reuse classification that already ran
         # this turn (the fiqh classifier and the hadith annotator) rather than
-        # adding a competing classifier. self_consistency (#ai-18) and
-        # citation_verification (#40) are passed through when those components
-        # supply them; until then they are simply absent from the average.
+        # adding a competing classifier. self_consistency (#ai-18) is still
+        # absent from the average until that component lands.
+        # citation_verification is now supplied (#15): the share of this
+        # answer's citations that validated against the surah index and the
+        # hadith collection table. Being an EXTERNAL_SIGNAL it also lifts the
+        # UNVERIFIED_CEILING that otherwise caps every answer at 0.65, so a
+        # well-cited answer can reach the confident band for the first time.
         signals = build_signals(
             response_text,
             is_religious=is_fiqh or bool(hadith_refs),
             is_high_stakes=is_fiqh,
+            citation_verification=citation_extraction.score,
         )
         assessment = assess(signals)
         answer_before_policy = response_text
@@ -826,6 +848,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             confidence=assessment,
             zakat=zakat_info,
             language=effective_language,
+            citations=citation_extraction.citations,
         )
         _finalize()
         _succeeded = True
@@ -1008,6 +1031,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
             decision: Any = None
             hadith_refs: List[HadithReference] = []
             assessment: Optional[ConfidenceAssessment] = None
+            citation_extraction = CitationExtraction()
 
             try:
                 # --- Metadata event ---
@@ -1042,7 +1066,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 chat_session = active_chats[chat_id]
 
                 # --- Build system context + prompt ---
-                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT
+                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
                 if effective_language:
                     system_context += LANGUAGE_INSTRUCTIONS
                     system_context += f"\nresponse_language: {effective_language}"
@@ -1074,14 +1098,29 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                         stream=True,
                     )
 
+                    # The citation block must never flash in a delta. The filter
+                    # withholds any tail that could still turn out to be the
+                    # start marker, including one split across two chunks.
+                    citation_filter = CitationStreamFilter()
                     async for chunk in stream_response:
                         if chunk.text:
-                            combined_text += chunk.text
-                            delta = json.dumps({
-                                "type": "content",
-                                "delta": chunk.text,
-                            })
-                            yield f"data: {delta}\n\n"
+                            visible = citation_filter.feed(chunk.text)
+                            if visible:
+                                combined_text += visible
+                                delta = json.dumps({
+                                    "type": "content",
+                                    "delta": visible,
+                                })
+                                yield f"data: {delta}\n\n"
+
+                    trailing, citation_extraction = citation_filter.finish()
+                    if trailing:
+                        combined_text += trailing
+                        delta = json.dumps({
+                            "type": "content",
+                            "delta": trailing,
+                        })
+                        yield f"data: {delta}\n\n"
 
                     telemetry.record_model_call(
                         stream_response,
@@ -1114,6 +1153,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                     combined_text,
                     is_religious=is_fiqh or bool(hadith_refs),
                     is_high_stakes=is_fiqh,
+                    citation_verification=citation_extraction.score,
                 )
                 assessment = assess(signals)
 
@@ -1184,6 +1224,9 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                     "fiqh": fiqh_info.model_dump() if fiqh_info else None,
                     "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                     "zakat": zakat_info.model_dump() if zakat_info else None,
+                    "citations": [
+                        c.model_dump() for c in citation_extraction.citations
+                    ],
                 }, ensure_ascii=False)
                 yield f"data: {done}\n\n"
 

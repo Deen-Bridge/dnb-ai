@@ -39,6 +39,7 @@ The platform is composed of three services:
 - 🧠 **Per-user long-term memory** — user profiles (knowledge level, madhhab, topics studied, remembered facts) extracted from conversations and injected across sessions; privacy controls with GET/DELETE endpoints and `remember` opt-out per request
 - 📋 **Conversation summarization** — compaction API ready for token-budget-triggered eviction; merges and recompresses summaries when history exceeds budget
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
+- 📚 **Structured citations** — Quran and Hadith references returned as validated, typed objects on every answer, bounds-checked against the 114-surah index
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
@@ -208,7 +209,7 @@ drops out of the average instead of being guessed at:
 | Signal | Weight | Produced by |
 |--------|--------|-------------|
 | `self_consistency` | 0.40 | the self-consistency work (#ai-18) — **passed in, never recomputed here** |
-| `citation_verification` | 0.30 | citation verification (#40) — passed in the same way |
+| `citation_verification` | 0.30 | [structured citation extraction](citations.py) (#15) — the share of a turn's citations that validated |
 | `expressed_certainty` | 0.30 | derived here from the answer's own hedging language |
 
 ```
@@ -269,6 +270,92 @@ valuable eval case.
 
 `ChatResponse` gains an optional `confidence: {score, band, abstained, queued,
 signals, review_id}` block. It is additive; existing clients are unaffected.
+
+### Structured Quran & Hadith citations
+
+Every chat answer carries a `citations` list of **validated, typed** references --
+`2:153` arrives as a surah number, an ayah number, and the surah's name from the
+index, not as a substring the client has to parse back out of prose.
+
+```jsonc
+{
+  "response": "Allah counsels the believers to seek help in patience and prayer...",
+  "citations": [
+    {"type": "quran", "surah": 2, "ayah_start": 153, "ayah_end": null, "surah_name": "Al-Baqarah"},
+    {"type": "hadith", "collection": "Sahih al-Bukhari", "number": 1, "grading": "sahih"},
+    {"type": "scholarly", "work": "Riyad as-Salihin", "author": "Al-Nawawi", "detail": "Book of Patience"}
+  ]
+}
+```
+
+**How the model is asked.** Whole-response JSON was rejected deliberately: it
+degrades prose quality, and one malformed brace loses the entire answer. The
+model instead appends a single delimited block after its normal prose, which is
+parsed off and never shown to the user:
+
+```
+<<<CITATIONS>>>
+{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}
+<<<END_CITATIONS>>>
+```
+
+On `/chat/stream` the block is withheld from the SSE deltas by a small hold-back
+filter, so a half-emitted marker never flickers into the UI; the finished
+`citations` array arrives on the terminal `done` event.
+
+**Parsing is total.** A malformed, truncated, or absent block yields an empty
+list and the prose is still returned -- nothing in this path can fail a chat
+turn. A block cut off by `max_output_tokens` is stripped from the prose anyway:
+half a JSON object is worse than no citations at all.
+
+**Validation.** Quran references are bounds-checked against
+[`data/quran/surah_index.json`](data/quran/surah_index.json) through the same
+114-surah index the tafsir layer validates against, so the two cannot drift
+apart -- `2:300` is refused against Al-Baqarah's real 286 ayat. `surah_name` is
+always taken from that index and never from the model, which is what makes the
+field trustworthy. Hadith collections are normalised through
+`hadith.normalize_collection`'s existing alias table (Bukhari, Muslim, Tirmidhi,
+Abu Dawud, Nasa'i, Ibn Majah and their variants) and gradings are read from the
+bundled grading dataset rather than from the model's claim. A citation naming an
+unrecognised collection is rejected, not echoed back. Citations are deduplicated
+and capped at 24 per answer.
+
+**It feeds confidence.** The share of a turn's attempted citations that validated
+is exactly the `citation_verification` signal [`confidence.py`](confidence.py)
+already reserves at weight 0.30 -- this completes machinery that was previously
+declared and never fed. A well-cited answer is no longer capped by
+`CONFIDENCE_UNVERIFIED_CEILING` (0.65); an answer that cites nothing produces no
+signal at all and is not penalised for it.
+
+#### Offline evaluation
+
+`scripts/eval_citations.py` scores a 15-case set at
+`data/eval/citations_eval.jsonl` with no API key and no network, and runs in CI:
+
+```bash
+python scripts/eval_citations.py --verbose               # offline, canned answers
+python scripts/eval_citations.py --live --url http://localhost:8000
+```
+
+Three metrics, each with a floor the script enforces:
+
+| Metric | Floor | Meaning |
+|--------|-------|---------|
+| extraction rate | 90% | answers that should have cited, and did |
+| validity rate | 90% | genuine citations that survived validation |
+| rejection rate | 100% | planted fabrications that were refused |
+
+Four of the fifteen cases plant fabrications -- an out-of-range surah, an ayah
+past a surah's real bound, an unknown collection, and a block mixing one real
+citation with one invented one. They are excluded from the validity denominator
+and scored only by the rejection rate, so a correct parser is never punished for
+refusing them, and a parser that accepts everything cannot pass.
+
+**Known limitation.** A semantic-cache hit replays stored prose with an empty
+citation list, because the cache stores text only. No markers leak, and
+re-asking with `X-Cache-Bypass` returns citations. Widening the cache record
+shape is out of scope for this change.
+
 ### Streaming chat responses (Server-Sent Events)
 
 `POST /chat/stream` is a streaming variant of the chat endpoint that returns
