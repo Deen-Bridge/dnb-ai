@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 import google.generativeai as genai
@@ -1454,6 +1454,27 @@ async def delete_memory(user_id: str):
         logger.info("Deleted memory for user %s", user_id[:8])
         return {"message": "Memory deleted successfully"}
     return {"message": "Memory not found"}
+
+
+def get_health_status(deep: bool = False) -> tuple[dict, int]:
+    key_configured = bool(GEMINI_API_KEY)
+    checks = {"gemini_api_key_configured": "ok" if key_configured else "fail"}
+    if deep:
+        checks["gemini_api_reachable"] = "skipped"
+    if key_configured:
+        return {"status": "ok", "version": app.version, "checks": checks}, 200
+    return {
+        "status": "unhealthy",
+        "version": app.version,
+        "checks": checks,
+        "failing_check": "gemini_api_key_configured",
+    }, 503
+
+
+@app.get("/health")
+async def health(deep: bool = False):
+    body, code = get_health_status(deep=deep)
+    return JSONResponse(content=body, status_code=code)
 
 
 @app.get("/cache/stats")
