@@ -11,7 +11,6 @@ import time
 from unittest.mock import AsyncMock
 
 import pytest
-
 from pydantic import ValidationError
 
 from memory.models import (

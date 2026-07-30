@@ -31,7 +31,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class RateLimiter:
     ) -> None:
         self._max = max_calls
         self._window = window_seconds
-        self._buckets: Dict[str, Deque[float]] = defaultdict(deque)
+        self._buckets: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
 
     def is_allowed(self, ip: str) -> bool:
@@ -149,16 +149,16 @@ class FeedbackRecord:
     feedback_id: str
     chat_id: str
     message_id: str
-    rating: str                       # "up" | "down"
-    categories: List[str] = field(default_factory=list)
-    comment: Optional[str] = None
-    prompt: Optional[str] = None
-    answer: Optional[str] = None
-    model_name: Optional[str] = None
-    generation_config: Optional[Dict[str, Any]] = None
-    created_at: str = ""              # ISO-8601 UTC
+    rating: str  # "up" | "down"
+    categories: list[str] = field(default_factory=list)
+    comment: str | None = None
+    prompt: str | None = None
+    answer: str | None = None
+    model_name: str | None = None
+    generation_config: dict[str, Any] | None = None
+    created_at: str = ""  # ISO-8601 UTC
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "feedback_id": self.feedback_id,
             "chat_id": self.chat_id,
@@ -174,7 +174,7 @@ class FeedbackRecord:
         }
 
     @staticmethod
-    def from_dict(d: Dict[str, Any]) -> "FeedbackRecord":
+    def from_dict(d: dict[str, Any]) -> FeedbackRecord:
         gen_cfg = d.get("generation_config")
         if isinstance(gen_cfg, str):
             try:
@@ -213,18 +213,18 @@ class FeedbackStore:
     def upsert(self, record: FeedbackRecord) -> None:
         raise NotImplementedError
 
-    def get(self, chat_id: str, message_id: str) -> Optional[FeedbackRecord]:
+    def get(self, chat_id: str, message_id: str) -> FeedbackRecord | None:
         raise NotImplementedError
 
     def list_records(
         self,
-        rating: Optional[str] = None,
-        category: Optional[str] = None,
+        rating: str | None = None,
+        category: str | None = None,
         limit: int = 100,
-    ) -> List[FeedbackRecord]:
+    ) -> list[FeedbackRecord]:
         raise NotImplementedError
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -280,8 +280,7 @@ class SQLiteFeedbackStore(FeedbackStore):
         if count > SQLITE_MAX_RECORDS:
             excess = count - SQLITE_MAX_RECORDS
             conn.execute(
-                "DELETE FROM feedback WHERE rowid IN "
-                "(SELECT rowid FROM feedback ORDER BY created_at ASC LIMIT ?)",
+                "DELETE FROM feedback WHERE rowid IN (SELECT rowid FROM feedback ORDER BY created_at ASC LIMIT ?)",
                 (excess,),
             )
 
@@ -321,7 +320,7 @@ class SQLiteFeedbackStore(FeedbackStore):
         self._prune(conn)
         conn.commit()
 
-    def get(self, chat_id: str, message_id: str) -> Optional[FeedbackRecord]:
+    def get(self, chat_id: str, message_id: str) -> FeedbackRecord | None:
         conn = self._conn()
         row = conn.execute(
             "SELECT * FROM feedback WHERE chat_id=? AND message_id=?",
@@ -331,10 +330,10 @@ class SQLiteFeedbackStore(FeedbackStore):
 
     def list_records(
         self,
-        rating: Optional[str] = None,
-        category: Optional[str] = None,
+        rating: str | None = None,
+        category: str | None = None,
         limit: int = 100,
-    ) -> List[FeedbackRecord]:
+    ) -> list[FeedbackRecord]:
         conn = self._conn()
         sql = "SELECT * FROM feedback WHERE 1=1"
         params: list = []
@@ -350,14 +349,14 @@ class SQLiteFeedbackStore(FeedbackStore):
         rows = conn.execute(sql, params).fetchall()
         return [FeedbackRecord.from_dict(dict(r)) for r in rows]
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         conn = self._conn()
 
         total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
         up = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='up'").fetchone()[0]
         down = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='down'").fetchone()[0]
 
-        cat_counts: Dict[str, Dict[str, int]] = {}
+        cat_counts: dict[str, dict[str, int]] = {}
         for row in conn.execute("SELECT categories, rating FROM feedback").fetchall():
             try:
                 cats = json.loads(row["categories"]) if row["categories"] else []
@@ -368,10 +367,9 @@ class SQLiteFeedbackStore(FeedbackStore):
                 bucket[row["rating"]] = bucket.get(row["rating"], 0) + 1
 
         model_rows = conn.execute(
-            "SELECT model_name, rating, COUNT(*) as cnt "
-            "FROM feedback GROUP BY model_name, rating"
+            "SELECT model_name, rating, COUNT(*) as cnt FROM feedback GROUP BY model_name, rating"
         ).fetchall()
-        model_counts: Dict[str, Dict[str, int]] = {}
+        model_counts: dict[str, dict[str, int]] = {}
         for r in model_rows:
             name = r["model_name"] or "unknown"
             bucket = model_counts.setdefault(name, {"up": 0, "down": 0})
@@ -389,7 +387,7 @@ class SQLiteFeedbackStore(FeedbackStore):
             ") "
             "GROUP BY day, rating ORDER BY day DESC"
         ).fetchall()
-        by_day: Dict[str, Dict[str, int]] = {}
+        by_day: dict[str, dict[str, int]] = {}
         for r in day_rows:
             bucket = by_day.setdefault(r["day"], {"up": 0, "down": 0})
             bucket[r["rating"]] = r["cnt"]
@@ -438,9 +436,7 @@ class RedisFeedbackStore(FeedbackStore):
 
         data = record.to_dict()
         data["categories"] = json.dumps(data["categories"])
-        data["generation_config"] = (
-            json.dumps(data["generation_config"]) if data["generation_config"] else ""
-        )
+        data["generation_config"] = json.dumps(data["generation_config"]) if data["generation_config"] else ""
         pipe = self._r.pipeline()
         if previous is not None:
             pipe.zrem(f"{self._PREFIX}:index:rating:{previous.rating}", key)
@@ -456,14 +452,14 @@ class RedisFeedbackStore(FeedbackStore):
         pipe.zadd(f"{self._PREFIX}:index:model:{record.model_name or 'unknown'}", {key: ts})
         pipe.execute()
 
-    def get(self, chat_id: str, message_id: str) -> Optional[FeedbackRecord]:
+    def get(self, chat_id: str, message_id: str) -> FeedbackRecord | None:
         data = self._r.hgetall(self._record_key(chat_id, message_id))
         return FeedbackRecord.from_dict(data) if data else None
 
-    def _fetch_keys(self, index_key: str, limit: int) -> List[str]:
+    def _fetch_keys(self, index_key: str, limit: int) -> list[str]:
         return self._r.zrevrange(index_key, 0, limit - 1)
 
-    def _fetch_records(self, keys: List[str]) -> List[FeedbackRecord]:
+    def _fetch_records(self, keys: list[str]) -> list[FeedbackRecord]:
         if not keys:
             return []
         pipe = self._r.pipeline()
@@ -480,10 +476,10 @@ class RedisFeedbackStore(FeedbackStore):
 
     def list_records(
         self,
-        rating: Optional[str] = None,
-        category: Optional[str] = None,
+        rating: str | None = None,
+        category: str | None = None,
         limit: int = 100,
-    ) -> List[FeedbackRecord]:
+    ) -> list[FeedbackRecord]:
         if rating:
             keys = self._fetch_keys(f"{self._PREFIX}:index:rating:{rating}", limit)
         elif category:
@@ -503,12 +499,12 @@ class RedisFeedbackStore(FeedbackStore):
             keys = [k for k in keys if k in cat_keys][:limit]
         return self._fetch_records(keys)
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         up = self._r.zcard(f"{self._PREFIX}:index:rating:up")
         down = self._r.zcard(f"{self._PREFIX}:index:rating:down")
         total = up + down
 
-        cat_counts: Dict[str, Dict[str, int]] = {}
+        cat_counts: dict[str, dict[str, int]] = {}
         for cat in FEEDBACK_TAXONOMY:
             n = self._r.zcard(f"{self._PREFIX}:index:cat:{cat}")
             if n:
@@ -520,7 +516,7 @@ class RedisFeedbackStore(FeedbackStore):
             "down": down,
             "up_ratio": round(up / total, 4) if total else None,
             "by_category": cat_counts,
-            "by_model": {},   # full per-model aggregation omitted for Redis brevity
+            "by_model": {},  # full per-model aggregation omitted for Redis brevity
             "by_day": {},
         }
 
@@ -530,7 +526,7 @@ class RedisFeedbackStore(FeedbackStore):
 # ---------------------------------------------------------------------------
 
 
-def _build_redis_store() -> Optional[RedisFeedbackStore]:
+def _build_redis_store() -> RedisFeedbackStore | None:
     redis_url = os.getenv("REDIS_URL")
     if not redis_url:
         return None

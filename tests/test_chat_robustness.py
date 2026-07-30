@@ -1,15 +1,15 @@
 import asyncio
 import time
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from httpx import AsyncClient, ASGITransport
 from google.api_core.exceptions import (
-    ResourceExhausted,
-    InvalidArgument,
     DeadlineExceeded,
+    InvalidArgument,
+    ResourceExhausted,
     ServiceUnavailable,
 )
+from httpx import ASGITransport, AsyncClient
 
 import main
 from main import app
@@ -68,9 +68,7 @@ async def test_concurrent_chat_requests_do_not_block_event_loop(monkeypatch):
 async def test_quota_exceeded_returns_429(monkeypatch):
     """ResourceExhausted should map to HTTP 429 with generic detail."""
     mock_session = MagicMock()
-    mock_session.send_message_async = AsyncMock(
-        side_effect=ResourceExhausted("429 Quota exceeded for project 12345")
-    )
+    mock_session.send_message_async = AsyncMock(side_effect=ResourceExhausted("429 Quota exceeded for project 12345"))
     mock_session.history = []
 
     mock_model = MagicMock()
@@ -91,9 +89,7 @@ async def test_quota_exceeded_returns_429(monkeypatch):
 async def test_timeout_returns_504(monkeypatch):
     """DeadlineExceeded should map to HTTP 504 with generic detail."""
     mock_session = MagicMock()
-    mock_session.send_message_async = AsyncMock(
-        side_effect=DeadlineExceeded("Deadline exceeded during RPC")
-    )
+    mock_session.send_message_async = AsyncMock(side_effect=DeadlineExceeded("Deadline exceeded during RPC"))
     mock_session.history = []
 
     mock_model = MagicMock()
@@ -114,9 +110,7 @@ async def test_timeout_returns_504(monkeypatch):
 async def test_invalid_argument_returns_400(monkeypatch):
     """InvalidArgument should map to HTTP 400 with generic detail."""
     mock_session = MagicMock()
-    mock_session.send_message_async = AsyncMock(
-        side_effect=InvalidArgument("Invalid field value in payload")
-    )
+    mock_session.send_message_async = AsyncMock(side_effect=InvalidArgument("Invalid field value in payload"))
     mock_session.history = []
 
     mock_model = MagicMock()
@@ -168,7 +162,9 @@ async def test_safety_blocked_response_returns_graceful_200(monkeypatch):
     fake_response = MagicMock()
     # Accessing .text on safety block raises ValueError in google-generativeai
     type(fake_response).text = property(
-        fget=MagicMock(side_effect=ValueError("Quick accessor for response.text is invalid. The Response has no candidate..."))
+        fget=MagicMock(
+            side_effect=ValueError("Quick accessor for response.text is invalid. The Response has no candidate...")
+        )
     )
     fake_response.candidates = [MagicMock(finish_reason="SAFETY")]
 

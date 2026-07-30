@@ -16,7 +16,7 @@ import logging
 import os
 import re
 from decimal import Decimal
-from typing import List, Optional
+from typing import overload
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -75,9 +75,7 @@ def usdc_issuer() -> str:
 
 class ZakatRequest(BaseModel):
     public_key: str = Field(..., description="Stellar account public key (G...)")
-    nisab_usd: Optional[float] = Field(
-        None, gt=0, description="Override the nisab threshold in USD"
-    )
+    nisab_usd: float | None = Field(None, gt=0, description="Override the nisab threshold in USD")
 
 
 class ZakatResponse(BaseModel):
@@ -90,11 +88,10 @@ class ZakatResponse(BaseModel):
     zakat_due: str
     message: str
     disclaimer: str
-    nisab: Optional[NisabQuote] = Field(
+    nisab: NisabQuote | None = Field(
         None,
         description=(
-            "Where the nisab threshold came from — a live gold price, the "
-            "configured default, or a caller override."
+            "Where the nisab threshold came from — a live gold price, the configured default, or a caller override."
         ),
     )
 
@@ -126,9 +123,7 @@ def validate_public_key(public_key: str) -> str:
     return cleaned
 
 
-def build_zakat_response(
-    public_key: str, balance: Optional[Decimal], nisab_quote: NisabQuote
-) -> ZakatResponse:
+def build_zakat_response(public_key: str, balance: Decimal | None, nisab_quote: NisabQuote) -> ZakatResponse:
     """Assemble the response from an already-fetched balance and nisab.
 
     Pure: no network, so the wording and the arithmetic are testable offline.
@@ -163,10 +158,7 @@ def build_zakat_response(
             f"If held for a full lunar year, the zakat due is {zakat_due} USDC (2.5%)."
         )
     else:
-        message = (
-            f"Your USDC balance of {balance} is below {basis}, "
-            "so no zakat is due on this balance alone."
-        )
+        message = f"Your USDC balance of {balance} is below {basis}, so no zakat is due on this balance alone."
 
     return ZakatResponse(
         network=STELLAR_NETWORK,
@@ -182,7 +174,7 @@ def build_zakat_response(
     )
 
 
-def fetch_usdc_balance(public_key: str) -> Optional[Decimal]:
+def fetch_usdc_balance(public_key: str) -> Decimal | None:
     """Return the account's USDC balance, or None if it has no USDC trustline.
 
     Raises HTTPException(404) if the account does not exist on this network.
@@ -194,21 +186,16 @@ def fetch_usdc_balance(public_key: str) -> Optional[Decimal]:
         raise HTTPException(
             status_code=404,
             detail=f"Account not found on the Stellar {STELLAR_NETWORK} network.",
-        )
+        ) from None
     for balance in account.get("balances", []):
-        if (
-            balance.get("asset_code") == "USDC"
-            and balance.get("asset_issuer") == usdc_issuer()
-        ):
+        if balance.get("asset_code") == "USDC" and balance.get("asset_issuer") == usdc_issuer():
             return Decimal(balance["balance"])
     return None
 
 
 # Backend that already exposes per-user Stellar payment history behind JWT.
 # Reusing it avoids duplicating Stellar payment logic in this Python service.
-DNB_BACKEND_URL = os.getenv(
-    "DNB_BACKEND_URL", "https://dnb-backend-api.onrender.com"
-).rstrip("/")
+DNB_BACKEND_URL = os.getenv("DNB_BACKEND_URL", "https://dnb-backend-api.onrender.com").rstrip("/")
 PURCHASE_FETCH_TIMEOUT = float(os.getenv("PURCHASE_FETCH_TIMEOUT", "10"))
 
 
@@ -228,7 +215,13 @@ async def stellar_info():
 # ---------------------------------------------------------------------------
 
 ZAKAT_KEYWORDS = (
-    "zakat", "zakah", "zakaat", "nisab", "nisaab", "almsgiving", "alms",
+    "zakat",
+    "zakah",
+    "zakaat",
+    "nisab",
+    "nisaab",
+    "almsgiving",
+    "alms",
 )
 
 # Stellar public keys are 56 characters of base32 starting with G. Matching
@@ -255,7 +248,7 @@ def is_zakat_question(text: str) -> bool:
     return any(keyword in lowered for keyword in ZAKAT_KEYWORDS)
 
 
-def extract_public_key(*texts: Optional[str]) -> Optional[str]:
+def extract_public_key(*texts: str | None) -> str | None:
     """First valid Stellar public key found across *texts*, if any."""
     for text in texts:
         if not text:
@@ -266,7 +259,7 @@ def extract_public_key(*texts: Optional[str]) -> Optional[str]:
     return None
 
 
-def contains_secret_key(*texts: Optional[str]) -> bool:
+def contains_secret_key(*texts: str | None) -> bool:
     """True if any text looks like it contains a Stellar secret key."""
     return any(SECRET_KEY_PATTERN.search(text or "") for text in texts)
 
@@ -274,7 +267,15 @@ def contains_secret_key(*texts: Optional[str]) -> bool:
 SECRET_KEY_PLACEHOLDER = "[REDACTED STELLAR SECRET KEY]"
 
 
-def redact_secret_keys(text: Optional[str]) -> Optional[str]:
+@overload
+def redact_secret_keys(text: str) -> str: ...
+
+
+@overload
+def redact_secret_keys(text: None) -> None: ...
+
+
+def redact_secret_keys(text: str | None) -> str | None:
     """Replace any secret-key-shaped string with a placeholder.
 
     A user who pastes their secret key into the chat should not have it
@@ -290,24 +291,15 @@ def redact_secret_keys(text: Optional[str]) -> Optional[str]:
 class ZakatInfo(BaseModel):
     """What the zakat integration contributed to a chat answer."""
 
-    calculated: bool = Field(
-        ..., description="True when an on-chain balance was actually read"
-    )
-    public_key: Optional[str] = Field(
-        None, description="The wallet the figures describe"
-    )
-    usdc_balance: Optional[str] = None
-    nisab_usd: Optional[str] = None
-    zakat_due: Optional[str] = None
-    nisab_source: Optional[str] = Field(
-        None, description="Where the nisab threshold came from"
-    )
+    calculated: bool = Field(..., description="True when an on-chain balance was actually read")
+    public_key: str | None = Field(None, description="The wallet the figures describe")
+    usdc_balance: str | None = None
+    nisab_usd: str | None = None
+    zakat_due: str | None = None
+    nisab_source: str | None = Field(None, description="Where the nisab threshold came from")
     secret_key_detected: bool = Field(
         False,
-        description=(
-            "The message appeared to contain a secret key; the answer warns "
-            "the user instead of using it."
-        ),
+        description=("The message appeared to contain a secret key; the answer warns the user instead of using it."),
     )
 
 
@@ -332,9 +324,7 @@ def build_zakat_prompt_block(response: ZakatResponse) -> str:
         basis = "live gold price" if response.nisab.live else "fallback"
         lines.append(f"- Nisab basis: 85g gold, {basis}, via {response.nisab.source}")
         if response.nisab.gold_price_usd_per_ounce:
-            lines.append(
-                f"- Gold price used: {response.nisab.gold_price_usd_per_ounce} USD/troy ounce"
-            )
+            lines.append(f"- Gold price used: {response.nisab.gold_price_usd_per_ounce} USD/troy ounce")
     lines += [
         f"- Meets nisab: {'yes' if response.has_usdc_trustline and Decimal(response.usdc_balance) >= Decimal(response.nisab_usd) else 'no'}",
         f"- Zakat due (2.5%): {response.zakat_due} USDC",
@@ -359,9 +349,7 @@ NO_KEY_NOTE = (
 )
 
 
-async def build_chat_zakat_context(
-    prompt: str, context: Optional[str] = None
-) -> Optional[ZakatContext]:
+async def build_chat_zakat_context(prompt: str, context: str | None = None) -> ZakatContext | None:
     """Compute zakat for a chat turn, or None if this isn't a zakat question.
 
     Detection is offline (keywords plus a key-shaped match), so an ordinary
@@ -455,16 +443,12 @@ class PurchaseTransaction(BaseModel):
     """
 
     hash: str = Field(..., description="Stellar transaction hash")
-    amount: Optional[str] = None
-    asset: Optional[str] = Field(default="USDC")
-    status: Optional[str] = None
-    created_at: Optional[str] = Field(
-        None, description="ISO timestamp or human-readable date"
-    )
-    item_title: Optional[str] = Field(
-        None, description="Course or book title, if known"
-    )
-    memo: Optional[str] = Field(
+    amount: str | None = None
+    asset: str | None = Field(default="USDC")
+    status: str | None = None
+    created_at: str | None = Field(None, description="ISO timestamp or human-readable date")
+    item_title: str | None = Field(None, description="Course or book title, if known")
+    memo: str | None = Field(
         None,
         description="On-chain memo — treated as untrusted user-controlled text",
     )
@@ -478,7 +462,7 @@ class PurchaseInfo(BaseModel):
         description="True when transaction metadata was available for this user",
     )
     count: int = Field(0, description="How many transactions were provided")
-    source: Optional[str] = Field(
+    source: str | None = Field(
         None,
         description="'inline' when the client sent a summary, 'backend' when fetched",
     )
@@ -506,7 +490,7 @@ def explorer_url(tx_hash: str) -> str:
     return f"https://stellar.expert/explorer/{network}/tx/{tx_hash}"
 
 
-def sanitize_memo(memo: Optional[str], max_len: int = 200) -> Optional[str]:
+def sanitize_memo(memo: str | None, max_len: int = 200) -> str | None:
     """Neutralize memo text so it cannot act as prompt injection.
 
     Memos are free-form and often user-controlled. Newlines and control
@@ -525,7 +509,7 @@ def sanitize_memo(memo: Optional[str], max_len: int = 200) -> Optional[str]:
     return cleaned
 
 
-def normalize_transaction(raw: dict) -> Optional[PurchaseTransaction]:
+def normalize_transaction(raw: dict) -> PurchaseTransaction | None:
     """Map a backend or frontend payload into PurchaseTransaction fields."""
     if not isinstance(raw, dict):
         return None
@@ -546,12 +530,7 @@ def normalize_transaction(raw: dict) -> Optional[PurchaseTransaction]:
         amount=amount,
         asset=(raw.get("asset") or raw.get("assetCode") or "USDC"),
         status=raw.get("status") or raw.get("paymentStatus"),
-        created_at=(
-            raw.get("created_at")
-            or raw.get("createdAt")
-            or raw.get("date")
-            or raw.get("timestamp")
-        ),
+        created_at=(raw.get("created_at") or raw.get("createdAt") or raw.get("date") or raw.get("timestamp")),
         item_title=(
             raw.get("item_title")
             or raw.get("itemTitle")
@@ -580,7 +559,7 @@ PURCHASE_GUARDRAILS = (
 )
 
 
-def build_purchase_prompt_block(transactions: List[PurchaseTransaction]) -> str:
+def build_purchase_prompt_block(transactions: list[PurchaseTransaction]) -> str:
     """Render this user's transaction metadata as factual grounding."""
     lines = [
         "",
@@ -645,8 +624,8 @@ PURCHASE_LOOKUP_FAILED_NOTE = (
 async def fetch_user_transactions(
     auth_token: str,
     *,
-    client: Optional[httpx.AsyncClient] = None,
-) -> List[PurchaseTransaction]:
+    client: httpx.AsyncClient | None = None,
+) -> list[PurchaseTransaction]:
     """Fetch per-user payment records from dnb-backend using the user's JWT.
 
     Raises httpx.HTTPError (and subclasses) on transport failures; callers
@@ -668,16 +647,12 @@ async def fetch_user_transactions(
         raw_items = payload
     elif isinstance(payload, dict):
         raw_items = (
-            payload.get("transactions")
-            or payload.get("data")
-            or payload.get("items")
-            or payload.get("results")
-            or []
+            payload.get("transactions") or payload.get("data") or payload.get("items") or payload.get("results") or []
         )
     else:
         raw_items = []
 
-    transactions: List[PurchaseTransaction] = []
+    transactions: list[PurchaseTransaction] = []
     for item in raw_items:
         normalized = normalize_transaction(item)
         if normalized is not None:
@@ -687,11 +662,11 @@ async def fetch_user_transactions(
 
 async def build_chat_purchase_context(
     prompt: str,
-    transactions: Optional[List[PurchaseTransaction]] = None,
-    auth_token: Optional[str] = None,
+    transactions: list[PurchaseTransaction] | None = None,
+    auth_token: str | None = None,
     *,
-    client: Optional[httpx.AsyncClient] = None,
-) -> Optional[PurchaseContext]:
+    client: httpx.AsyncClient | None = None,
+) -> PurchaseContext | None:
     """Build purchase grounding for a chat turn, or None if not a purchase Q.
 
     Prefers an inline structured summary from the authenticated frontend.
@@ -702,16 +677,14 @@ async def build_chat_purchase_context(
         return None
 
     if contains_secret_key(prompt, auth_token):
-        logger.warning(
-            "Secret-key-shaped string in a purchase chat turn; refusing history"
-        )
+        logger.warning("Secret-key-shaped string in a purchase chat turn; refusing history")
         return PurchaseContext(
             info=PurchaseInfo(loaded=False, secret_key_detected=True),
             prompt_block=SECRET_KEY_WARNING,
         )
 
-    source: Optional[str] = None
-    resolved: List[PurchaseTransaction]
+    source: str | None = None
+    resolved: list[PurchaseTransaction]
 
     if transactions is not None:
         # Explicit summary from the signed-in client — including an empty list.
@@ -745,16 +718,14 @@ async def build_chat_purchase_context(
     )
 
 
-async def resolve_nisab(nisab_usd_override: Optional[float]) -> NisabQuote:
+async def resolve_nisab(nisab_usd_override: float | None) -> NisabQuote:
     """Caller's override if given, otherwise the live gold-derived nisab."""
     if nisab_usd_override:
         return override_quote(Decimal(str(nisab_usd_override)))
     return await get_nisab()
 
 
-async def zakat_for_account(
-    public_key: str, nisab_usd_override: Optional[float] = None
-) -> ZakatResponse:
+async def zakat_for_account(public_key: str, nisab_usd_override: float | None = None) -> ZakatResponse:
     """Full zakat calculation for a validated public key.
 
     Shared by ``POST /zakat`` and the chat integration so both report the same

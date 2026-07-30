@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 OUT_PATH = Path(__file__).resolve().parents[1] / "data" / "quran" / "surah_index.json"
 
@@ -180,7 +181,7 @@ ALIASES: dict[int, list[str]] = {
 }
 
 
-def build() -> list[dict[str, object]]:
+def build() -> list[dict[str, Any]]:
     return [
         {
             "number": i,

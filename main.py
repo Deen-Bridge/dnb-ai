@@ -3,61 +3,35 @@ import json
 import logging
 import os
 import secrets
-from typing import Any, Dict, List, Optional
+import time
 import uuid
-from datetime import datetime, timezone
 from collections import OrderedDict
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
+
+import google.generativeai as genai
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, field_validator
-import google.generativeai as genai
-import time
-
 from google.api_core.exceptions import (
-    ResourceExhausted,
-    InvalidArgument,
     DeadlineExceeded,
+    InvalidArgument,
+    ResourceExhausted,
     ServiceUnavailable,
 )
+from pydantic import BaseModel, Field, field_validator
 
 import telemetry
-
-from stellar import (
-    PurchaseInfo,
-    PurchaseTransaction,
-    ZakatInfo,
-    build_chat_purchase_context,
-    build_chat_zakat_context,
-    redact_secret_keys,
-    router as stellar_router,
-)
-from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
-from semantic_cache import (
-    SEMANTIC_CACHE_ENABLED,
-    embed_text,
-    get_cache,
-    normalize_text,
-)
-from fiqh import (
-    FIQH_IKHTILAF_CONTEXT,
-    MADHHAB_LEAD_INSTRUCTION,
-    FiqhInfo,
-    classify_fiqh,
-    normalize_madhhab,
-)
-from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
-from study import router as study_router
-from tafsir import (
-    TafsirContext,
-    TafsirInfo,
-    build_chat_tafsir_context,
-    router as tafsir_router,
-    summarize_tafsir_context,
-    tafsir_system_context,
+from citations import (
+    CITATION_BLOCK_CONTEXT,
+    Citation,
+    CitationExtraction,
+    CitationStreamFilter,
+    extract_citations,
 )
 from confidence import (
     ConfidenceAssessment,
@@ -67,15 +41,6 @@ from confidence import (
     build_signals,
     thresholds as confidence_thresholds,
 )
-from review import enqueue_for_review, router as review_router
-from review_store import get_review_store
-from citations import (
-    CITATION_BLOCK_CONTEXT,
-    Citation,
-    CitationExtraction,
-    CitationStreamFilter,
-    extract_citations,
-)
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -84,7 +49,14 @@ from feedback import (
     rate_limiter,
     store as feedback_store,
 )
-
+from fiqh import (
+    FIQH_IKHTILAF_CONTEXT,
+    MADHHAB_LEAD_INSTRUCTION,
+    FiqhInfo,
+    classify_fiqh,
+    normalize_madhhab,
+)
+from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -92,6 +64,35 @@ from memory.extraction import (
     extract_updates,
     merge_summaries,
     summarize_conversation_turns,
+)
+from review import enqueue_for_review, router as review_router
+from review_store import get_review_store
+from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
+from semantic_cache import (
+    SEMANTIC_CACHE_ENABLED,
+    embed_text,
+    get_cache,
+    normalize_text,
+)
+from stellar import (
+    PurchaseContext,
+    PurchaseInfo,
+    PurchaseTransaction,
+    ZakatContext,
+    ZakatInfo,
+    build_chat_purchase_context,
+    build_chat_zakat_context,
+    redact_secret_keys,
+    router as stellar_router,
+)
+from study import router as study_router
+from tafsir import (
+    TafsirContext,
+    TafsirInfo,
+    build_chat_tafsir_context,
+    router as tafsir_router,
+    summarize_tafsir_context,
+    tafsir_system_context,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,57 +134,57 @@ app.add_middleware(
 # Response Models
 class CitationVerificationResult(BaseModel):
     source: str  # "quran" | "hadith"
-    surah: Optional[int] = None
-    ayah: Optional[int] = None
-    collection: Optional[str] = None
-    number: Optional[str] = None
+    surah: int | None = None
+    ayah: int | None = None
+    collection: str | None = None
+    number: str | None = None
     status: str  # "verified" | "mismatch" | "unverified" | "not_quoted"
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class ChatRequest(BaseModel):
     prompt: str
-    chat_id: Optional[str] = None
-    context: Optional[str] = None  # Additional context for specific queries
-    madhhab: Optional[str] = None  # User's madhhab: hanafi, maliki, shafii, hanbali
-    language: Optional[str] = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
-    user_id: Optional[str] = Field(default=None, max_length=128)  # Opaque user identifier for personalization
-    remember: bool = True           # When False, existing memory is read but no new data persisted
+    chat_id: str | None = None
+    context: str | None = None  # Additional context for specific queries
+    madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
+    language: str | None = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
+    user_id: str | None = Field(default=None, max_length=128)  # Opaque user identifier for personalization
+    remember: bool = True  # When False, existing memory is read but no new data persisted
     # Optional authenticated purchase context for Stellar payment questions.
     # Prefer a short structured summary from the signed-in frontend; otherwise
     # pass the user's JWT so this service can fetch history from dnb-backend.
-    transactions: Optional[List[PurchaseTransaction]] = None
-    auth_token: Optional[str] = None
+    transactions: list[PurchaseTransaction] | None = None
+    auth_token: str | None = None
 
 
 class Message(BaseModel):
     role: str
     content: str
-    message_id: Optional[str] = None  # present on model turns, for feedback
+    message_id: str | None = None  # present on model turns, for feedback
 
 
 class Moderation(BaseModel):
-    category_id: Optional[str] = None
+    category_id: str | None = None
     action: str
 
 
 class ChatResponse(BaseModel):
-    response: Optional[str] = None
-    text: Optional[str] = None
+    response: str | None = None
+    text: str | None = None
     chat_id: str
-    message_id: Optional[str] = None  # stable id of the answer just returned
-    history: List[Message] = []
-    moderation: Optional[Moderation] = None
-    fiqh: Optional[FiqhInfo] = None
-    hadith_references: Optional[List[HadithReference]] = None
-    tafsir: Optional[TafsirInfo] = None
-    confidence: Optional[ConfidenceAssessment] = None
-    zakat: Optional[ZakatInfo] = None
-    purchases: Optional[PurchaseInfo] = None
-    language: Optional[str] = None
+    message_id: str | None = None  # stable id of the answer just returned
+    history: list[Message] = []
+    moderation: Moderation | None = None
+    fiqh: FiqhInfo | None = None
+    hadith_references: list[HadithReference] | None = None
+    tafsir: TafsirInfo | None = None
+    confidence: ConfidenceAssessment | None = None
+    zakat: ZakatInfo | None = None
+    purchases: PurchaseInfo | None = None
+    language: str | None = None
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
-    citations: List[Citation] = []
+    citations: list[Citation] = []
 
 
 class FeedbackRequest(BaseModel):
@@ -191,13 +192,13 @@ class FeedbackRequest(BaseModel):
     message_id: str = Field(..., max_length=200)
     rating: str = Field(..., description="'up' or 'down'")
     # At most one tag per taxonomy category; a caller cannot pad the list.
-    categories: Optional[List[str]] = Field(None, max_length=len(FEEDBACK_TAXONOMY))
-    comment: Optional[str] = Field(None, max_length=COMMENT_MAX_CHARS)
+    categories: list[str] | None = Field(None, max_length=len(FEEDBACK_TAXONOMY))
+    comment: str | None = Field(None, max_length=COMMENT_MAX_CHARS)
     # Supplied by the client when the snapshot is gone (restart). Bounded so an
     # anonymous caller cannot fill the store with multi-megabyte bodies — the
     # rate limiter caps request count, not request size.
-    prompt: Optional[str] = Field(None, max_length=8000)
-    answer: Optional[str] = Field(None, max_length=16000)
+    prompt: str | None = Field(None, max_length=8000)
+    answer: str | None = Field(None, max_length=16000)
 
     @field_validator("rating")
     @classmethod
@@ -208,19 +209,16 @@ class FeedbackRequest(BaseModel):
 
     @field_validator("categories")
     @classmethod
-    def categories_must_be_valid(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def categories_must_be_valid(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return v
         invalid = set(v) - FEEDBACK_TAXONOMY
         if invalid:
-            raise ValueError(
-                f"Unknown categories: {sorted(invalid)}. "
-                f"Valid choices: {sorted(FEEDBACK_TAXONOMY)}"
-            )
+            raise ValueError(f"Unknown categories: {sorted(invalid)}. Valid choices: {sorted(FEEDBACK_TAXONOMY)}")
         return v
 
 
-def classify_for_safety(prompt: str, candidate_ids: List[str]):
+def classify_for_safety(prompt: str, candidate_ids: list[str]) -> dict[str, Any]:
     """Gemini classifier seam; offline tests replace this with a fixture."""
     classifier_instruction = (
         "Classify the user text for the Deen Bridge safety policy. Return only "
@@ -252,9 +250,7 @@ def classify_for_safety(prompt: str, candidate_ids: List[str]):
 
 
 safety_policy = load_policy()
-safety_pipeline = SafetyPipeline(
-    InputGate(safety_policy, classify_for_safety), OutputCheck(safety_policy)
-)
+safety_pipeline = SafetyPipeline(InputGate(safety_policy, classify_for_safety), OutputCheck(safety_policy))
 
 # Semantic response cache
 semantic_cache = get_cache()
@@ -272,7 +268,7 @@ MAX_CHAT_HISTORY_TURNS = 20
 DEFAULT_TAFSIR_LANGUAGE = "en"
 
 
-async def tafsir_retriever(prompt: str, language: str) -> Optional[TafsirContext]:
+async def tafsir_retriever(prompt: str, language: str) -> TafsirContext | None:
     """Retrieve tafsir for a chat turn; never fail the turn over retrieval."""
     try:
         return await build_chat_tafsir_context(prompt, language)
@@ -281,7 +277,7 @@ async def tafsir_retriever(prompt: str, language: str) -> Optional[TafsirContext
         return None
 
 
-async def zakat_retriever(prompt: str, context: Optional[str]):
+async def zakat_retriever(prompt: str, context: str | None) -> ZakatContext | None:
     """Compute zakat for a chat turn; never fail the turn over the lookup."""
     try:
         return await build_chat_zakat_context(prompt, context)
@@ -292,48 +288,34 @@ async def zakat_retriever(prompt: str, context: Optional[str]):
 
 async def purchase_retriever(
     prompt: str,
-    transactions: Optional[List[PurchaseTransaction]],
-    auth_token: Optional[str],
-):
+    transactions: list[PurchaseTransaction] | None,
+    auth_token: str | None,
+) -> PurchaseContext | None:
     """Load purchase metadata for a chat turn; never fail the turn over it."""
     try:
-        return await build_chat_purchase_context(
-            prompt, transactions=transactions, auth_token=auth_token
-        )
+        return await build_chat_purchase_context(prompt, transactions=transactions, auth_token=auth_token)
     except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
         logger.warning("Purchase lookup failed; answering without it: %s", exc)
         return None
 
 
-def get_safety_settings():
+def get_safety_settings() -> list[dict[str, str]]:
     return [
-        {
-            "category": "HARM_CATEGORY_HARASSMENT",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        },
-        {
-            "category": "HARM_CATEGORY_HATE_SPEECH",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        },
-        {
-            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        },
-        {
-            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-        }
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
     ]
 
 
 # In-memory session store for demo purposes
-sessions: Dict[str, Any] = {}
-active_chats: Dict[str, Any] = {}
+sessions: dict[str, Any] = {}
+active_chats: dict[str, Any] = {}
 
 # --- Feedback support ------------------------------------------------------
 # The generation config captured into a feedback record so a flagged answer is
 # reproducible evidence, kept beside the model name telemetry already tracks.
-GENERATION_CONFIG: Dict[str, Any] = {
+GENERATION_CONFIG: dict[str, Any] = {
     "temperature": 0.7,
     "top_p": 0.8,
     "top_k": 40,
@@ -343,7 +325,7 @@ GENERATION_CONFIG: Dict[str, Any] = {
 # Stable ids for model answers, so the frontend can address one turn and the
 # feedback endpoint can locate what was said. Kept parallel to active_chats
 # rather than restructuring it: chat_id -> [message_id per model turn, in order].
-chat_message_ids: Dict[str, List[str]] = {}
+chat_message_ids: dict[str, list[str]] = {}
 
 # Faithful snapshot of what the user was actually shown for each answered turn,
 # keyed by (chat_id, message_id). Feedback reads from here so the stored answer
@@ -351,7 +333,7 @@ chat_message_ids: Dict[str, List[str]] = {}
 # model output. Bounded LRU — on a free-tier restart it is empty, which is why
 # the feedback endpoint also accepts a client-supplied prompt/answer.
 FEEDBACK_SNAPSHOT_MAX = env_int("FEEDBACK_SNAPSHOT_MAX", 5000)
-answer_snapshots: "OrderedDict[tuple, Dict[str, str]]" = OrderedDict()
+answer_snapshots: "OrderedDict[tuple, dict[str, str]]" = OrderedDict()
 
 # Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
 # control; otherwise any client can rotate the header to mint a fresh rate-limit
@@ -369,7 +351,7 @@ def _record_answer(chat_id: str, prompt: str, answer: str) -> str:
     return message_id
 
 
-def _tag_history_with_message_ids(chat_id: str, history: List["Message"]) -> None:
+def _tag_history_with_message_ids(chat_id: str, history: list["Message"]) -> None:
     """Attach each model turn's stable id to the history returned to the client."""
     ids = chat_message_ids.get(chat_id, [])
     model_turn = 0
@@ -385,7 +367,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 _admin_header = APIKeyHeader(name="X-Admin-Token", auto_error=False)
 
 
-async def require_admin(token: Optional[str] = Depends(_admin_header)) -> None:
+async def require_admin(token: str | None = Depends(_admin_header)) -> None:
     """Gate admin endpoints on ADMIN_TOKEN; closed by default when unset."""
     if not ADMIN_TOKEN:
         raise HTTPException(
@@ -396,6 +378,7 @@ async def require_admin(token: Optional[str] = Depends(_admin_header)) -> None:
     # would turn a crafted header into a 500 instead of a clean 403.
     if not token or not secrets.compare_digest(token.encode("utf-8"), ADMIN_TOKEN.encode("utf-8")):
         raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
+
 
 ISLAMIC_CONTEXT = (
     "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
@@ -436,7 +419,7 @@ LANGUAGE_INSTRUCTIONS = (
 )
 
 
-def normalize_language(lang: Optional[str]) -> Optional[str]:
+def normalize_language(lang: str | None) -> str | None:
     """Validate a BCP-47 language code against SUPPORTED_LANGUAGES.
 
     Returns the lowercase code if valid, or None to signal auto-detection.
@@ -455,7 +438,7 @@ def normalize_language(lang: Optional[str]) -> Optional[str]:
     return None
 
 
-def get_model():
+def get_model() -> genai.GenerativeModel:
     return genai.GenerativeModel(
         model_name="gemini-1.5-flash",
         system_instruction=ISLAMIC_CONTEXT,
@@ -465,7 +448,7 @@ def get_model():
 GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "30"))
 
 
-def extract_text_safely(response: Any) -> Optional[str]:
+def extract_text_safely(response: Any) -> str | None:
     """Safely extract text from Gemini response, handling safety blocks gracefully."""
     if not response:
         return None
@@ -498,7 +481,7 @@ def extract_text_safely(response: Any) -> Optional[str]:
 async def send_message_with_retry(
     chat_session: Any,
     message: str,
-    generation_config: Optional[Dict[str, Any]] = None,
+    generation_config: dict[str, Any] | None = None,
     timeout: int = GEMINI_TIMEOUT,
     max_retries: int = 2,
 ) -> Any:
@@ -510,12 +493,10 @@ async def send_message_with_retry(
     attempt = 0
     while True:
         history_len_before = (
-            len(chat_session.history)
-            if hasattr(chat_session, "history") and chat_session.history is not None
-            else 0
+            len(chat_session.history) if hasattr(chat_session, "history") and chat_session.history is not None else 0
         )
         try:
-            kwargs: Dict[str, Any] = {"request_options": {"timeout": timeout}}
+            kwargs: dict[str, Any] = {"request_options": {"timeout": timeout}}
             if generation_config:
                 kwargs["generation_config"] = generation_config
             response = await chat_session.send_message_async(
@@ -523,7 +504,7 @@ async def send_message_with_retry(
                 **kwargs,
             )
             return response
-        except (ServiceUnavailable, DeadlineExceeded, asyncio.TimeoutError) as exc:
+        except (TimeoutError, ServiceUnavailable, DeadlineExceeded) as exc:
             if hasattr(chat_session, "history") and chat_session.history is not None:
                 if len(chat_session.history) > history_len_before:
                     chat_session.history = chat_session.history[:history_len_before]
@@ -554,18 +535,17 @@ async def send_message_with_retry(
 
 
 async def run_strict_corrective_loop(
-    chat_session,
+    chat_session: Any,
     user_message: str,
     original_text: str,
-    mismatches: List[Dict[str, Any]],
+    mismatches: list[dict[str, Any]],
 ) -> str:
     """Run exactly one corrective regeneration when a citation mismatch occurs in strict mode."""
     corrections_text = []
     for m in mismatches:
         if m.get("source") == "quran" and "correct_text" in m:
             corrections_text.append(
-                f"- Surah {m['surah']}:{m['ayah']} text in corpus is: '{m['correct_text']}'. "
-                f"Your quote did not match."
+                f"- Surah {m['surah']}:{m['ayah']} text in corpus is: '{m['correct_text']}'. Your quote did not match."
             )
         elif m.get("reason"):
             corrections_text.append(f"- {m['reason']}")
@@ -582,7 +562,7 @@ async def run_strict_corrective_loop(
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response):
+async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response) -> ChatResponse:
     trace = telemetry.Trace()
     _ctx_token = telemetry.current_trace.set(trace)
     _handler_start = time.perf_counter()
@@ -622,9 +602,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         with trace.span("retrieval"):
             # Tafsir detection is offline (regex + the bundled surah index),
             # so a non-tafsir prompt costs nothing.
-            tafsir_context = await tafsir_retriever(
-                prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
-            )
+            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
 
             # Zakat detection is offline (keywords plus a key-shaped match), so
@@ -634,14 +612,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
             # Purchase detection is offline (keywords). History comes from an
             # inline summary or a best-effort JWT fetch — never other users'.
-            purchase_context = await purchase_retriever(
-                request.prompt, request.transactions, request.auth_token
-            )
+            purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
 
         # --- Memory lookup ---
-        profile: Optional[UserProfile] = None
-        summary: Optional[ChatSummary] = None
+        profile: UserProfile | None = None
+        summary: ChatSummary | None = None
         if request.user_id:
             profile = await memory_store.get_profile(request.user_id)
             summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
@@ -662,7 +638,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         # --- Semantic cache lookup ---
         embedding: Any = None
-        normalized: Optional[str] = None
+        normalized: str | None = None
         if is_cacheable and not is_bypass:
             normalized = normalize_text(prompt)
             embedding = embed_text(normalized)
@@ -673,10 +649,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     telemetry.GEMINI_MODEL,
                     safety_settings=get_safety_settings(),
                 )
-                chat_session = model.start_chat(history=[
-                    {"role": "user", "parts": [{"text": prompt}]},
-                    {"role": "model", "parts": [{"text": cached.response}]},
-                ])
+                chat_session = model.start_chat(
+                    history=[
+                        {"role": "user", "parts": [{"text": prompt}]},
+                        {"role": "model", "parts": [{"text": cached.response}]},
+                    ]
+                )
                 active_chats[chat_id] = chat_session
                 logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
@@ -764,15 +742,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         chat_session = active_chats.get(chat_id)
         for message in chat_session.history if chat_session else []:
             try:
-                if hasattr(message, 'parts') and message.parts:
-                    content = message.parts[0].text if hasattr(message.parts[0], 'text') else str(message.parts[0])
+                if hasattr(message, "parts") and message.parts:
+                    content = message.parts[0].text if hasattr(message.parts[0], "text") else str(message.parts[0])
                 else:
                     content = str(message)
 
-                history.append(Message(
-                    role="user" if message.role == "user" else "model",
-                    content=content
-                ))
+                history.append(Message(role="user" if message.role == "user" else "model", content=content))
             except Exception as e:
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
@@ -875,7 +850,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             moderation=Moderation(
                 category_id=safety_result.category_id,
                 action=safety_result.action,
-            ) if safety_result and safety_result.category_id else None,
+            )
+            if safety_result and safety_result.category_id
+            else None,
             fiqh=fiqh_info,
             hadith_references=hadith_refs,
             tafsir=tafsir_info,
@@ -893,7 +870,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
             asyncio.create_task(
                 _extract_and_update_memory(
-                    request.user_id, prompt, response_text, chat_id, summary, memory_store,
+                    request.user_id,
+                    prompt,
+                    response_text,
+                    chat_id,
+                    summary,
+                    memory_store,
                 )
             )
             logger.info("Memory extraction scheduled for user %s", request.user_id[:8])
@@ -922,28 +904,28 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             status_code=429,
             detail="Rate limit exceeded. Please try again later.",
             headers={"X-Trace-Id": trace.trace_id},
-        )
+        ) from exc
     except InvalidArgument as exc:
         logger.warning("Invalid argument for Gemini call in chat %s: %s", chat_id, exc)
         raise HTTPException(
             status_code=400,
             detail="Invalid request parameters.",
             headers={"X-Trace-Id": trace.trace_id},
-        )
-    except (DeadlineExceeded, asyncio.TimeoutError) as exc:
+        ) from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
         logger.warning("Gemini API call timed out for chat %s: %s", chat_id, exc)
         raise HTTPException(
             status_code=504,
             detail="AI service timed out.",
             headers={"X-Trace-Id": trace.trace_id},
-        )
+        ) from exc
     except ServiceUnavailable as exc:
         logger.warning("Gemini service unavailable for chat %s: %s", chat_id, exc)
         raise HTTPException(
             status_code=503,
             detail="AI service temporarily unavailable.",
             headers={"X-Trace-Id": trace.trace_id},
-        )
+        ) from exc
     except HTTPException as exc:
         # Attach the trace id to already-typed HTTP errors (e.g. the empty-response
         # 500 raised inside generate) so a failed request stays correlatable.
@@ -955,20 +937,21 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             status_code=500,
             detail="AI service error",
             headers={"X-Trace-Id": trace.trace_id},
-        )
+        ) from exc
     finally:
         # Record the request exactly once: the success path already recorded it
         # via _finalize(); anything that reached an except path is an error.
         if not _succeeded:
-            telemetry.registry.record_request(
-                (time.perf_counter() - _handler_start) * 1000.0, error=True
-            )
+            telemetry.registry.record_request((time.perf_counter() - _handler_start) * 1000.0, error=True)
         telemetry.current_trace.reset(_ctx_token)
 
 
 async def _extract_and_update_memory(
-    user_id: str, prompt: str, response: str, chat_id: str,
-    existing_summary: Optional[ChatSummary],
+    user_id: str,
+    prompt: str,
+    response: str,
+    chat_id: str,
+    existing_summary: ChatSummary | None,
     store: Any,
 ) -> None:
     """Fire-and-forget memory extraction. Runs via asyncio.create_task."""
@@ -987,15 +970,14 @@ async def _extract_and_update_memory(
 
 
 async def _summarize_history(
-    chat_id: str, history: list, existing_summary: Optional[ChatSummary],
+    chat_id: str,
+    history: list,
+    existing_summary: ChatSummary | None,
     store: Any,
 ) -> None:
     """Summarize accumulated conversation turns and persist."""
     try:
-        turns = [
-            {"role": m.role, "text": m.parts[0].text if m.parts else ""}
-            for m in history
-        ]
+        turns = [{"role": m.role, "text": m.parts[0].text if m.parts else ""} for m in history]
         new_summary_text = await summarize_conversation_turns(turns)
         if existing_summary:
             merged = await merge_summaries(existing_summary.content, new_summary_text)
@@ -1008,7 +990,7 @@ async def _summarize_history(
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest, http_request: Request):
+async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
     """Streaming chat endpoint using Server-Sent Events (SSE).
 
     Returns incremental ``data:`` events carrying text deltas as JSON
@@ -1043,9 +1025,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
         # --- Tafsir and zakat retrieval ---
         with trace.span("retrieval"):
-            tafsir_context = await tafsir_retriever(
-                prompt, request.language or DEFAULT_TAFSIR_LANGUAGE
-            )
+            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
             zakat_context = await zakat_retriever(request.prompt, request.context)
             zakat_info = zakat_context.info if zakat_context else None
@@ -1053,24 +1033,20 @@ async def chat_stream(request: ChatRequest, http_request: Request):
         combined_text: str = ""  # accumulated full response for post-processing
         chat_session = None
 
-        safety_enabled = os.getenv(
-            "SAFETY_PIPELINE_ENABLED", "true"
-        ).lower() not in {"0", "false", "off"}
+        safety_enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
 
         # --- Purchase history ---
-        purchase_context = await purchase_retriever(
-            request.prompt, request.transactions, request.auth_token
-        )
+        purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
 
-        async def event_generator():
+        async def event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
             nonlocal combined_text, chat_session
 
             # Track the Gemini streaming response for disconnect handling
             stream_response: Any = None
             decision: Any = None
-            hadith_refs: List[HadithReference] = []
-            assessment: Optional[ConfidenceAssessment] = None
+            hadith_refs: list[HadithReference] = []
+            assessment: ConfidenceAssessment | None = None
             citation_extraction = CitationExtraction()
 
             try:
@@ -1084,10 +1060,12 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                         decision = await safety_pipeline.input_gate.evaluate_async(prompt)
 
                     if decision.action == "refuse":
-                        err = json.dumps({
-                            "type": "error",
-                            "message": "Your message was not processed due to content policy.",
-                        })
+                        err = json.dumps(
+                            {
+                                "type": "error",
+                                "message": "Your message was not processed due to content policy.",
+                            }
+                        )
                         yield f"data: {err}\n\n"
                         return
 
@@ -1116,9 +1094,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 if is_fiqh:
                     system_context += FIQH_IKHTILAF_CONTEXT
                     if madhhab:
-                        system_context += MADHHAB_LEAD_INSTRUCTION.format(
-                            madhhab=madhhab
-                        )
+                        system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
                 if tafsir_context is not None:
                     system_context += tafsir_system_context(tafsir_context)
                 if zakat_context is not None:
@@ -1149,19 +1125,23 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                             visible = citation_filter.feed(chunk.text)
                             if visible:
                                 combined_text += visible
-                                delta = json.dumps({
-                                    "type": "content",
-                                    "delta": visible,
-                                })
+                                delta = json.dumps(
+                                    {
+                                        "type": "content",
+                                        "delta": visible,
+                                    }
+                                )
                                 yield f"data: {delta}\n\n"
 
                     trailing, citation_extraction = citation_filter.finish()
                     if trailing:
                         combined_text += trailing
-                        delta = json.dumps({
-                            "type": "content",
-                            "delta": trailing,
-                        })
+                        delta = json.dumps(
+                            {
+                                "type": "content",
+                                "delta": trailing,
+                            }
+                        )
                         yield f"data: {delta}\n\n"
 
                     telemetry.record_model_call(
@@ -1211,9 +1191,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                         )
                         assessment.review_id = item.id
                     except Exception as exc:  # noqa: BLE001
-                        logger.error(
-                            "Could not queue streaming answer for review: %s", exc
-                        )
+                        logger.error("Could not queue streaming answer for review: %s", exc)
                         assessment.queued = False
 
                 combined_text = apply_policy(combined_text, assessment)
@@ -1229,21 +1207,19 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 )
 
                 # --- Build history ---
-                history: List[Message] = []
+                history: list[Message] = []
                 for msg in chat_session.history if chat_session else []:
                     try:
                         if hasattr(msg, "parts") and msg.parts:
-                            content = (
-                                msg.parts[0].text
-                                if hasattr(msg.parts[0], "text")
-                                else str(msg.parts[0])
-                            )
+                            content = msg.parts[0].text if hasattr(msg.parts[0], "text") else str(msg.parts[0])
                         else:
                             content = str(msg)
-                        history.append(Message(
-                            role="user" if msg.role == "user" else "model",
-                            content=content,
-                        ))
+                        history.append(
+                            Message(
+                                role="user" if msg.role == "user" else "model",
+                                content=content,
+                            )
+                        )
                     except Exception as exc:
                         logger.warning("Error processing message in history: %s", exc)
                         continue
@@ -1254,22 +1230,21 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 )
 
                 # --- Terminal done event ---
-                done = json.dumps({
-                    "type": "done",
-                    "chat_id": chat_id,
-                    "history": [m.model_dump() for m in history],
-                    "text": combined_text,
-                    "confidence": assessment.model_dump() if assessment else None,
-                    "hadith_references": (
-                        [r.model_dump() for r in hadith_refs] if hadith_refs else None
-                    ),
-                    "fiqh": fiqh_info.model_dump() if fiqh_info else None,
-                    "tafsir": tafsir_info.model_dump() if tafsir_info else None,
-                    "zakat": zakat_info.model_dump() if zakat_info else None,
-                    "citations": [
-                        c.model_dump() for c in citation_extraction.citations
-                    ],
-                }, ensure_ascii=False)
+                done = json.dumps(
+                    {
+                        "type": "done",
+                        "chat_id": chat_id,
+                        "history": [m.model_dump() for m in history],
+                        "text": combined_text,
+                        "confidence": assessment.model_dump() if assessment else None,
+                        "hadith_references": ([r.model_dump() for r in hadith_refs] if hadith_refs else None),
+                        "fiqh": fiqh_info.model_dump() if fiqh_info else None,
+                        "tafsir": tafsir_info.model_dump() if tafsir_info else None,
+                        "zakat": zakat_info.model_dump() if zakat_info else None,
+                        "citations": [c.model_dump() for c in citation_extraction.citations],
+                    },
+                    ensure_ascii=False,
+                )
                 yield f"data: {done}\n\n"
 
                 logger.info("Streaming chat response completed for %s", chat_id)
@@ -1288,10 +1263,12 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
             except Exception as exc:
                 logger.error("Streaming error for %s: %s", chat_id, exc)
-                err = json.dumps({
-                    "type": "error",
-                    "message": "An error occurred during response generation.",
-                })
+                err = json.dumps(
+                    {
+                        "type": "error",
+                        "message": "An error occurred during response generation.",
+                    }
+                )
                 try:
                     yield f"data: {err}\n\n"
                 except Exception:
@@ -1315,8 +1292,9 @@ async def chat_stream(request: ChatRequest, http_request: Request):
             exc,
         )
         raise HTTPException(
-            status_code=500, detail="AI service error",
-        )
+            status_code=500,
+            detail="AI service error",
+        ) from exc
     finally:
         telemetry.registry.record_request(
             (time.perf_counter() - _handler_start) * 1000.0,
@@ -1326,7 +1304,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str):
+async def delete_chat(chat_id: str) -> dict[str, str]:
     try:
         existed = chat_id in active_chats
         active_chats.pop(chat_id, None)
@@ -1347,6 +1325,7 @@ async def delete_chat(chat_id: str):
 # Feedback: capture and admin views
 # ---------------------------------------------------------------------------
 
+
 def _client_ip(request: Request) -> str:
     """Best-effort client IP for rate limiting.
 
@@ -1365,7 +1344,7 @@ def _client_ip(request: Request) -> str:
 
 
 @app.post("/feedback", status_code=200)
-async def submit_feedback(request: Request, body: FeedbackRequest):
+async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, Any]:
     """Attach a rating and optional failure categories to one model answer.
 
     The prompt/answer snapshot is resolved server-side from what the user was
@@ -1406,7 +1385,7 @@ async def submit_feedback(request: Request, body: FeedbackRequest):
         answer=answer_text,
         model_name=telemetry.GEMINI_MODEL,
         generation_config=GENERATION_CONFIG,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
     )
 
     try:
@@ -1418,13 +1397,15 @@ async def submit_feedback(request: Request, body: FeedbackRequest):
 
     logger.info(
         "Feedback stored: chat_id=%s message_id=%s rating=%s",
-        body.chat_id, body.message_id, body.rating,
+        body.chat_id,
+        body.message_id,
+        body.rating,
     )
     return {"status": "ok", "feedback_id": record.feedback_id}
 
 
 @app.get("/feedback/stats", dependencies=[Depends(require_admin)])
-async def feedback_stats():
+async def feedback_stats() -> dict[str, Any]:
     """Aggregate quality metrics: rating ratios, per-category, per-model, by day.
 
     Requires the X-Admin-Token header.
@@ -1438,10 +1419,10 @@ async def feedback_stats():
 
 @app.get("/feedback/records", dependencies=[Depends(require_admin)])
 async def feedback_records(
-    rating: Optional[str] = None,
-    category: Optional[str] = None,
+    rating: str | None = None,
+    category: str | None = None,
     limit: int = 50,
-):
+) -> dict[str, Any]:
     """Recent flagged records, filterable by rating and category.
 
     Requires the X-Admin-Token header.
@@ -1456,9 +1437,7 @@ async def feedback_records(
     if not (1 <= limit <= 500):
         raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
     try:
-        records = await run_in_threadpool(
-            feedback_store.list_records, rating, category, limit
-        )
+        records = await run_in_threadpool(feedback_store.list_records, rating, category, limit)
         return {"records": [r.to_dict() for r in records]}
     except Exception as exc:
         logger.error("Failed to fetch feedback records: %s", exc)
@@ -1466,13 +1445,13 @@ async def feedback_records(
 
 
 @app.get("/ping")
-async def ping():
+async def ping() -> dict[str, str]:
     """Lightweight liveness probe for container healthchecks and keep-alive pings."""
     return {"status": "ok"}
 
 
 @app.get("/memory/{user_id}")
-async def get_memory(user_id: str):
+async def get_memory(user_id: str) -> dict[str, Any]:
     """Retrieve the stored user profile for transparency.
 
     TODO(#9): bind to authenticated principal — anyone who knows a user_id
@@ -1485,7 +1464,7 @@ async def get_memory(user_id: str):
 
 
 @app.delete("/memory/{user_id}")
-async def delete_memory(user_id: str):
+async def delete_memory(user_id: str) -> dict[str, str]:
     """Completely erase the stored user profile.
 
     TODO(#9): bind to authenticated principal — anyone who knows a user_id
@@ -1514,18 +1493,18 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
 
 
 @app.get("/health")
-async def health(deep: bool = False):
+async def health(deep: bool = False) -> JSONResponse:
     body, code = get_health_status(deep=deep)
     return JSONResponse(content=body, status_code=code)
 
 
 @app.get("/cache/stats")
-async def cache_stats():
+async def cache_stats() -> dict[str, Any]:
     return semantic_cache.get_stats()
 
 
 @app.get("/metrics")
-async def metrics():
+async def metrics() -> dict[str, Any]:
     """Lightweight LLM observability surface: token, cost, and latency
     aggregates plus error rate. Contains only counts, durations, costs, model
     names, and trace-derived aggregates - never prompt or answer content.
@@ -1541,7 +1520,7 @@ async def metrics():
 
 
 @app.get("/confidence/policy")
-async def confidence_policy():
+async def confidence_policy() -> dict[str, Any]:
     """Current confidence thresholds and the queue's durability."""
     return {
         "thresholds": confidence_thresholds(),
@@ -1551,5 +1530,6 @@ async def confidence_policy():
 
 if __name__ == "__main__":
     import uvicorn
+
     logger.info("Starting server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)

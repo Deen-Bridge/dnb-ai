@@ -2,7 +2,6 @@
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional
 
 from .input_gate import InputDecision
 from .policy import Policy
@@ -11,9 +10,9 @@ from .policy import Policy
 @dataclass(frozen=True)
 class OutputDecision:
     text: str
-    stages_fired: List[str]
-    category_id: Optional[str] = None
-    action: Optional[str] = None
+    stages_fired: list[str]
+    category_id: str | None = None
+    action: str | None = None
 
 
 class OutputCheck:

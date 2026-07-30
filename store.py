@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import time
-from typing import Optional
+from typing import Any
 
 import google.generativeai.protos as protos
 
@@ -41,10 +41,7 @@ def history_to_dicts(contents: list) -> list[dict[str, str]]:
 
 def dicts_to_contents(dicts: list[dict[str, str]]) -> list:
     """Reconstruct Gemini Content objects from stored dicts."""
-    return [
-        protos.Content(role=d["role"], parts=[protos.Part(text=d["text"])])
-        for d in dicts
-    ]
+    return [protos.Content(role=d["role"], parts=[protos.Part(text=d["text"])]) for d in dicts]
 
 
 class SessionStore:
@@ -55,7 +52,8 @@ class SessionStore:
     """
 
     def __init__(self) -> None:
-        self._redis: Optional[aioredis.Redis] = None
+        # Typed Any: only ever touched behind the _use_redis flag below.
+        self._redis: Any = None
         self._local: dict[str, tuple[float, list[dict[str, str]]]] = {}
         self._use_redis = False
 
@@ -87,9 +85,7 @@ class SessionStore:
             return await self._redis_load(chat_id)
         return self._local_load(chat_id)
 
-    async def save_history(
-        self, chat_id: str, history: list[dict[str, str]]
-    ) -> None:
+    async def save_history(self, chat_id: str, history: list[dict[str, str]]) -> None:
         """Persist *history* for *chat_id* with a TTL."""
         if self._use_redis:
             await self._redis_save(chat_id, history)
@@ -116,9 +112,7 @@ class SessionStore:
             logger.warning("Corrupt history for chat %s; starting fresh", chat_id)
             return []
 
-    async def _redis_save(
-        self, chat_id: str, history: list[dict[str, str]]
-    ) -> None:
+    async def _redis_save(self, chat_id: str, history: list[dict[str, str]]) -> None:
         await self._redis.setex(
             f"chat:{chat_id}",
             SESSION_TTL_SECONDS,
@@ -143,9 +137,7 @@ class SessionStore:
             return []
         return history
 
-    def _local_save(
-        self, chat_id: str, history: list[dict[str, str]]
-    ) -> None:
+    def _local_save(self, chat_id: str, history: list[dict[str, str]]) -> None:
         self._local[chat_id] = (
             time.monotonic() + SESSION_TTL_SECONDS,
             history,

@@ -111,9 +111,7 @@ class TestReviewStore:
 
     def test_correct_replaces_the_answer(self, store):
         item = run(store.add(make_item(answer="Wrong answer.")))
-        decided = run(store.record_verdict(
-            item.id, Verdict.CORRECT, corrected_answer="The correct answer."
-        ))
+        decided = run(store.record_verdict(item.id, Verdict.CORRECT, corrected_answer="The correct answer."))
         assert decided.status is ReviewStatus.CORRECTED
         assert decided.final_answer == "The correct answer."
         assert decided.answer == "Wrong answer."
@@ -244,17 +242,17 @@ class TestRedisOutage:
 
 class TestEnqueue:
     def test_enqueue_stores_the_original_answer(self, store):
-        assessment = assess(
-            ConfidenceSignals(self_consistency=0.1, is_religious=True)
+        assessment = assess(ConfidenceSignals(self_consistency=0.1, is_religious=True))
+        item = run(
+            enqueue_for_review(
+                question="Is X halal?",
+                answer="The original doubtful answer.",
+                score=assessment.score,
+                band=assessment.band.value,
+                signals=assessment.signals,
+                chat_id="chat-9",
+            )
         )
-        item = run(enqueue_for_review(
-            question="Is X halal?",
-            answer="The original doubtful answer.",
-            score=assessment.score,
-            band=assessment.band.value,
-            signals=assessment.signals,
-            chat_id="chat-9",
-        ))
         stored = run(store.get(item.id))
         # The reviewer must see what the model produced, not the abstention
         # message the user was shown.
@@ -317,11 +315,13 @@ class TestReviewerEndpoints:
 
     def test_verdict_roundtrip_approve(self, store, export_path):
         item = run(store.add(make_item()))
-        response = run(record_verdict(
-            item.id,
-            VerdictRequest(verdict=Verdict.APPROVE, reviewer="Shaykh A"),
-            x_review_token=TOKEN,
-        ))
+        response = run(
+            record_verdict(
+                item.id,
+                VerdictRequest(verdict=Verdict.APPROVE, reviewer="Shaykh A"),
+                x_review_token=TOKEN,
+            )
+        )
         assert response.item.status is ReviewStatus.APPROVED
         assert response.item.reviewer == "Shaykh A"
         assert response.item.reviewed_at is not None
@@ -332,44 +332,38 @@ class TestReviewerEndpoints:
 
     def test_verdict_roundtrip_correct(self, store, export_path):
         item = run(store.add(make_item()))
-        response = run(record_verdict(
-            item.id,
-            VerdictRequest(
-                verdict=Verdict.CORRECT,
-                corrected_answer="The scholar-vetted answer.",
-                reviewer="Shaykh B",
-                note="Missing the hanafi position.",
-            ),
-            x_review_token=TOKEN,
-        ))
+        response = run(
+            record_verdict(
+                item.id,
+                VerdictRequest(
+                    verdict=Verdict.CORRECT,
+                    corrected_answer="The scholar-vetted answer.",
+                    reviewer="Shaykh B",
+                    note="Missing the hanafi position.",
+                ),
+                x_review_token=TOKEN,
+            )
+        )
         assert response.item.status is ReviewStatus.CORRECTED
         assert response.item.final_answer == "The scholar-vetted answer."
         assert response.item.reviewer_note == "Missing the hanafi position."
 
     def test_verdict_roundtrip_reject(self, store, export_path):
         item = run(store.add(make_item()))
-        response = run(record_verdict(
-            item.id, VerdictRequest(verdict=Verdict.REJECT), x_review_token=TOKEN
-        ))
+        response = run(record_verdict(item.id, VerdictRequest(verdict=Verdict.REJECT), x_review_token=TOKEN))
         assert response.item.status is ReviewStatus.REJECTED
         assert response.item.final_answer is None
 
     def test_verdict_on_unknown_item_is_404(self, store):
         with pytest.raises(HTTPException) as exc:
-            run(record_verdict(
-                "missing", VerdictRequest(verdict=Verdict.APPROVE), x_review_token=TOKEN
-            ))
+            run(record_verdict("missing", VerdictRequest(verdict=Verdict.APPROVE), x_review_token=TOKEN))
         assert exc.value.status_code == 404
 
     def test_second_verdict_is_rejected(self, store, export_path):
         item = run(store.add(make_item()))
-        run(record_verdict(
-            item.id, VerdictRequest(verdict=Verdict.APPROVE), x_review_token=TOKEN
-        ))
+        run(record_verdict(item.id, VerdictRequest(verdict=Verdict.APPROVE), x_review_token=TOKEN))
         with pytest.raises(HTTPException) as exc:
-            run(record_verdict(
-                item.id, VerdictRequest(verdict=Verdict.REJECT), x_review_token=TOKEN
-            ))
+            run(record_verdict(item.id, VerdictRequest(verdict=Verdict.REJECT), x_review_token=TOKEN))
         assert exc.value.status_code == 409
 
     def test_correction_requires_an_answer(self):
@@ -393,9 +387,7 @@ class TestReviewerEndpoints:
 class TestFeedbackExport:
     def test_export_writes_one_jsonl_record(self, store, export_path):
         item = run(store.add(make_item()))
-        decided = run(store.record_verdict(
-            item.id, Verdict.CORRECT, corrected_answer="Vetted.", reviewer="Shaykh C"
-        ))
+        decided = run(store.record_verdict(item.id, Verdict.CORRECT, corrected_answer="Vetted.", reviewer="Shaykh C"))
         assert export_reviewed_item(decided) is True
 
         lines = export_path.read_text(encoding="utf-8").strip().splitlines()
@@ -455,9 +447,7 @@ class TestFeedbackExport:
         cache.clear()
         try:
             item = run(store.add(make_item()))
-            decided = run(store.record_verdict(
-                item.id, Verdict.CORRECT, corrected_answer="Vetted answer."
-            ))
+            decided = run(store.record_verdict(item.id, Verdict.CORRECT, corrected_answer="Vetted answer."))
             assert review.cache_reviewed_answer(decided) is True
             hit = cache.get(np.array([1.0, 0.0], dtype=np.float32))
             assert hit is not None

@@ -39,7 +39,7 @@ import json
 import os
 import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Allow running from the repo root without installing the package.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,7 +53,7 @@ from feedback import (  # noqa: E402
 
 _WS = re.compile(r"\s+")
 
-_TAXONOMY_TO_HARNESS_CATEGORY: Dict[str, str] = {
+_TAXONOMY_TO_HARNESS_CATEGORY: dict[str, str] = {
     "incorrect_information": "factual_accuracy",
     "wrong_or_missing_citation": "citation_quality",
     "one_sided_fiqh_answer": "fiqh_balance",
@@ -71,7 +71,7 @@ def _normalise(text: str) -> str:
     return _WS.sub(" ", text.lower().strip())
 
 
-def _primary_category(categories: List[str]) -> str:
+def _primary_category(categories: list[str]) -> str:
     """First recognized category, mapped to the harness label, else 'other'."""
     for cat in categories:
         if cat in _TAXONOMY_TO_HARNESS_CATEGORY:
@@ -79,7 +79,7 @@ def _primary_category(categories: List[str]) -> str:
     return "other"
 
 
-def to_candidate(record: FeedbackRecord) -> Optional[Dict[str, Any]]:
+def to_candidate(record: FeedbackRecord) -> dict[str, Any] | None:
     """Convert a FeedbackRecord to an eval-harness candidate, or None.
 
     Returns None when there is no prompt snapshot — without the question there
@@ -100,12 +100,10 @@ def to_candidate(record: FeedbackRecord) -> Optional[Dict[str, Any]]:
     }
 
 
-def build_candidates(
-    records: List[FeedbackRecord], min_categories: int = 0
-) -> List[Dict[str, Any]]:
+def build_candidates(records: list[FeedbackRecord], min_categories: int = 0) -> list[dict[str, Any]]:
     """Deduplicated candidates from *records*, first occurrence winning."""
     seen_prompts: set = set()
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     for record in records:
         if min_categories and len(record.categories) < min_categories:
             continue
@@ -120,7 +118,7 @@ def build_candidates(
     return candidates
 
 
-def _select_store(db_path: Optional[str]) -> FeedbackStore:
+def _select_store(db_path: str | None) -> FeedbackStore:
     """The SQLite file when --db is given, otherwise the configured backend."""
     if db_path:
         return SQLiteFeedbackStore(db_path=db_path)
@@ -128,10 +126,10 @@ def _select_store(db_path: Optional[str]) -> FeedbackStore:
 
 
 def export(
-    output_path: Optional[str],
+    output_path: str | None,
     min_categories: int = 0,
     limit: int = 2000,
-    db_path: Optional[str] = None,
+    db_path: str | None = None,
 ) -> int:
     """Run the export; return the number of candidates written."""
     store = _select_store(db_path)
@@ -149,9 +147,7 @@ def export(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Export down-rated feedback as evaluation-dataset candidates."
-    )
+    parser = argparse.ArgumentParser(description="Export down-rated feedback as evaluation-dataset candidates.")
     parser.add_argument("--output", metavar="PATH", help="Output JSONL file (default: stdout)")
     parser.add_argument(
         "--db",
