@@ -11,4 +11,4 @@ jobs:
 
     steps:
       - name: Curl your Render backend
-        run: curl -fsS --max-time 30 --retry 3 https://dnb-ai.onrender.com/health
+        run: curl https://dnb-ai.onrender.com/ping

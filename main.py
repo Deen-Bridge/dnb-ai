@@ -106,6 +106,71 @@ if GEMINI_API_KEY:
 
 app = FastAPI(title="DeenBridge AI API")
 
+# --- Service API-key authentication ---
+# A shared secret between the DeenBridge backend/frontend and this service.
+# In production the key MUST be set; set AUTH_DISABLED=true to opt out locally.
+SERVICE_API_KEY = os.getenv("SERVICE_API_KEY", "")
+AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "yes"}
+
+if not AUTH_DISABLED and not SERVICE_API_KEY:
+    if os.getenv("ENVIRONMENT", "").lower() == "production":
+        raise RuntimeError(
+            "SERVICE_API_KEY must be set in production. "
+            "Set AUTH_DISABLED=true to run without authentication locally."
+        )
+    logger.warning(
+        "SERVICE_API_KEY is not set; authenticated endpoints will reject all requests."
+    )
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(
+    request: Request,
+    api_key: Optional[str] = Security(api_key_header),
+) -> str:
+    """Dependency that enforces X-API-Key on protected routes.
+
+    Returns the validated key on success, or raises 401.
+    """
+    if AUTH_DISABLED:
+        return ""
+    if not api_key or not secrets.compare_digest(api_key, SERVICE_API_KEY):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+    return api_key
+
+
+# --- Per-client rate limiting ---
+# Default: 20 requests/minute per API key (falls back to client IP).
+# Render sits behind a proxy; use X-Forwarded-For for IP-based limiting.
+# NOTE: in-memory storage is fine for single-instance Render.  A shared Redis
+# backend is needed if multi-instance support is added (see session-persistence
+# issue).
+
+
+def _rate_limit_key(request: Request) -> str:
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        return f"key:{api_key}"
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    retry_after = getattr(exc, "retry_after", 60)
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+        headers={"Retry-After": str(retry_after)},
+    )
+
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)

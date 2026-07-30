@@ -46,6 +46,8 @@ The platform is composed of three services:
 
 ## 🔗 API
 
+All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Limiting](#authentication--rate-limiting)).
+
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
@@ -134,6 +136,8 @@ services:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | Google Gemini API key | — |
+| `SERVICE_API_KEY` | Shared secret for API-key auth; required in production. Clients must send `X-API-Key` header. | — |
+| `AUTH_DISABLED` | Set to `true` to skip API-key auth (local development only) | `false` |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |

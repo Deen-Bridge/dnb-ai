@@ -8,3 +8,5 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false
+      - key: SERVICE_API_KEY
+        sync: false
