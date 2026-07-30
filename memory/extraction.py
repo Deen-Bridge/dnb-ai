@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Optional
 
 from memory.models import (
     MAX_FACT_LENGTH,
@@ -32,9 +31,7 @@ from memory.models import (
 
 logger = logging.getLogger(__name__)
 
-MEMORY_EXTRACTION_ENABLED = os.getenv(
-    "MEMORY_EXTRACTION_ENABLED", "true"
-).lower() not in {"0", "false", "off"}
+MEMORY_EXTRACTION_ENABLED = os.getenv("MEMORY_EXTRACTION_ENABLED", "true").lower() not in {"0", "false", "off"}
 
 _EXTRACTION_INSTRUCTION = """You are an AI assistant that extracts structured profile updates from a conversation turn.
 
@@ -63,6 +60,7 @@ def apply_updates(profile: UserProfile, updates: dict) -> UserProfile:
     knowledge_level = updates.get("knowledge_level")
     if knowledge_level is not None:
         from memory.models import VALID_KNOWLEDGE_LEVELS
+
         if knowledge_level in VALID_KNOWLEDGE_LEVELS:
             profile.knowledge_level = knowledge_level
         else:
@@ -116,11 +114,7 @@ async def extract_updates(user_prompt: str, model_response: str) -> dict:
 
     Offline seam: patch ``memory.extraction._call_extraction_gemini``.
     """
-    full_prompt = (
-        f"{_EXTRACTION_INSTRUCTION}\n\n"
-        f"User question: {user_prompt}\n"
-        f"Assistant response: {model_response}"
-    )
+    full_prompt = f"{_EXTRACTION_INSTRUCTION}\n\nUser question: {user_prompt}\nAssistant response: {model_response}"
     raw = await _call_extraction_gemini(full_prompt)
     if not isinstance(raw, dict):
         logger.warning("Extraction returned non-dict: %s", type(raw).__name__)
@@ -164,10 +158,7 @@ async def summarize_conversation_turns(evicted_turns: list[dict[str, str]]) -> s
 
     Offline seam: patch ``memory.extraction._call_summary_gemini``.
     """
-    turns_text = "\n".join(
-        f"{t.get('role', 'unknown')}: {t.get('text', '')}"
-        for t in evicted_turns
-    )
+    turns_text = "\n".join(f"{t.get('role', 'unknown')}: {t.get('text', '')}" for t in evicted_turns)
     prompt = f"{_SUMMARY_INSTRUCTION}\n\nTurns:\n{turns_text}"
     return await _call_summary_gemini(prompt)
 
@@ -191,7 +182,7 @@ async def _call_summary_gemini(prompt: str) -> str:
     return response.text
 
 
-def merge_summaries_deterministic(existing: str, new: str) -> Optional[str]:
+def merge_summaries_deterministic(existing: str, new: str) -> str | None:
     """Concatenate two summaries if the result fits within MAX_SUMMARY_LENGTH."""
     combined = f"{existing.rstrip()}\n{new}".strip()
     if len(combined) <= MAX_SUMMARY_LENGTH:
@@ -212,11 +203,7 @@ async def _call_recompress_gemini(existing: str, new: str) -> str:
     """
     import google.generativeai as genai
 
-    prompt = (
-        f"{_RECOMPRESS_INSTRUCTION}\n\n"
-        f"Existing summary:\n{existing}\n\n"
-        f"New segment:\n{new}"
-    )
+    prompt = f"{_RECOMPRESS_INSTRUCTION}\n\nExisting summary:\n{existing}\n\nNew segment:\n{new}"
     model = genai.GenerativeModel(
         "gemini-2.5-flash-preview-05-20",
         system_instruction=_RECOMPRESS_INSTRUCTION,

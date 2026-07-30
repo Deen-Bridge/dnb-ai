@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import time
-from typing import Optional
 
 from memory.models import ChatSummary, UserProfile
 
@@ -24,6 +23,7 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 
 try:
     import redis.asyncio as aioredis
+
     _redis_available = True
 except ImportError:
     _redis_available = False
@@ -39,28 +39,22 @@ def _summary_key(chat_id: str) -> str:
 
 class MemoryStore(abc.ABC):
     @abc.abstractmethod
-    async def get_profile(self, user_id: str) -> Optional[UserProfile]:
-        ...
+    async def get_profile(self, user_id: str) -> UserProfile | None: ...
 
     @abc.abstractmethod
-    async def save_profile(self, user_id: str, profile: UserProfile) -> None:
-        ...
+    async def save_profile(self, user_id: str, profile: UserProfile) -> None: ...
 
     @abc.abstractmethod
-    async def delete_profile(self, user_id: str) -> bool:
-        ...
+    async def delete_profile(self, user_id: str) -> bool: ...
 
     @abc.abstractmethod
-    async def get_chat_summary(self, chat_id: str) -> Optional[ChatSummary]:
-        ...
+    async def get_chat_summary(self, chat_id: str) -> ChatSummary | None: ...
 
     @abc.abstractmethod
-    async def save_chat_summary(self, chat_id: str, summary: ChatSummary) -> None:
-        ...
+    async def save_chat_summary(self, chat_id: str, summary: ChatSummary) -> None: ...
 
     @abc.abstractmethod
-    async def delete_chat_summary(self, chat_id: str) -> bool:
-        ...
+    async def delete_chat_summary(self, chat_id: str) -> bool: ...
 
 
 class InMemoryMemoryStore(MemoryStore):
@@ -68,7 +62,7 @@ class InMemoryMemoryStore(MemoryStore):
         self._profiles: dict[str, tuple[float, UserProfile]] = {}
         self._summaries: dict[str, tuple[float, ChatSummary]] = {}
 
-    async def get_profile(self, user_id: str) -> Optional[UserProfile]:
+    async def get_profile(self, user_id: str) -> UserProfile | None:
         entry = self._profiles.get(user_id)
         if entry is None:
             return None
@@ -84,7 +78,7 @@ class InMemoryMemoryStore(MemoryStore):
     async def delete_profile(self, user_id: str) -> bool:
         return self._profiles.pop(user_id, None) is not None
 
-    async def get_chat_summary(self, chat_id: str) -> Optional[ChatSummary]:
+    async def get_chat_summary(self, chat_id: str) -> ChatSummary | None:
         entry = self._summaries.get(chat_id)
         if entry is None:
             return None
@@ -107,7 +101,7 @@ class RedisMemoryStore(MemoryStore):
             raise RuntimeError("redis package not installed")
         self._redis = aioredis.from_url(redis_url, decode_responses=True)
 
-    async def get_profile(self, user_id: str) -> Optional[UserProfile]:
+    async def get_profile(self, user_id: str) -> UserProfile | None:
         raw = await self._redis.get(_profile_key(user_id))
         if raw is None:
             return None
@@ -128,7 +122,7 @@ class RedisMemoryStore(MemoryStore):
         deleted = await self._redis.delete(_profile_key(user_id))
         return deleted > 0
 
-    async def get_chat_summary(self, chat_id: str) -> Optional[ChatSummary]:
+    async def get_chat_summary(self, chat_id: str) -> ChatSummary | None:
         raw = await self._redis.get(_summary_key(chat_id))
         if raw is None:
             return None

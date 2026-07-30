@@ -32,9 +32,9 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
@@ -71,7 +71,7 @@ class GoldPriceSource(BaseModel):
     name: str
     url: str
     # Dotted path to the price within the JSON response.
-    path: List[str]
+    path: list[str]
 
 
 PRIMARY_SOURCE = GoldPriceSource(
@@ -106,25 +106,17 @@ class NisabQuote(BaseModel):
         "85g gold",
         description="Which classical nisab basis was used",
     )
-    gold_price_usd_per_ounce: Optional[str] = Field(
-        None, description="Spot gold price used, per troy ounce"
-    )
-    gold_price_usd_per_gram: Optional[str] = Field(
-        None, description="Spot gold price used, per gram"
-    )
-    as_of: Optional[str] = Field(
-        None, description="UTC timestamp of the price fetch (ISO 8601)"
-    )
-    note: Optional[str] = Field(
-        None, description="Explanation when a fallback was used"
-    )
+    gold_price_usd_per_ounce: str | None = Field(None, description="Spot gold price used, per troy ounce")
+    gold_price_usd_per_gram: str | None = Field(None, description="Spot gold price used, per gram")
+    as_of: str | None = Field(None, description="UTC timestamp of the price fetch (ISO 8601)")
+    note: str | None = Field(None, description="Explanation when a fallback was used")
 
     @property
     def amount(self) -> Decimal:
         return Decimal(self.nisab_usd)
 
 
-def _dig(payload: Any, path: List[str]) -> Any:
+def _dig(payload: Any, path: list[str]) -> Any:
     for key in path:
         if not isinstance(payload, dict) or key not in payload:
             return None
@@ -132,7 +124,7 @@ def _dig(payload: Any, path: List[str]) -> Any:
     return payload
 
 
-def parse_price(payload: Any, source: GoldPriceSource) -> Optional[Decimal]:
+def parse_price(payload: Any, source: GoldPriceSource) -> Decimal | None:
     """Pull the price out of a source's payload, or None if it is unusable.
 
     Rejects prices outside a plausible range: a source that changes its units
@@ -165,8 +157,8 @@ def nisab_from_ounce_price(price_per_ounce: Decimal) -> Decimal:
 
 
 async def fetch_gold_price(
-    client: Optional[httpx.AsyncClient] = None,
-) -> Optional[Dict[str, Any]]:
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any] | None:
     """Return ``{"price", "source"}`` from the first source that answers.
 
     Returns None when every source fails, which is the caller's cue to fall
@@ -205,7 +197,7 @@ def _fallback_quote(reason: str) -> NisabQuote:
 
 
 async def get_nisab(
-    client: Optional[httpx.AsyncClient] = None,
+    client: httpx.AsyncClient | None = None,
     use_cache: bool = True,
 ) -> NisabQuote:
     """The nisab in force now: live from the gold price, or the default.
@@ -234,10 +226,8 @@ async def get_nisab(
         live=True,
         source=result["source"],
         gold_price_usd_per_ounce=str(price_per_ounce),
-        gold_price_usd_per_gram=str(
-            (price_per_ounce / GRAMS_PER_TROY_OUNCE).quantize(Decimal("0.01"))
-        ),
-        as_of=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        gold_price_usd_per_gram=str((price_per_ounce / GRAMS_PER_TROY_OUNCE).quantize(Decimal("0.01"))),
+        as_of=datetime.now(UTC).isoformat(timespec="seconds"),
     )
     if use_cache:
         cache.put(CACHE_KEY, quote.model_dump(), ttl_seconds=NISAB_CACHE_TTL_SECONDS)

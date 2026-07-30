@@ -14,7 +14,6 @@ from fastapi import BackgroundTasks
 from memory import InMemoryMemoryStore, render_user_context
 from memory.models import ChatSummary, UserProfile
 
-
 # ---------------------------------------------------------------------------
 # render_user_context — unit-level but integration-like
 # ---------------------------------------------------------------------------
@@ -42,6 +41,7 @@ class TestRenderUserContext:
 
     def test_profile_with_facts(self):
         from memory.models import FactEntry
+
         profile = UserProfile(user_id="u")
         profile.remembered_facts.append(FactEntry(fact="is a convert", created_at=1000.0))
         result = render_user_context(profile, None)
@@ -198,8 +198,7 @@ class TestCacheIsolation:
 class TestLoggingPrivacy:
     def test_profile_not_logged_at_info(self, caplog):
         caplog.set_level(logging.INFO)
-        profile = UserProfile(user_id="secret-user", knowledge_level="advanced",
-                              madhhab="hanafi")
+        profile = UserProfile(user_id="secret-user", knowledge_level="advanced", madhhab="hanafi")
         logger = logging.getLogger("memory")
         logger.info("Profile loaded for user %s", profile.user_id[:8])
         logger.info("Memory extraction scheduled for user %s", profile.user_id[:8])

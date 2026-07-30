@@ -9,7 +9,6 @@ from fiqh import (
     FIQH_IKHTILAF_CONTEXT,
     MADHHAB_LEAD_INSTRUCTION,
     FiqhInfo,
-    VALID_MADHHABS,
     classify_fiqh,
     keyword_match,
     normalize_madhhab,
@@ -34,19 +33,22 @@ def load_cases():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("hanafi", "hanafi"),
-    ("Hanafi", "hanafi"),
-    ("hanafee", "hanafi"),
-    ("maliki", "maliki"),
-    ("Maliki", "maliki"),
-    ("shafii", "shafii"),
-    ("shafi'i", "shafii"),
-    ("Shafi'i", "shafii"),
-    ("shafie", "shafii"),
-    ("hanbali", "hanbali"),
-    ("Hanbali", "hanbali"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("hanafi", "hanafi"),
+        ("Hanafi", "hanafi"),
+        ("hanafee", "hanafi"),
+        ("maliki", "maliki"),
+        ("Maliki", "maliki"),
+        ("shafii", "shafii"),
+        ("shafi'i", "shafii"),
+        ("Shafi'i", "shafii"),
+        ("shafie", "shafii"),
+        ("hanbali", "hanbali"),
+        ("Hanbali", "hanbali"),
+    ],
+)
 def test_normalize_valid(raw, expected):
     assert normalize_madhhab(raw) == expected
 
@@ -66,17 +68,20 @@ def test_normalize_unknown_degrades_to_none():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("Does touching a woman break wudu?", True),
-    ("What is the ruling on marriage?", True),
-    ("Is this halal?", True),
-    ("How do I pray?", True),
-    ("Can I fast while travelling?", True),
-    ("What is the story of Prophet Musa?", False),
-    ("Hello, how are you?", False),
-    ("Explain the concept of tawheed.", False),
-    ("What is the capital of Egypt?", False),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Does touching a woman break wudu?", True),
+        ("What is the ruling on marriage?", True),
+        ("Is this halal?", True),
+        ("How do I pray?", True),
+        ("Can I fast while travelling?", True),
+        ("What is the story of Prophet Musa?", False),
+        ("Hello, how are you?", False),
+        ("Explain the concept of tawheed.", False),
+        ("What is the capital of Egypt?", False),
+    ],
+)
 def test_keyword_match(text, expected):
     assert keyword_match(text) == expected
 
@@ -161,6 +166,7 @@ def test_non_fiqh_cases_have_empty_schools():
 # ---------------------------------------------------------------------------
 # Keyword pre-filter: eval cases
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("case", [c for c in load_cases() if c["is_fiqh"]], ids=lambda c: c["prompt"][:40])
 def test_fiqh_cases_keyword_match_true(case):

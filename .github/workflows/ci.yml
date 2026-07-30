@@ -25,13 +25,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest flake8 pytest-asyncio
+          pip install -r requirements-dev.txt
 
-      - name: Run linting
-        run: flake8 main.py citations.py memory stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py feedback.py scripts/export_eval_candidates.py tests/test_feedback.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py tests/test_zakat.py tests/test_purchases.py tests/test_telemetry.py tests/test_multilingual.py tests/test_memory_profile.py tests/test_memory_extraction.py tests/test_memory_integration.py scripts/build_hadith_data.py scripts/build_surah_index.py scripts/eval_citations.py tests/test_citations.py tests/test_citations_integration.py --max-line-length=120 --ignore=E501,W503
+      - name: Lint (ruff)
+        run: ruff check .
 
-      - name: Check syntax
-        run: python -m compileall -q main.py citations.py memory stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py feedback.py scripts/export_eval_candidates.py scripts/build_hadith_data.py scripts/build_surah_index.py scripts/eval_citations.py
+      - name: Check formatting (ruff format)
+        run: ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy .
 
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam

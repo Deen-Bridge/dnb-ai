@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 from memory.models import ChatSummary, UserProfile
 from memory.store import (
@@ -34,8 +33,8 @@ def create_memory_store() -> MemoryStore:
 
 
 def render_user_context(
-    profile: Optional[UserProfile],
-    summary: Optional[ChatSummary],
+    profile: UserProfile | None,
+    summary: ChatSummary | None,
 ) -> str:
     """Render profile and chat summary as a delimited DATA block.
 
@@ -59,9 +58,7 @@ def render_user_context(
         if profile.preferred_language:
             lines.append(f"Preferred language: {profile.preferred_language}")
         if profile.topics_studied:
-            topics_str = ", ".join(
-                f"{t.topic}" for t in profile.topics_studied[-10:]
-            )
+            topics_str = ", ".join(f"{t.topic}" for t in profile.topics_studied[-10:])
             lines.append(f"Topics studied: {topics_str}")
         if profile.remembered_facts:
             for fact in profile.remembered_facts[-5:]:

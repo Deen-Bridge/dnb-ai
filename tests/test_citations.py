@@ -115,17 +115,13 @@ class TestQuranValidation:
         assert "286" in extraction.rejected[0]
 
     def test_ayah_range_is_kept_when_valid(self):
-        extraction = parse_citations(
-            '{"citations": [{"type": "quran", "surah": 103, "ayah_start": 1, "ayah_end": 3}]}'
-        )
+        extraction = parse_citations('{"citations": [{"type": "quran", "surah": 103, "ayah_start": 1, "ayah_end": 3}]}')
         citation = extraction.citations[0]
         assert citation.ayah_end == 3
         assert citation.reference == "103:1-3"
 
     def test_impossible_range_degrades_to_the_single_ayah(self):
-        extraction = parse_citations(
-            '{"citations": [{"type": "quran", "surah": 103, "ayah_start": 2, "ayah_end": 1}]}'
-        )
+        extraction = parse_citations('{"citations": [{"type": "quran", "surah": 103, "ayah_start": 2, "ayah_end": 1}]}')
         citation = extraction.citations[0]
         assert citation.ayah_start == 2
         assert citation.ayah_end is None
@@ -231,7 +227,7 @@ class TestStreamFilter:
 
     def test_marker_never_reaches_the_client(self):
         text = answer_with('{"citations": [{"type": "quran", "surah": 1, "ayah_start": 1}]}')
-        chunks = [text[i:i + 7] for i in range(0, len(text), 7)]
+        chunks = [text[i : i + 7] for i in range(0, len(text), 7)]
         emitted, extraction = self.feed_all(chunks)
         assert CITATION_BLOCK_START not in emitted
         assert CITATION_BLOCK_END not in emitted

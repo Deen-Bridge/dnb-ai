@@ -52,7 +52,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -85,7 +85,7 @@ class QuranCitation(BaseModel):
     type: Literal["quran"] = "quran"
     surah: int = Field(..., ge=1, le=114)
     ayah_start: int = Field(..., ge=1)
-    ayah_end: Optional[int] = Field(None, ge=1)
+    ayah_end: int | None = Field(None, ge=1)
     surah_name: str
 
     @property
@@ -104,8 +104,8 @@ class HadithCitation(BaseModel):
 
     type: Literal["hadith"] = "hadith"
     collection: str
-    number: Optional[str] = None
-    grading: Optional[str] = None
+    number: str | None = None
+    grading: str | None = None
 
 
 class ScholarlyReference(BaseModel):
@@ -113,12 +113,12 @@ class ScholarlyReference(BaseModel):
 
     type: Literal["scholarly"] = "scholarly"
     work: str
-    author: Optional[str] = None
-    detail: Optional[str] = None
+    author: str | None = None
+    detail: str | None = None
 
 
 Citation = Annotated[
-    Union[QuranCitation, HadithCitation, ScholarlyReference],
+    QuranCitation | HadithCitation | ScholarlyReference,
     Field(discriminator="type"),
 ]
 
@@ -130,19 +130,19 @@ class CitationExtraction(BaseModel):
     than silent. It is not part of the chat response.
     """
 
-    citations: List[Citation] = []
+    citations: list[Citation] = []
     attempted: int = 0
-    rejected: List[str] = []
+    rejected: list[str] = []
 
     @property
-    def score(self) -> Optional[float]:
+    def score(self) -> float | None:
         """Share of attempted citations that validated, or None if none tried."""
         if self.attempted <= 0:
             return None
         return round(len(self.citations) / self.attempted, 4)
 
 
-def _coerce_int(value: Any) -> Optional[int]:
+def _coerce_int(value: Any) -> int | None:
     """Accept 2 and "2" alike; reject everything else without raising."""
     if isinstance(value, bool):
         return None
@@ -153,11 +153,11 @@ def _coerce_int(value: Any) -> Optional[int]:
     return None
 
 
-def _clean_str(value: Any) -> Optional[str]:
+def _clean_str(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _lookup_grading(collection_key: str, number: Optional[str]) -> Optional[str]:
+def _lookup_grading(collection_key: str, number: str | None) -> str | None:
     """Grade this reference from the bundled dataset, or return None."""
     if not number:
         return None
@@ -175,7 +175,7 @@ def _lookup_grading(collection_key: str, number: Optional[str]) -> Optional[str]
     return record.grade.value.lower()
 
 
-def _build_quran(raw: Dict[str, Any]) -> Tuple[Optional[QuranCitation], Optional[str]]:
+def _build_quran(raw: dict[str, Any]) -> tuple[QuranCitation | None, str | None]:
     surah_value = raw.get("surah")
     record = None
 
@@ -214,7 +214,7 @@ def _build_quran(raw: Dict[str, Any]) -> Tuple[Optional[QuranCitation], Optional
     return citation, None
 
 
-def _build_hadith(raw: Dict[str, Any]) -> Tuple[Optional[HadithCitation], Optional[str]]:
+def _build_hadith(raw: dict[str, Any]) -> tuple[HadithCitation | None, str | None]:
     name = _clean_str(raw.get("collection"))
     if not name:
         return None, "hadith citation without a collection"
@@ -238,7 +238,7 @@ def _build_hadith(raw: Dict[str, Any]) -> Tuple[Optional[HadithCitation], Option
     return citation, None
 
 
-def _build_scholarly(raw: Dict[str, Any]) -> Tuple[Optional[ScholarlyReference], Optional[str]]:
+def _build_scholarly(raw: dict[str, Any]) -> tuple[ScholarlyReference | None, str | None]:
     work = _clean_str(raw.get("work")) or _clean_str(raw.get("title"))
     if not work:
         return None, "scholarly reference without a work"
@@ -257,7 +257,7 @@ _BUILDERS = {
 }
 
 
-def _infer_type(entry: Dict[str, Any]) -> str:
+def _infer_type(entry: dict[str, Any]) -> str:
     """Guess the citation type when the model omitted it."""
     if "surah" in entry or "ayah_start" in entry or "ayah" in entry:
         return "quran"
@@ -268,7 +268,7 @@ def _infer_type(entry: Dict[str, Any]) -> str:
     return ""
 
 
-def parse_citations(payload: Optional[str]) -> CitationExtraction:
+def parse_citations(payload: str | None) -> CitationExtraction:
     """Parse the JSON payload of a citation block. Never raises."""
     extraction = CitationExtraction()
     if not payload or not payload.strip():
@@ -321,7 +321,7 @@ def parse_citations(payload: Optional[str]) -> CitationExtraction:
     return extraction
 
 
-def extract_citations(text: Optional[str]) -> Tuple[str, CitationExtraction]:
+def extract_citations(text: str | None) -> tuple[str, CitationExtraction]:
     """Split *text* into (prose, citations). Never raises.
 
     Text containing no citation block is returned unchanged, so this is safe to
@@ -332,13 +332,13 @@ def extract_citations(text: Optional[str]) -> Tuple[str, CitationExtraction]:
 
     match = _BLOCK_PATTERN.search(text)
     if match:
-        prose = (text[: match.start()] + text[match.end():]).strip()
+        prose = (text[: match.start()] + text[match.end() :]).strip()
         return prose, parse_citations(match.group("payload"))
 
     truncated = _UNTERMINATED_PATTERN.search(text)
     if truncated:
         prose = text[: truncated.start()].strip()
-        payload = text[truncated.start() + len(CITATION_BLOCK_START):]
+        payload = text[truncated.start() + len(CITATION_BLOCK_START) :]
         return prose, parse_citations(payload)
 
     return text, CitationExtraction()
@@ -384,7 +384,7 @@ class CitationStreamFilter:
             return emit
         return ""
 
-    def finish(self) -> Tuple[str, CitationExtraction]:
+    def finish(self) -> tuple[str, CitationExtraction]:
         """Return (remaining prose to emit, citations)."""
         if self._in_block:
             _, extraction = extract_citations(self._tail)

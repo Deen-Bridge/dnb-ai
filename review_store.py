@@ -30,7 +30,7 @@ import os
 import time
 import uuid
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -57,7 +57,7 @@ class AlreadyReviewedError(Exception):
     was rather than a bare conflict.
     """
 
-    def __init__(self, item: "ReviewItem") -> None:
+    def __init__(self, item: ReviewItem) -> None:
         super().__init__(f"Review item {item.id} was already reviewed")
         self.item = item
 
@@ -75,7 +75,7 @@ class Verdict(str, Enum):
     REJECT = "reject"
 
 
-VERDICT_STATUS: Dict[Verdict, ReviewStatus] = {
+VERDICT_STATUS: dict[Verdict, ReviewStatus] = {
     Verdict.APPROVE: ReviewStatus.APPROVED,
     Verdict.CORRECT: ReviewStatus.CORRECTED,
     Verdict.REJECT: ReviewStatus.REJECTED,
@@ -90,19 +90,19 @@ class ReviewItem(BaseModel):
     answer: str
     confidence: float
     band: str
-    signals: Dict[str, float] = {}
-    chat_id: Optional[str] = None
+    signals: dict[str, float] = {}
+    chat_id: str | None = None
     created_at: float = Field(default_factory=time.time)
 
     status: ReviewStatus = ReviewStatus.PENDING
-    verdict: Optional[Verdict] = None
-    corrected_answer: Optional[str] = None
-    reviewer: Optional[str] = None
-    reviewer_note: Optional[str] = None
-    reviewed_at: Optional[float] = None
+    verdict: Verdict | None = None
+    corrected_answer: str | None = None
+    reviewer: str | None = None
+    reviewer_note: str | None = None
+    reviewed_at: float | None = None
 
     @property
-    def final_answer(self) -> Optional[str]:
+    def final_answer(self) -> str | None:
         """The answer a reviewer stands behind, or None if there isn't one."""
         if self.status is ReviewStatus.APPROVED:
             return self.answer
@@ -115,8 +115,9 @@ class ReviewStore:
     """Persists review items. Redis-backed when configured, in-memory otherwise."""
 
     def __init__(self) -> None:
-        self._redis: Optional[Any] = None
-        self._local: Dict[str, ReviewItem] = {}
+        # Typed Any: only ever touched behind the _use_redis flag below.
+        self._redis: Any = None
+        self._local: dict[str, ReviewItem] = {}
         self._use_redis = False
         self._degraded = False
 
@@ -127,15 +128,13 @@ class ReviewStore:
                 logger.info("ReviewStore using Redis")
             except Exception as exc:  # pragma: no cover - connection-time only
                 logger.warning(
-                    "Failed to connect to Redis for the review queue (%s); "
-                    "falling back to in-memory",
+                    "Failed to connect to Redis for the review queue (%s); falling back to in-memory",
                     exc,
                 )
 
         if not self._use_redis:
             logger.info(
-                "ReviewStore using in-memory dict — set REDIS_URL to persist "
-                "the scholar-review queue across restarts"
+                "ReviewStore using in-memory dict — set REDIS_URL to persist the scholar-review queue across restarts"
             )
 
     @property
@@ -171,7 +170,7 @@ class ReviewStore:
         )
         return item
 
-    async def get(self, item_id: str) -> Optional[ReviewItem]:
+    async def get(self, item_id: str) -> ReviewItem | None:
         if self._use_redis:
             try:
                 raw = await self._redis.get(ITEM_KEY.format(item_id=item_id))
@@ -185,54 +184,42 @@ class ReviewStore:
             return self._local.get(item_id)
         return self._local.get(item_id)
 
-    async def list_pending(self, limit: int = 50, offset: int = 0) -> List[ReviewItem]:
+    async def list_pending(self, limit: int = 50, offset: int = 0) -> list[ReviewItem]:
         """Oldest pending items first — the longest wait gets seen first."""
         if self._use_redis:
             try:
-                ids = await self._redis.zrange(
-                    PENDING_INDEX, offset, offset + limit - 1
-                )
+                ids = await self._redis.zrange(PENDING_INDEX, offset, offset + limit - 1)
             except Exception as exc:  # noqa: BLE001
                 self._mark_degraded("list_pending", exc)
                 return []
             items = [await self.get(item_id) for item_id in ids]
             return [item for item in items if item is not None]
-        pending = [
-            item
-            for item in self._local.values()
-            if item.status is ReviewStatus.PENDING
-        ]
+        pending = [item for item in self._local.values() if item.status is ReviewStatus.PENDING]
         pending.sort(key=lambda item: item.created_at)
-        return pending[offset:offset + limit]
+        return pending[offset : offset + limit]
 
-    async def list_reviewed(self, limit: int = 50, offset: int = 0) -> List[ReviewItem]:
+    async def list_reviewed(self, limit: int = 50, offset: int = 0) -> list[ReviewItem]:
         """Most recently decided items first."""
         if self._use_redis:
             try:
-                ids = await self._redis.zrevrange(
-                    REVIEWED_INDEX, offset, offset + limit - 1
-                )
+                ids = await self._redis.zrevrange(REVIEWED_INDEX, offset, offset + limit - 1)
             except Exception as exc:  # noqa: BLE001
                 self._mark_degraded("list_reviewed", exc)
                 return []
             items = [await self.get(item_id) for item_id in ids]
             return [item for item in items if item is not None]
-        reviewed = [
-            item
-            for item in self._local.values()
-            if item.status is not ReviewStatus.PENDING
-        ]
+        reviewed = [item for item in self._local.values() if item.status is not ReviewStatus.PENDING]
         reviewed.sort(key=lambda item: item.reviewed_at or 0, reverse=True)
-        return reviewed[offset:offset + limit]
+        return reviewed[offset : offset + limit]
 
     async def record_verdict(
         self,
         item_id: str,
         verdict: Verdict,
-        corrected_answer: Optional[str] = None,
-        reviewer: Optional[str] = None,
-        reviewer_note: Optional[str] = None,
-    ) -> Optional[ReviewItem]:
+        corrected_answer: str | None = None,
+        reviewer: str | None = None,
+        reviewer_note: str | None = None,
+    ) -> ReviewItem | None:
         """Apply a reviewer's decision, exactly once.
 
         Returns None if the item does not exist, and raises
@@ -273,9 +260,7 @@ class ReviewStore:
         if self._use_redis and item_id not in self._local:
             try:
                 async with self._redis.pipeline(transaction=True) as pipe:
-                    pipe.set(
-                        ITEM_KEY.format(item_id=item.id), item.model_dump_json()
-                    )
+                    pipe.set(ITEM_KEY.format(item_id=item.id), item.model_dump_json())
                     pipe.zadd(REVIEWED_INDEX, {item.id: item.reviewed_at})
                     await pipe.execute()
             except Exception as exc:  # noqa: BLE001 - a recorded verdict is not lost
@@ -287,7 +272,7 @@ class ReviewStore:
         logger.info("Review %s recorded: %s", item.id, verdict.value)
         return item
 
-    async def stats(self) -> Dict[str, Any]:
+    async def stats(self) -> dict[str, Any]:
         if self._use_redis:
             try:
                 pending = await self._redis.zcard(PENDING_INDEX)
@@ -301,16 +286,12 @@ class ReviewStore:
                     "durable": True,
                     "degraded": False,
                 }
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for item in self._local.values():
             counts[item.status.value] = counts.get(item.status.value, 0) + 1
         return {
             "pending": counts.get(ReviewStatus.PENDING.value, 0),
-            "reviewed": sum(
-                count
-                for status, count in counts.items()
-                if status != ReviewStatus.PENDING.value
-            ),
+            "reviewed": sum(count for status, count in counts.items() if status != ReviewStatus.PENDING.value),
             "by_status": counts,
             "durable": False,
             "degraded": self._degraded,
@@ -350,7 +331,7 @@ class ReviewStore:
             logger.warning("Review queue Redis %r failed again: %s", operation, exc)
 
     @staticmethod
-    def _deserialize(raw: Optional[str]) -> Optional[ReviewItem]:
+    def _deserialize(raw: str | None) -> ReviewItem | None:
         if raw is None:
             return None
         try:

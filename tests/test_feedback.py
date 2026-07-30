@@ -8,6 +8,7 @@ Gemini stubbed, matching the existing endpoint tests.
 import asyncio
 import json
 import uuid
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -22,14 +23,13 @@ from feedback import (
     env_int,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 def make_record(**overrides) -> FeedbackRecord:
-    fields = dict(
+    fields: dict[str, Any] = dict(
         feedback_id=str(uuid.uuid4()),
         chat_id="chat-1",
         message_id="msg-1",
@@ -218,7 +218,7 @@ class FakeRedis:
 
     def zrevrange(self, key, start, stop):
         members = sorted(self.zsets.get(key, {}).items(), key=lambda kv: kv[1], reverse=True)
-        return [m for m, _ in members][start:stop + 1]
+        return [m for m, _ in members][start : stop + 1]
 
 
 class TestRedisIndexHygiene:
@@ -289,6 +289,7 @@ class TestBackendSelection:
 class TestExport:
     def _export_module(self):
         import importlib
+
         import scripts.export_eval_candidates as exp
 
         return importlib.reload(exp)
@@ -346,10 +347,13 @@ class TestExport:
         monkeypatch.setattr(exp, "build_store", lambda: live)
         assert exp.export(output_path=None, db_path=None) == 1
 
-    @pytest.mark.parametrize("argv", [
-        ["--limit", "-1"],
-        ["--min-categories", "-2"],
-    ])
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["--limit", "-1"],
+            ["--min-categories", "-2"],
+        ],
+    )
     def test_cli_rejects_negative_values(self, argv, monkeypatch):
         exp = self._export_module()
         monkeypatch.setattr(exp.sys, "argv", ["export_eval_candidates.py", *argv])
@@ -437,9 +441,7 @@ class TestFeedbackEndpoint:
             chat_id, message_id = await self._one_answer(client)
             assert message_id
             # And the model turn in history is tagged with it.
-            resp = await client.post(
-                "/chat", json={"prompt": "again", "chat_id": chat_id}
-            )
+            resp = await client.post("/chat", json={"prompt": "again", "chat_id": chat_id})
             history = resp.json()["history"]
             model_turns = [m for m in history if m["role"] == "model"]
             assert all(m["message_id"] for m in model_turns)
@@ -447,17 +449,21 @@ class TestFeedbackEndpoint:
     async def test_submit_down_feedback_from_live_snapshot(self, client):
         async with client:
             chat_id, message_id = await self._one_answer(client)
-            resp = await client.post("/feedback", json={
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "rating": "down",
-                "categories": ["incorrect_information"],
-                "comment": "wrong",
-            })
+            resp = await client.post(
+                "/feedback",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "rating": "down",
+                    "categories": ["incorrect_information"],
+                    "comment": "wrong",
+                },
+            )
             assert resp.status_code == 200
             fid = resp.json()["feedback_id"]
 
             import main
+
             stored = main.feedback_store.get(chat_id, message_id)
             assert stored.rating == "down"
             assert stored.feedback_id == fid
@@ -470,20 +476,28 @@ class TestFeedbackEndpoint:
     async def test_up_feedback_needs_no_categories(self, client):
         async with client:
             chat_id, message_id = await self._one_answer(client)
-            resp = await client.post("/feedback", json={
-                "chat_id": chat_id, "message_id": message_id, "rating": "up",
-            })
+            resp = await client.post(
+                "/feedback",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "rating": "up",
+                },
+            )
             assert resp.status_code == 200
 
-    @pytest.mark.parametrize("payload,field", [
-        ({"rating": "sideways"}, "rating"),
-        ({"rating": "down", "categories": ["not_a_category"]}, "categories"),
-        ({"rating": "down", "comment": "x" * 1001}, "comment"),
-        # Oversized snapshot fields must be rejected at the boundary, not stored.
-        ({"rating": "down", "prompt": "x" * 8001}, "prompt"),
-        ({"rating": "down", "answer": "x" * 16001}, "answer"),
-        ({"rating": "down", "categories": ["other"] * 50}, "categories"),
-    ])
+    @pytest.mark.parametrize(
+        "payload,field",
+        [
+            ({"rating": "sideways"}, "rating"),
+            ({"rating": "down", "categories": ["not_a_category"]}, "categories"),
+            ({"rating": "down", "comment": "x" * 1001}, "comment"),
+            # Oversized snapshot fields must be rejected at the boundary, not stored.
+            ({"rating": "down", "prompt": "x" * 8001}, "prompt"),
+            ({"rating": "down", "answer": "x" * 16001}, "answer"),
+            ({"rating": "down", "categories": ["other"] * 50}, "categories"),
+        ],
+    )
     async def test_invalid_body_is_422(self, client, payload, field):
         async with client:
             chat_id, message_id = await self._one_answer(client)
@@ -493,19 +507,31 @@ class TestFeedbackEndpoint:
 
     async def test_missing_snapshot_requires_client_prompt_and_answer(self, client):
         async with client:
-            resp = await client.post("/feedback", json={
-                "chat_id": "gone", "message_id": "gone", "rating": "down",
-            })
+            resp = await client.post(
+                "/feedback",
+                json={
+                    "chat_id": "gone",
+                    "message_id": "gone",
+                    "rating": "down",
+                },
+            )
             assert resp.status_code == 422
 
     async def test_missing_snapshot_accepts_client_supplied_pair(self, client):
         async with client:
-            resp = await client.post("/feedback", json={
-                "chat_id": "gone", "message_id": "gone", "rating": "down",
-                "prompt": "client prompt", "answer": "client answer",
-            })
+            resp = await client.post(
+                "/feedback",
+                json={
+                    "chat_id": "gone",
+                    "message_id": "gone",
+                    "rating": "down",
+                    "prompt": "client prompt",
+                    "answer": "client answer",
+                },
+            )
             assert resp.status_code == 200
             import main
+
             stored = main.feedback_store.get("gone", "gone")
             assert stored.prompt == "client prompt"
             assert stored.answer == "client answer"
@@ -517,11 +543,13 @@ class TestFeedbackEndpoint:
             await client.post("/feedback", json={**base, "rating": "down"})
             await client.post("/feedback", json={**base, "rating": "up"})
             import main
+
             assert main.feedback_store.get(chat_id, message_id).rating == "up"
             assert len(main.feedback_store.list_records()) == 1
 
     async def test_rate_limit_blocks_a_flood(self, client, monkeypatch):
         import main
+
         monkeypatch.setattr(main.rate_limiter, "_max", 3)
         async with client:
             chat_id, message_id = await self._one_answer(client)
@@ -532,6 +560,7 @@ class TestFeedbackEndpoint:
     async def test_forwarded_header_ignored_unless_proxy_trusted(self, client, monkeypatch):
         """Header rotation must not mint fresh buckets when proxy is untrusted."""
         import main
+
         monkeypatch.setattr(main, "TRUST_PROXY_HEADERS", False)
         monkeypatch.setattr(main.rate_limiter, "_max", 2)
         async with client:
@@ -539,15 +568,14 @@ class TestFeedbackEndpoint:
             body = {"chat_id": chat_id, "message_id": message_id, "rating": "up"}
             statuses = []
             for i in range(4):
-                resp = await client.post(
-                    "/feedback", json=body, headers={"X-Forwarded-For": f"9.9.9.{i}"}
-                )
+                resp = await client.post("/feedback", json=body, headers={"X-Forwarded-For": f"9.9.9.{i}"})
                 statuses.append(resp.status_code)
             # A rotating X-Forwarded-For gave no new buckets, so the limit bit.
             assert 429 in statuses
 
     async def test_trusted_proxy_uses_rightmost_hop(self, client, monkeypatch):
         import main
+
         monkeypatch.setattr(main, "TRUST_PROXY_HEADERS", True)
         captured = {}
         real_is_allowed = main.rate_limiter.is_allowed
@@ -590,8 +618,9 @@ class TestAdminEndpoints:
         require_admin as a str. httpx itself won't send such a header, so this
         exercises the dependency directly.
         """
-        import main
         from fastapi import HTTPException
+
+        import main
 
         monkeypatch.setattr(main, "ADMIN_TOKEN", ADMIN_TOKEN)
         with pytest.raises(HTTPException) as exc:
@@ -600,6 +629,7 @@ class TestAdminEndpoints:
 
     async def test_unconfigured_token_disables_admin(self, client, monkeypatch):
         import main
+
         monkeypatch.setattr(main, "ADMIN_TOKEN", "")
         async with client:
             resp = await client.get("/feedback/stats", headers={"X-Admin-Token": "anything"})
@@ -622,13 +652,16 @@ class TestAdminEndpoints:
         async with client:
             resp = await client.post("/chat", json={"prompt": "What is zakat?"})
             chat_id, message_id = resp.json()["chat_id"], resp.json()["message_id"]
-            await client.post("/feedback", json={
-                "chat_id": chat_id, "message_id": message_id,
-                "rating": "down", "categories": ["too_vague"],
-            })
-            resp = await client.get(
-                "/feedback/records?rating=down", headers={"X-Admin-Token": ADMIN_TOKEN}
+            await client.post(
+                "/feedback",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "rating": "down",
+                    "categories": ["too_vague"],
+                },
             )
+            resp = await client.get("/feedback/records?rating=down", headers={"X-Admin-Token": ADMIN_TOKEN})
             assert resp.status_code == 200
             records = resp.json()["records"]
             assert len(records) == 1

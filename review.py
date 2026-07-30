@@ -31,7 +31,7 @@ import logging
 import os
 import secrets
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
@@ -51,7 +51,7 @@ SCHOLAR_REVIEW_TOKEN = os.getenv("SCHOLAR_REVIEW_TOKEN", "")
 REVIEW_EXPORT_PATH = os.getenv("REVIEW_EXPORT_PATH", "data/review/reviewed.jsonl")
 
 
-def require_reviewer(token: Optional[str]) -> None:
+def require_reviewer(token: str | None) -> None:
     """Authorize a reviewer request, or raise.
 
     Closed by default: an unset token disables the endpoints entirely rather
@@ -60,17 +60,12 @@ def require_reviewer(token: Optional[str]) -> None:
     if not SCHOLAR_REVIEW_TOKEN:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Scholar review is not configured. Set SCHOLAR_REVIEW_TOKEN to "
-                "enable the reviewer endpoints."
-            ),
+            detail=("Scholar review is not configured. Set SCHOLAR_REVIEW_TOKEN to enable the reviewer endpoints."),
         )
     # Constant-time comparison: a timing-distinguishable check on a shared
     # secret is worth avoiding even on a low-traffic endpoint.
     if not token or not secrets.compare_digest(token, SCHOLAR_REVIEW_TOKEN):
-        raise HTTPException(
-            status_code=401, detail="A valid X-Review-Token header is required."
-        )
+        raise HTTPException(status_code=401, detail="A valid X-Review-Token header is required.")
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +73,7 @@ def require_reviewer(token: Optional[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def export_reviewed_item(item: ReviewItem, export_path: Optional[str] = None) -> bool:
+def export_reviewed_item(item: ReviewItem, export_path: str | None = None) -> bool:
     """Append a vetted answer to the eval/feedback export. Returns True if written.
 
     Rejected answers are exported too, with ``verdict: "reject"`` — a wrong
@@ -86,7 +81,7 @@ def export_reviewed_item(item: ReviewItem, export_path: Optional[str] = None) ->
     Corrections carry the reviewer's answer as the expected one.
     """
     path = Path(export_path or REVIEW_EXPORT_PATH)
-    record: Dict[str, Any] = {
+    record: dict[str, Any] = {
         "id": item.id,
         "question": item.question,
         "answer": item.final_answer or item.answer,
@@ -114,8 +109,8 @@ async def enqueue_for_review(
     answer: str,
     score: float,
     band: str,
-    signals: Optional[Dict[str, float]] = None,
-    chat_id: Optional[str] = None,
+    signals: dict[str, float] | None = None,
+    chat_id: str | None = None,
 ) -> ReviewItem:
     """Persist a low-confidence religious answer for a scholar to vet.
 
@@ -167,20 +162,16 @@ def cache_reviewed_answer(item: ReviewItem) -> bool:
 
 class VerdictRequest(BaseModel):
     verdict: Verdict = Field(..., description="approve, correct, or reject")
-    corrected_answer: Optional[str] = Field(
-        None, description="Required when the verdict is 'correct'"
-    )
-    reviewer: Optional[str] = Field(None, description="Reviewer's name or identifier")
-    note: Optional[str] = Field(None, description="Optional note for the record")
+    corrected_answer: str | None = Field(None, description="Required when the verdict is 'correct'")
+    reviewer: str | None = Field(None, description="Reviewer's name or identifier")
+    note: str | None = Field(None, description="Optional note for the record")
 
     @model_validator(mode="after")
-    def correction_requires_an_answer(self) -> "VerdictRequest":
+    def correction_requires_an_answer(self) -> VerdictRequest:
         if self.verdict is Verdict.CORRECT and not (self.corrected_answer or "").strip():
             raise ValueError("corrected_answer is required when verdict is 'correct'")
         if self.verdict is not Verdict.CORRECT and self.corrected_answer:
-            raise ValueError(
-                "corrected_answer is only accepted when verdict is 'correct'"
-            )
+            raise ValueError("corrected_answer is only accepted when verdict is 'correct'")
         return self
 
 
@@ -192,7 +183,7 @@ class VerdictResponse(BaseModel):
 
 class PendingResponse(BaseModel):
     count: int
-    items: List[ReviewItem]
+    items: list[ReviewItem]
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +195,7 @@ class PendingResponse(BaseModel):
 async def list_pending(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    x_review_token: Optional[str] = Header(None),
+    x_review_token: str | None = Header(None),
 ) -> PendingResponse:
     """Answers awaiting a scholar's verdict, longest-waiting first."""
     require_reviewer(x_review_token)
@@ -216,7 +207,7 @@ async def list_pending(
 async def list_reviewed(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    x_review_token: Optional[str] = Header(None),
+    x_review_token: str | None = Header(None),
 ) -> PendingResponse:
     """Answers that already carry a verdict, most recently decided first."""
     require_reviewer(x_review_token)
@@ -225,16 +216,14 @@ async def list_reviewed(
 
 
 @router.get("/review/stats")
-async def review_stats(x_review_token: Optional[str] = Header(None)) -> Dict[str, Any]:
+async def review_stats(x_review_token: str | None = Header(None)) -> dict[str, Any]:
     """Queue depth and whether the queue is actually durable."""
     require_reviewer(x_review_token)
     return await get_review_store().stats()
 
 
 @router.get("/review/{item_id}", response_model=ReviewItem)
-async def get_item(
-    item_id: str, x_review_token: Optional[str] = Header(None)
-) -> ReviewItem:
+async def get_item(item_id: str, x_review_token: str | None = Header(None)) -> ReviewItem:
     require_reviewer(x_review_token)
     item = await get_review_store().get(item_id)
     if item is None:
@@ -246,7 +235,7 @@ async def get_item(
 async def record_verdict(
     item_id: str,
     request: VerdictRequest,
-    x_review_token: Optional[str] = Header(None),
+    x_review_token: str | None = Header(None),
 ) -> VerdictResponse:
     """Record a scholar's verdict and feed a vetted answer back into the system."""
     require_reviewer(x_review_token)
@@ -266,11 +255,8 @@ async def record_verdict(
     except AlreadyReviewedError as exc:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"Item {item_id} was already reviewed "
-                f"({exc.item.status.value}); it cannot be decided twice."
-            ),
-        )
+            detail=(f"Item {item_id} was already reviewed ({exc.item.status.value}); it cannot be decided twice."),
+        ) from exc
     if item is None:
         raise HTTPException(status_code=404, detail=f"No review item {item_id}.")
 

@@ -66,9 +66,7 @@ def ask(monkeypatch, answer_text: str, chat_id: str, prompt: str = "What does Is
 
 class TestCitationsOnTheResponse:
     def test_a_quran_citation_is_returned_as_structured_data(self, monkeypatch):
-        answer = "Allah counsels patience." + block(
-            '{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}'
-        )
+        answer = "Allah counsels patience." + block('{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}')
         body = ask(monkeypatch, answer, "c-quran")
 
         assert len(body["citations"]) == 1
@@ -80,9 +78,7 @@ class TestCitationsOnTheResponse:
         assert citation["surah_name"] == "Al-Baqarah"
 
     def test_the_block_is_never_shown_to_the_user(self, monkeypatch):
-        answer = "Allah counsels patience." + block(
-            '{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}'
-        )
+        answer = "Allah counsels patience." + block('{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}')
         body = ask(monkeypatch, answer, "c-hidden")
 
         assert START not in body["response"]
@@ -125,9 +121,7 @@ class TestFailureIsAlwaysSurvivable:
             "",
         ],
     )
-    def test_malformed_or_invalid_blocks_yield_no_citations_and_still_answer(
-        self, monkeypatch, payload
-    ):
+    def test_malformed_or_invalid_blocks_yield_no_citations_and_still_answer(self, monkeypatch, payload):
         answer = "The prose survives." + block(payload)
         body = ask(monkeypatch, answer, f"c-bad-{abs(hash(payload))}")
 
@@ -156,9 +150,7 @@ class TestConfidenceSignal:
 
     PROSE = "Allah counsels patience, and the Prophet taught intention."
 
-    def test_validated_citations_raise_confidence_above_the_unverified_ceiling(
-        self, monkeypatch
-    ):
+    def test_validated_citations_raise_confidence_above_the_unverified_ceiling(self, monkeypatch):
         cited = self.PROSE + block(
             '{"citations": ['
             '{"type": "quran", "surah": 2, "ayah_start": 153},'
@@ -184,9 +176,7 @@ class TestConfidenceSignal:
             '{"type": "quran", "surah": 2, "ayah_start": 9999}'
             "]}"
         )
-        good = self.PROSE + block(
-            '{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}'
-        )
+        good = self.PROSE + block('{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}')
 
         mixed = ask(monkeypatch, half_bogus, "c-conf-mixed")
         clean = ask(monkeypatch, good, "c-conf-clean")
@@ -214,9 +204,7 @@ class TestSystemPrompt:
 
 def test_no_citation_markers_survive_into_any_visible_field(monkeypatch):
     """Belt and braces: no marker may appear anywhere the client renders."""
-    answer = "Visible prose." + block(
-        '{"citations": [{"type": "quran", "surah": 1, "ayah_start": 1}]}'
-    )
+    answer = "Visible prose." + block('{"citations": [{"type": "quran", "surah": 1, "ayah_start": 1}]}')
     body = ask(monkeypatch, answer, "c-leak")
 
     rendered = [body.get("response") or "", body.get("text") or ""]

@@ -151,9 +151,7 @@ def evaluate(records, live_url=None, verbose=False):
     validity_rate = total_valid / total_genuine if total_genuine else 1.0
     # Capped at the planted count: over-rejection is a validity failure, not a
     # rejection success, and validity_rate is where it should surface.
-    rejection_rate = (
-        min(total_rejected, total_planted) / total_planted if total_planted else 1.0
-    )
+    rejection_rate = min(total_rejected, total_planted) / total_planted if total_planted else 1.0
 
     print(f"mode              {'live' if live_url else 'offline'}")
     print(f"cases             {len(records)}")
@@ -169,9 +167,7 @@ def evaluate(records, live_url=None, verbose=False):
 
     if verbose:
         print()
-        print(
-            f"{'id':<30}{'cites':<7}{'parsed':<8}{'valid':<7}{'planted':<9}note"
-        )
+        print(f"{'id':<30}{'cites':<7}{'parsed':<8}{'valid':<7}{'planted':<9}note")
         for row in rows:
             print(
                 f"{row['id']:<30}{str(row['expects']):<7}"
@@ -185,8 +181,7 @@ def evaluate(records, live_url=None, verbose=False):
         failures.append(f"validity rate {validity_rate:.0%} below {MIN_VALIDITY_RATE:.0%}")
     if rejection_rate < MIN_REJECTION_RATE:
         failures.append(
-            f"rejection rate {rejection_rate:.0%} below {MIN_REJECTION_RATE:.0%}: "
-            f"a fabricated citation was accepted"
+            f"rejection rate {rejection_rate:.0%} below {MIN_REJECTION_RATE:.0%}: a fabricated citation was accepted"
         )
     if leaks:
         failures.append(f"citation markers leaked into prose for: {', '.join(leaks)}")

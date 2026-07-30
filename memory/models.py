@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,9 +26,9 @@ class FactEntry(BaseModel):
 
 class UserProfile(BaseModel):
     user_id: str
-    knowledge_level: Optional[str] = None
-    madhhab: Optional[str] = None
-    preferred_language: Optional[str] = None
+    knowledge_level: str | None = None
+    madhhab: str | None = None
+    preferred_language: str | None = None
     topics_studied: list[TopicEntry] = Field(default_factory=list)
     remembered_facts: list[FactEntry] = Field(default_factory=list)
     created_at: float = Field(default_factory=time.time)

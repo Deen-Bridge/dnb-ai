@@ -1,7 +1,6 @@
 import json
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 DATA_PATH = Path(__file__).parent / "data" / "adhkar.json"
 
@@ -13,19 +12,19 @@ class AdhkarEntry(dict):
 class AdhkarCorpus:
     def __init__(self, data_file: Path = DATA_PATH):
         self.data_file = data_file
-        self.entries: List[Dict[str, Any]] = []
+        self.entries: list[dict[str, Any]] = []
         self._load_corpus()
 
     def _load_corpus(self) -> None:
         if not self.data_file.exists():
             self.entries = []
             return
-        with open(self.data_file, "r", encoding="utf-8") as handle:
+        with open(self.data_file, encoding="utf-8") as handle:
             payload = json.load(handle)
             self.entries = payload.get("entries", [])
 
-    def search(self, *, category: Optional[str] = None, query: Optional[str] = None) -> List[Dict[str, Any]]:
-        matches: List[Dict[str, Any]] = []
+    def search(self, *, category: str | None = None, query: str | None = None) -> list[dict[str, Any]]:
+        matches: list[dict[str, Any]] = []
         normalized_query = (query or "").strip().casefold()
         for entry in self.entries:
             category_matches = True

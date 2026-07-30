@@ -10,19 +10,19 @@ import json
 import pytest
 
 from main import (
-    ChatRequest,
-    ChatResponse,
     ISLAMIC_CONTEXT,
     LANGUAGE_INSTRUCTIONS,
     SUPPORTED_LANGUAGES,
+    ChatRequest,
+    ChatResponse,
     Message,
     normalize_language,
 )
 
-
 # ---------------------------------------------------------------------------
 # normalize_language
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizeLanguage:
     """normalize_language validates BCP-47 codes against SUPPORTED_LANGUAGES."""
@@ -61,6 +61,7 @@ class TestNormalizeLanguage:
 # Supported languages constant
 # ---------------------------------------------------------------------------
 
+
 class TestSupportedLanguages:
     def test_arabic_is_supported(self):
         assert "ar" in SUPPORTED_LANGUAGES
@@ -80,6 +81,7 @@ class TestSupportedLanguages:
 # Language instructions
 # ---------------------------------------------------------------------------
 
+
 class TestLanguageInstructions:
     def test_instructions_mention_arabic_script(self):
         assert "Arabic script" in LANGUAGE_INSTRUCTIONS
@@ -97,6 +99,7 @@ class TestLanguageInstructions:
 # ---------------------------------------------------------------------------
 # ChatRequest model
 # ---------------------------------------------------------------------------
+
 
 class TestChatRequest:
     def test_language_field_optional(self):
@@ -125,6 +128,7 @@ class TestChatRequest:
 # ChatResponse model
 # ---------------------------------------------------------------------------
 
+
 class TestChatResponse:
     def test_language_field_in_response(self):
         resp = ChatResponse(
@@ -152,6 +156,7 @@ class TestChatResponse:
 # ---------------------------------------------------------------------------
 # Arabic content JSON round-tripping
 # ---------------------------------------------------------------------------
+
 
 class TestArabicJsonRoundTrip:
     """Ensure Arabic (and mixed) content survives JSON serialization."""
