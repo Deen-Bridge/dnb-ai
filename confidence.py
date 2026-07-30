@@ -60,7 +60,6 @@ import logging
 import os
 import re
 from enum import Enum
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -93,9 +92,7 @@ CONFIDENCE_HIGH_THRESHOLD = _env_float("CONFIDENCE_HIGH_THRESHOLD", 0.70)
 # Religious answers at or below this score go to the scholar queue. Defaults to
 # the abstain threshold: what the service would not say on its own is exactly
 # what a scholar should look at.
-SCHOLAR_QUEUE_THRESHOLD = _env_float(
-    "SCHOLAR_QUEUE_THRESHOLD", CONFIDENCE_LOW_THRESHOLD
-)
+SCHOLAR_QUEUE_THRESHOLD = _env_float("SCHOLAR_QUEUE_THRESHOLD", CONFIDENCE_LOW_THRESHOLD)
 
 HIGH_STAKES_PENALTY = _env_float("CONFIDENCE_HIGH_STAKES_PENALTY", 0.15)
 NO_SIGNAL_PRIOR = _env_float("CONFIDENCE_NO_SIGNAL_PRIOR", 0.55)
@@ -111,7 +108,7 @@ UNVERIFIED_CEILING = _env_float("CONFIDENCE_UNVERIFIED_CEILING", 0.65)
 # own account of itself.
 EXTERNAL_SIGNALS = ("self_consistency", "citation_verification")
 
-SIGNAL_WEIGHTS: Dict[str, float] = {
+SIGNAL_WEIGHTS: dict[str, float] = {
     "self_consistency": 0.40,
     "citation_verification": 0.30,
     "expressed_certainty": 0.30,
@@ -119,8 +116,7 @@ SIGNAL_WEIGHTS: Dict[str, float] = {
 
 if CONFIDENCE_LOW_THRESHOLD > CONFIDENCE_HIGH_THRESHOLD:
     logger.warning(
-        "CONFIDENCE_LOW_THRESHOLD (%s) exceeds CONFIDENCE_HIGH_THRESHOLD (%s); "
-        "every answer will abstain",
+        "CONFIDENCE_LOW_THRESHOLD (%s) exceeds CONFIDENCE_HIGH_THRESHOLD (%s); every answer will abstain",
         CONFIDENCE_LOW_THRESHOLD,
         CONFIDENCE_HIGH_THRESHOLD,
     )
@@ -208,19 +204,17 @@ class ConfidenceSignals(BaseModel):
     implementation.
     """
 
-    self_consistency: Optional[float] = Field(
+    self_consistency: float | None = Field(
         None, ge=0.0, le=1.0, description="Agreement across sampled answers (#ai-18)"
     )
-    citation_verification: Optional[float] = Field(
+    citation_verification: float | None = Field(
         None, ge=0.0, le=1.0, description="Share of citations that verified (#40)"
     )
-    expressed_certainty: Optional[float] = Field(
-        None, ge=0.0, le=1.0, description="Inverse of the answer's own hedging"
-    )
+    expressed_certainty: float | None = Field(None, ge=0.0, le=1.0, description="Inverse of the answer's own hedging")
     is_religious: bool = False
     is_high_stakes: bool = False
 
-    def present(self) -> Dict[str, float]:
+    def present(self) -> dict[str, float]:
         return {
             name: value
             for name, value in (
@@ -239,9 +233,9 @@ class ConfidenceAssessment(BaseModel):
     band: ConfidenceBand
     abstained: bool
     queued: bool
-    signals: Dict[str, float] = {}
-    signals_used: List[str] = []
-    review_id: Optional[str] = None
+    signals: dict[str, float] = {}
+    signals_used: list[str] = []
+    review_id: str | None = None
 
 
 def compute_confidence(signals: ConfidenceSignals) -> float:
@@ -314,8 +308,7 @@ ABSTENTION_MESSAGE = (
 )
 
 SCHOLAR_QUEUED_NOTE = (
-    "\n\nYour question has been added to our scholar-review queue so a "
-    "qualified reviewer can look at it."
+    "\n\nYour question has been added to our scholar-review queue so a qualified reviewer can look at it."
 )
 
 UNCERTAINTY_NOTE = (
@@ -351,8 +344,8 @@ def build_signals(
     answer: str,
     is_religious: bool,
     is_high_stakes: bool = False,
-    self_consistency: Optional[float] = None,
-    citation_verification: Optional[float] = None,
+    self_consistency: float | None = None,
+    citation_verification: float | None = None,
 ) -> ConfidenceSignals:
     """Assemble signals for a turn, deriving only the text-based one here."""
     return ConfidenceSignals(
@@ -364,7 +357,7 @@ def build_signals(
     )
 
 
-def thresholds() -> Dict[str, float]:
+def thresholds() -> dict[str, float]:
     """Current policy configuration, for the stats endpoint and for tests."""
     return {
         "low": CONFIDENCE_LOW_THRESHOLD,

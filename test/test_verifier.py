@@ -1,11 +1,11 @@
 from verifier import (
+    VerificationStatus,
+    calculate_similarity,
+    extract_and_verify_all,
     normalize_arabic,
     normalize_english,
-    calculate_similarity,
-    verify_quran_citation,
     verify_hadith_citation,
-    extract_and_verify_all,
-    VerificationStatus,
+    verify_quran_citation,
 )
 
 
@@ -69,7 +69,7 @@ def test_verify_hadith_unverified_fallback():
 def test_extract_and_verify_all():
     sample_text = (
         'As mentioned in Quran 1:1 "In the name of Allah, the Entirely Merciful, the Especially Merciful.", '
-        'and also noted in Bukhari 42.'
+        "and also noted in Bukhari 42."
     )
     results = extract_and_verify_all(sample_text)
     assert len(results) == 2

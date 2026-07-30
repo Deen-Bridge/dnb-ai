@@ -2,23 +2,23 @@
 
 import asyncio
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Any
 
 from .policy import Policy, PolicyCategory
 
-
-Classifier = Callable[[str, List[str]], Dict[str, object]]
+Classifier = Callable[[str, list[str]], dict[str, Any]]
 
 
 @dataclass(frozen=True)
 class InputDecision:
-    category_id: Optional[str]
+    category_id: str | None
     confidence: float
     action: str
     guidance: str = ""
     refusal: str = ""
-    stages_fired: List[str] = field(default_factory=list)
+    stages_fired: list[str] = field(default_factory=list)
 
 
 class InputGate:
@@ -27,14 +27,12 @@ class InputGate:
         self.classifier = classifier
 
     @staticmethod
-    def _matches(text: str, patterns: List[str]) -> bool:
+    def _matches(text: str, patterns: list[str]) -> bool:
         return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
     def evaluate(self, prompt: str) -> InputDecision:
         candidates = [
-            category
-            for category in self.policy.categories.values()
-            if self._matches(prompt, category.keywords)
+            category for category in self.policy.categories.values() if self._matches(prompt, category.keywords)
         ]
         if not candidates and self._matches(prompt, self.policy.benign_near_miss_patterns):
             return InputDecision(None, 1.0, "allow", stages_fired=["prefilter_benign"])
@@ -74,9 +72,7 @@ class InputGate:
         """Evaluate without running the synchronous classifier on the event loop."""
         return await asyncio.to_thread(self.evaluate, prompt)
 
-    def _validated_category(
-        self, result: Dict[str, object], candidates: List[PolicyCategory]
-    ) -> Optional[PolicyCategory]:
+    def _validated_category(self, result: dict[str, Any], candidates: list[PolicyCategory]) -> PolicyCategory | None:
         required = {"category_id", "confidence", "action"}
         if set(result) != required:
             raise ValueError("Classifier response does not match the strict schema")
@@ -98,9 +94,7 @@ class InputGate:
         return {"allow": 0, "allow_with_guidance": 1, "refuse": 2}[action]
 
     @staticmethod
-    def _decision(
-        category: PolicyCategory, action: str, confidence: float, stages: List[str]
-    ) -> InputDecision:
+    def _decision(category: PolicyCategory, action: str, confidence: float, stages: list[str]) -> InputDecision:
         return InputDecision(
             category_id=category.id,
             confidence=confidence,

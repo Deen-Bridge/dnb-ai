@@ -19,7 +19,7 @@ its collection.
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -60,10 +60,10 @@ def normalize_text(text: str) -> str:
 # Embedding seam
 # ---------------------------------------------------------------------------
 
-_FAKE_EMBEDDING: Optional[np.ndarray] = None
+_FAKE_EMBEDDING: np.ndarray | None = None
 
 
-def set_fake_embedding(vec: Optional[np.ndarray]) -> None:
+def set_fake_embedding(vec: np.ndarray | None) -> None:
     global _FAKE_EMBEDDING
     _FAKE_EMBEDDING = vec
 
@@ -124,7 +124,7 @@ class SemanticCache:
 
     # -- public API ---------------------------------------------------------
 
-    def get(self, embedding: np.ndarray) -> Optional[CacheEntry]:
+    def get(self, embedding: np.ndarray) -> CacheEntry | None:
         if not SEMANTIC_CACHE_ENABLED:
             return None
         match = self._find_best_match(embedding)
@@ -177,11 +177,9 @@ class SemanticCache:
 
     # -- internals ----------------------------------------------------------
 
-    def _find_best_match(
-        self, embedding: np.ndarray
-    ) -> Optional[tuple[CacheEntry, int]]:
+    def _find_best_match(self, embedding: np.ndarray) -> tuple[CacheEntry, int] | None:
         best_score = SEMANTIC_CACHE_THRESHOLD
-        best_idx: Optional[int] = None
+        best_idx: int | None = None
 
         surviving_entries: list[CacheEntry] = []
         surviving_times: list[float] = []
@@ -253,7 +251,7 @@ class KeyedCache:
         self.misses = 0
         self.evictions = 0
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         entry = self._entries.get(key)
         if entry is None:
             self.misses += 1
@@ -269,7 +267,7 @@ class KeyedCache:
         self.hits += 1
         return value
 
-    def put(self, key: str, value: Any, ttl_seconds: Optional[int] = None) -> None:
+    def put(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:
         """Store *value*, expiring after *ttl_seconds* (default: the cache TTL).
 
         The override exists for content that is cacheable but not immutable —
