@@ -34,6 +34,7 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
+from store import SessionStore, history_to_dicts, dicts_to_contents
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -736,7 +737,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
                 model = get_model()
-                active_chats[chat_id] = model.start_chat(history=[])
+                # Load persisted history if available
+                persisted = await session_store.load_history(chat_id)
+                history = dicts_to_contents(persisted) if persisted else []
+                active_chats[chat_id] = model.start_chat(history=history)
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
             if is_fiqh:
@@ -796,7 +800,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             },
         )
 
-        # Get chat history
+        # Get chat history (strip system context from user messages)
         history = []
         chat_session = active_chats.get(chat_id)
         for message in chat_session.history if chat_session else []:
@@ -806,7 +810,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 else:
                     content = str(message)
 
-                history.append(Message(role="user" if message.role == "user" else "model", content=content))
+                if message.role == "user":
+                    content = _strip_system_context(content)
+                history.append(Message(
+                    role="user" if message.role == "user" else "model",
+                    content=content
+                ))
             except Exception as e:
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
@@ -923,6 +932,11 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         )
         _finalize()
         _succeeded = True
+
+        # --- Persist chat history ---
+        asyncio.create_task(
+            _persist_chat_history(chat_id, request.user_id, chat_session)
+        )
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
@@ -1278,6 +1292,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                             content = msg.parts[0].text if hasattr(msg.parts[0], "text") else str(msg.parts[0])
                         else:
                             content = str(msg)
+                        if msg.role == "user":
+                            content = _strip_system_context(content)
                         history.append(
                             Message(
                                 role="user" if msg.role == "user" else "model",
@@ -1367,8 +1383,87 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
         telemetry.current_trace.reset(_ctx_token)
 
 
+def _strip_system_context(text: str) -> str:
+    """Extract just the user's actual question from the full prompt that includes system context."""
+    marker = "\nUser question: "
+    if marker in text:
+        return text.split(marker, 1)[1]
+    return text
+
+
+async def _persist_chat_history(chat_id: str, user_id: Optional[str], chat_session) -> None:
+    """Persist chat history and user-chat mapping."""
+    try:
+        if chat_session and hasattr(chat_session, "history") and chat_session.history:
+            history_dicts = history_to_dicts(chat_session.history)
+            # Strip system context from user messages so the store only contains
+            # what the user actually asked, not the internal system prompt blocks.
+            for msg in history_dicts:
+                if msg.get("role") == "user":
+                    msg["text"] = _strip_system_context(msg["text"])
+            await session_store.save_history(chat_id, history_dicts)
+            if user_id:
+                await session_store.add_user_chat(user_id, chat_id)
+                logger.info("Persisted chat %s for user %s (%d turns)", chat_id[:8], user_id[:8], len(history_dicts))
+            else:
+                logger.warning("No user_id — chat %s not linked to any user", chat_id[:8])
+    except Exception as exc:
+        logger.warning("Failed to persist chat history for %s: %s", chat_id, exc)
+
+
+@app.get("/user/{user_id}/chats")
+async def get_user_chats(user_id: str):
+    """List all chat IDs for a user."""
+    try:
+        chat_ids = await session_store.get_user_chats(user_id)
+        chats = []
+        for cid in chat_ids:
+            history = await session_store.load_history(cid)
+            # Strip system context from stored user messages
+            for msg in history:
+                if msg.get("role") == "user":
+                    msg["text"] = _strip_system_context(msg.get("text", ""))
+            # Use first user message as title, or last message snippet
+            title = ""
+            snippet = ""
+            for msg in history:
+                if msg.get("role") == "user" and not title:
+                    title = msg.get("text", "")[:80]
+                snippet = msg.get("text", "")[:120]
+            created_at = await session_store.get_chat_created_at(cid)
+            chats.append({
+                "chat_id": cid,
+                "title": title or f"Chat {cid[:8]}",
+                "snippet": snippet,
+                "message_count": len(history),
+                "created_at": created_at,
+            })
+        # Most recent first
+        chats.sort(key=lambda c: c["created_at"] or 0, reverse=True)
+        return {"chats": chats}
+    except Exception as e:
+        logger.error("Error listing user chats", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@app.get("/chat/{chat_id}/history")
+async def get_chat_history(chat_id: str):
+    """Get the message history for a specific chat."""
+    try:
+        history = await session_store.load_history(chat_id)
+        # Strip system context from persisted user messages (covers old data
+        # stored before the stripping fix was deployed).
+        for msg in history:
+            if msg.get("role") == "user":
+                msg["text"] = _strip_system_context(msg.get("text", ""))
+        return history
+    except Exception as e:
+        logger.error("Error loading chat history", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str) -> dict[str, str]:
+async def delete_chat(chat_id: str, user_id: Optional[str] = None) -> dict[str, str]:
     try:
         existed = chat_id in active_chats
         active_chats.pop(chat_id, None)
@@ -1376,6 +1471,10 @@ async def delete_chat(chat_id: str) -> dict[str, str]:
         # and answer snapshots do not outlive the conversation they describe.
         for message_id in chat_message_ids.pop(chat_id, []):
             answer_snapshots.pop((chat_id, message_id), None)
+        # Remove from persistent store
+        await session_store.delete_session(chat_id)
+        if user_id:
+            await session_store.remove_user_chat(user_id, chat_id)
         if existed:
             logger.info(f"Deleted chat session: {chat_id}")
             return {"message": "Chat session deleted successfully"}

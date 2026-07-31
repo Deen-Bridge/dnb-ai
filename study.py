@@ -258,7 +258,7 @@ class BaseGenerator:
 class GeminiGenerator(BaseGenerator):
     """Real generator that calls the Gemini API."""
 
-    def __init__(self, model_name: str = "gemini-2.5-flash-preview-05-20"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         self.model_name = model_name
 
     def generate(self, prompt: str, schema: dict) -> str:
