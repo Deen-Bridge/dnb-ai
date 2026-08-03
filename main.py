@@ -12,6 +12,12 @@ from typing import Any, Optional
 
 import google.generativeai as genai
 from dotenv import load_dotenv
+
+# Must run before any module that reads os.getenv at import time (store,
+# config, …) so local development reads .env the same way production reads
+# real environment variables.
+load_dotenv()
+
 from config import get_settings
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
@@ -37,7 +43,7 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
-from store import SessionStore, history_to_dicts, dicts_to_contents
+from store import create_session_store, history_to_dicts, dicts_to_contents
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -323,6 +329,11 @@ review_store = get_review_store()
 
 # Per-user memory store (Redis-backed or in-memory)
 memory_store = create_memory_store()
+
+# Chat-history store: Firestore when a Firebase service account is configured,
+# otherwise Redis, otherwise in-memory. Used by both the non-streaming and
+# streaming chat endpoints, and by the history/list/delete endpoints below.
+session_store = create_session_store()
 
 MAX_CHAT_HISTORY_TURNS = 20
 
@@ -1155,7 +1166,12 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # --- Create or get chat session ---
                 if chat_id not in active_chats:
                     logger.info("Creating new streaming chat session: %s", chat_id)
-                    active_chats[chat_id] = get_model().start_chat(history=[])
+                    # Resume from persisted history so a returning user (or a
+                    # request that arrived after a restart) keeps the context.
+                    persisted = await session_store.load_history(chat_id)
+                    active_chats[chat_id] = get_model().start_chat(
+                        history=dicts_to_contents(persisted) if persisted else []
+                    )
 
                 chat_session = active_chats[chat_id]
 
@@ -1331,6 +1347,12 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 yield f"data: {done}\n\n"
 
                 logger.info("Streaming chat response completed for %s", chat_id)
+
+                # --- Persist chat history ---
+                # Awaited (not fire-and-forget) so a client that immediately
+                # reloads the chat list sees this turn. Failures are caught
+                # inside the helper; the stream is already complete.
+                await _persist_chat_history(chat_id, request.user_id, chat_session)
 
             except asyncio.CancelledError:
                 # Client disconnected mid-stream. Consume remaining chunks

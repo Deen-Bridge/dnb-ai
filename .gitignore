@@ -1,6 +1,11 @@
 # Environment variables
 .env
 
+# Firebase service-account keys — NEVER commit these (they grant full access)
+*firebase-adminsdk*.json
+*service-account*.json
+firebase-service-account.json
+
 # Python
 __pycache__/
 *.py[cod]
