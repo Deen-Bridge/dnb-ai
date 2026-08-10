@@ -7,7 +7,7 @@
 [![CI](https://github.com/Deen-Bridge/dnb-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Deen-Bridge/dnb-ai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue.svg)](CONTRIBUTING.md)
-[![Python](https://img.shields.io/badge/Python-3.11-3776ab.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12-3776ab.svg)](https://www.python.org/)
 
 [Live API](https://dnb-ai.onrender.com) · [Web App](https://dnb-frontend.vercel.app) · [Report a Bug](https://github.com/Deen-Bridge/dnb-ai/issues) · [Contribute](CONTRIBUTING.md)
 
@@ -128,8 +128,8 @@ services:
         sync: false
 ```
 
-> **Note:** this PR does **not** flip production to Docker — that is a
-> deliberate post-merge step for the team.
+> **Note:** Production currently runs on the Python buildpack. To deploy the
+> Docker image instead, set `runtime: docker` in `render.yaml` as shown above.
 
 ### Environment Variables
 
@@ -644,7 +644,7 @@ This repository participates in the **[Stellar Drips Wave](https://www.drips.net
 
 - All pull requests target the **`dev`** branch (`main` is releases only)
 - CI must pass before review
-- One contributor per issue — comment to claim it first
+- One contributor per issue — request it through the campaign (Drips Wave / GrantFox OSS); the maintainer assigns it. Please don't open a PR for an issue you haven't been assigned.
 
 Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full workflow, coding standards, and Wave rules.
 
