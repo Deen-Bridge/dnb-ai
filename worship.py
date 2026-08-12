@@ -11,12 +11,11 @@ matching the logic of PrayTimes.org.
 import math
 from datetime import date, datetime, timedelta
 from enum import Enum
-from zoneinfo import ZoneInfo, available_timezones
-from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
+from hijridate import Gregorian, Hijri
 from pydantic import BaseModel
-from hijridate import Hijri, Gregorian
 
 router = APIRouter(tags=["worship"])
 
@@ -131,8 +130,9 @@ def compute_asr(lat, declination, asr_factor):
         return None
 
 
-def calculate_prayer_times(lat: float, lon: float, date_obj: date, method: CalculationMethod,
-                           asr_method: AsrMethod, tz: ZoneInfo):
+def calculate_prayer_times(
+    lat: float, lon: float, date_obj: date, method: CalculationMethod, asr_method: AsrMethod, tz: ZoneInfo
+):
     jd = julian_date(date_obj.year, date_obj.month, date_obj.day)
 
     offset_h = lon / 15.0
@@ -184,8 +184,12 @@ def calculate_prayer_times(lat: float, lon: float, date_obj: date, method: Calcu
 
     # High-latitude fallback (Angle-based method: e.g. 1/7th of night)
     fallback_applied = False
-    if (times_hours["fajr"] is None or times_hours["isha"] is None or
-            times_hours["sunrise"] is None or times_hours["maghrib"] is None):
+    if (
+        times_hours["fajr"] is None
+        or times_hours["isha"] is None
+        or times_hours["sunrise"] is None
+        or times_hours["maghrib"] is None
+    ):
         if times_hours["sunrise"] is not None and times_hours["maghrib"] is not None:
             night_duration = 24.0 - (times_hours["maghrib"] - times_hours["sunrise"])
             # Fallback: Fajr is 1/7th of night before sunrise, Isha is 1/7th of night after sunset
@@ -209,8 +213,7 @@ def calculate_prayer_times(lat: float, lon: float, date_obj: date, method: Calcu
 
             # This is UTC time.
             dt_utc = datetime(
-                date_obj.year, date_obj.month, date_obj.day,
-                hours, minutes, seconds, tzinfo=ZoneInfo("UTC")
+                date_obj.year, date_obj.month, date_obj.day, hours, minutes, seconds, tzinfo=ZoneInfo("UTC")
             )
             # If the calculated UTC time wrapped around the day, adjust date
             if v < 0:
@@ -224,19 +227,19 @@ def calculate_prayer_times(lat: float, lon: float, date_obj: date, method: Calcu
 
 
 class PrayerTimesResponse(BaseModel):
-    fajr: Optional[str]
-    sunrise: Optional[str]
+    fajr: str | None
+    sunrise: str | None
     dhuhr: str
-    asr: Optional[str]
-    maghrib: Optional[str]
-    isha: Optional[str]
+    asr: str | None
+    maghrib: str | None
+    isha: str | None
     method: CalculationMethod
     asr_method: AsrMethod
     lat: float
     lon: float
     date: date
     tz: str
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class HijriResponse(BaseModel):
@@ -262,13 +265,13 @@ async def get_prayer_times(
     date: date = Query(..., description="Date for calculation"),
     method: CalculationMethod = Query(CalculationMethod.MAKKAH, description="Calculation method"),
     asr: AsrMethod = Query(AsrMethod.STANDARD, description="Asr juristic method"),
-    tz: str = Query(..., description="IANA timezone name")
+    tz: str = Query(..., description="IANA timezone name"),
 ):
     """Get Islamic prayer times for a given location, date, and calculation method."""
     try:
         zone = ZoneInfo(tz)
     except Exception:
-        raise HTTPException(status_code=400, detail=f"Invalid timezone: {tz}")
+        raise HTTPException(status_code=400, detail=f"Invalid timezone: {tz}") from None
 
     times, fallback_applied = calculate_prayer_times(lat, lon, date, method, asr, zone)
 
@@ -289,7 +292,7 @@ async def get_prayer_times(
         lon=lon,
         date=date,
         tz=tz,
-        notes=notes
+        notes=notes,
     )
 
 
@@ -303,33 +306,28 @@ async def get_hijri(date: date = Query(..., description="Gregorian date (YYYY-MM
             year=h.year,
             month=h.month,
             month_en=h.month_name(),
-            month_ar=h.month_name(language='ar'),
+            month_ar=h.month_name(language="ar"),
             day=h.day,
-            gregorian_date=date
+            gregorian_date=date,
         )
     except OverflowError as e:
-        raise HTTPException(status_code=400, detail=f"Date out of supported range: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Date out of supported range: {str(e)}") from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/gregorian", response_model=GregorianResponse)
 async def get_gregorian(hijri: str = Query(..., description="Hijri date (YYYY-MM-DD)")):
     """Convert a Hijri date to Gregorian."""
     try:
-        parts = hijri.split('-')
+        parts = hijri.split("-")
         if len(parts) != 3:
             raise ValueError("Invalid format. Use YYYY-MM-DD")
         y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
         h = Hijri(y, m, d)
         g = h.to_gregorian()
-        return GregorianResponse(
-            year=g.year,
-            month=g.month,
-            day=g.day,
-            hijri_date=hijri
-        )
+        return GregorianResponse(year=g.year, month=g.month, day=g.day, hijri_date=hijri)
     except (ValueError, OverflowError) as e:
-        raise HTTPException(status_code=400, detail=f"Invalid Hijri date: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid Hijri date: {str(e)}") from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e

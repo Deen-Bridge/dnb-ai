@@ -18,7 +18,7 @@ This repository participates in the **Stellar Drips Wave** bounty program. Contr
 Points are assigned per issue by the maintainer in the Drips Wave dashboard using Drips' three complexity tiers:
 
 | Complexity | Points | Typical Scope                              |
-|------------|--------|--------------------------------------------|
+| ---------- | ------ | ------------------------------------------ |
 | Trivial    | 100    | Typos, small bug fixes, minor copy changes |
 | Medium     | 150    | Standard features or involved bug fixes    |
 | High       | 200    | Complex features, refactors, integrations  |
@@ -29,7 +29,7 @@ Issues carry `complexity:trivial`, `complexity:medium`, or `complexity:high` lab
 
 ### Prerequisites
 
-1. Python 3.10 or higher
+1. Python 3.11 or higher
 2. pip package manager
 3. Google AI API key (for Gemini)
 
@@ -47,8 +47,13 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Create .env file
-echo "GOOGLE_AI_API_KEY=your_api_key_here" > .env
+# Install the lint/type/test tooling CI runs
+pip install -r requirements-dev.txt
+
+# Create .env file from template
+cp .env.example .env
+
+# Edit .env and set your GEMINI_API_KEY
 
 # Run the server
 uvicorn main:app --reload
@@ -56,16 +61,17 @@ uvicorn main:app --reload
 
 ## Branching Strategy
 
-| Branch | Purpose                                                        |
-|--------|----------------------------------------------------------------|
-| `main` | Stable, production-ready code — releases only                  |
-| `dev`  | Active development — **all pull requests must target `dev`**   |
+| Branch | Purpose                                                      |
+| ------ | ------------------------------------------------------------ |
+| `main` | Stable, production-ready code — releases only                |
+| `dev`  | Active development — **all pull requests must target `dev`** |
 
 Maintainers periodically merge `dev` into `main` for releases. Pull requests opened against `main` will be asked to retarget `dev`.
 
 ### Making Changes
 
 1. Create a branch from the latest `dev`:
+
    ```bash
    git fetch origin
    git checkout -b feature/your-feature-name origin/dev
@@ -76,6 +82,7 @@ Maintainers periodically merge `dev` into `main` for releases. Pull requests ope
 3. Test your changes locally
 
 4. Commit with a descriptive message:
+
    ```bash
    git commit -m "feat: improve response caching"
    ```
@@ -93,6 +100,29 @@ Maintainers periodically merge `dev` into `main` for releases. Pull requests ope
 2. Use type hints for function parameters and return values
 3. Write docstrings for functions and classes
 4. Keep functions focused and small
+
+Linting, formatting, and type checking are enforced in CI by [ruff](https://docs.astral.sh/ruff/)
+and [mypy](https://mypy.readthedocs.io/), configured in `pyproject.toml` (line length 120).
+Run these locally before pushing — CI runs exactly the same commands:
+
+```bash
+ruff check .          # lint (pycodestyle, pyflakes, import sorting, pyupgrade, bugbear)
+ruff format .         # format the code (use `ruff format --check .` to only verify)
+mypy .                # type check
+```
+
+`ruff check --fix .` applies the fixes ruff can make automatically.
+
+`main.py` is type-checked with `disallow_untyped_defs`: every function there needs
+parameter and return annotations. The rest of the tree is checked less strictly for now —
+please annotate new code anyway.
+
+Optionally, install the git hook so the same checks run before each commit:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
 
 ### API Design
 

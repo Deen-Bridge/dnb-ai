@@ -5,8 +5,7 @@ All tests use the in-memory fallback — no Redis server needed.
 
 import pytest
 
-from store import SessionStore, history_to_dicts, dicts_to_contents
-
+from store import SessionStore, dicts_to_contents, history_to_dicts
 
 # ---------------------------------------------------------------------------
 # SessionStore — in-memory fallback
@@ -100,8 +99,6 @@ class TestSessionTTL:
         yield
 
     async def test_expired_session_returns_empty(self):
-        import time
-
         history = [{"role": "user", "text": "hello"}]
         await self.store.save_history("chat-1", history)
         # TTL=0 means already expired — load should return empty
@@ -119,7 +116,7 @@ class TestGeminiChatSessionLifecycle:
 
     async def test_new_session_creates_and_persists(self, monkeypatch):
         """Simulate a full chat request cycle with mocked Gemini."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import AsyncMock, MagicMock
 
         store = SessionStore()
         store._use_redis = False

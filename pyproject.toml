@@ -1,0 +1,74 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    "venv",
+    ".venv",
+    "data",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort (import sorting)
+    "UP", # pyupgrade (modernization)
+    "B",  # flake8-bugbear
+    "W",  # pycodestyle warnings
+]
+ignore = [
+    "B008", # FastAPI dependency defaults are function calls by design
+    "E501", # line length is enforced by the formatter, not the linter
+]
+
+[tool.ruff.lint.isort]
+# Keep `from x import a, b as c` on one statement instead of splitting it.
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Tests routinely rebind fixtures and assert on broad exception shapes.
+"tests/**" = ["B011"]
+# main.py calls load_dotenv() before importing modules that read env at import
+# time, so module-level imports intentionally follow that setup call.
+"main.py" = ["E402"]
+# conftest.py adjusts sys.path before importing test dependencies.
+"tests/conftest.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+# scripts/ and test dirs have no __init__.py; without explicit package bases
+# mypy sees e.g. scripts/foo.py as both "foo" and "scripts.foo".
+plugins = ["pydantic.mypy"]
+mypy_path = "."
+explicit_package_bases = true
+namespace_packages = true
+warn_unused_configs = true
+warn_redundant_casts = true
+no_implicit_optional = true
+exclude = [
+    "^venv/",
+    "^\\.venv/",
+]
+
+# main.py is the reference for the standard CONTRIBUTING.md sets: every
+# function there carries parameter and return annotations. The rest of the
+# tree is type-checked but not yet required to be fully annotated.
+[[tool.mypy.overrides]]
+module = "main"
+disallow_untyped_defs = true
+
+# google-generativeai and its api_core siblings ship incomplete stubs.
+[[tool.mypy.overrides]]
+module = [
+    "google.*",
+    "stellar_sdk.*",
+    "redis.*",
+    "yaml.*",
+    "firebase_admin",
+    "firebase_admin.*",
+]
+ignore_missing_imports = true
