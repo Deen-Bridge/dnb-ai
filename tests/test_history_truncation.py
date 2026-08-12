@@ -5,15 +5,10 @@ All tests run offline — no GEMINI_API_KEY needed.
 
 from unittest.mock import MagicMock, PropertyMock
 
-import pytest
-
 from history import (
-    MAX_HISTORY_TOKENS,
-    MAX_HISTORY_TURNS,
     estimate_tokens,
     trim_history,
 )
-
 
 # ---------------------------------------------------------------------------
 # Token estimation
@@ -84,9 +79,9 @@ class TestTrimHistory:
         monkeypatch.setattr("history.MAX_HISTORY_TOKENS", 10)
         monkeypatch.setattr("history.MAX_HISTORY_TURNS", 50)
         pairs = [
-            ("AAAAA AAAAA AA", "BBBBB BBBBB BB"),   # ~5+5 = 10 tokens — will be dropped
-            ("CCCCC CCCCC CC", "DDDDD DDDDD DD"),   # ~5+5 = 10 tokens — will be dropped
-            ("EEEEE EEEEE EE", "FFFFF FFFFF FF"),   # ~5+5 = 10 tokens — keeps this
+            ("AAAAA AAAAA AA", "BBBBB BBBBB BB"),  # ~5+5 = 10 tokens — will be dropped
+            ("CCCCC CCCCC CC", "DDDDD DDDDD DD"),  # ~5+5 = 10 tokens — will be dropped
+            ("EEEEE EEEEE EE", "FFFFF FFFFF FF"),  # ~5+5 = 10 tokens — keeps this
         ]
         chat = _make_chat_session(pairs)
         assert trim_history(chat) is True
@@ -141,9 +136,7 @@ class TestTrimHistory:
         ]
         chat = _make_chat_session(pairs)
         trim_history(chat)
-        remaining = " ".join(
-            m.parts[0].text for m in chat.history
-        )
+        remaining = " ".join(m.parts[0].text for m in chat.history)
         assert "Recent" in remaining
         assert "Old question 1" not in remaining
 
@@ -157,10 +150,7 @@ class TestTrimHistoryIntegration:
     def test_long_conversation_triggers_truncation(self, monkeypatch):
         monkeypatch.setattr("history.MAX_HISTORY_TOKENS", 50)
         monkeypatch.setattr("history.MAX_HISTORY_TURNS", 50)
-        pairs = [
-            (f"User message {i} " + "X" * 60, f"Model response {i} " + "Y" * 60)
-            for i in range(20)
-        ]
+        pairs = [(f"User message {i} " + "X" * 60, f"Model response {i} " + "Y" * 60) for i in range(20)]
         chat = _make_chat_session(pairs)
         truncated = trim_history(chat)
         assert truncated is True

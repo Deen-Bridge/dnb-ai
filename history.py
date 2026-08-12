@@ -4,9 +4,8 @@ Provides token estimation and history trimming logic that operates on
 Gemini chat session history lists — no Gemini SDK dependency needed.
 """
 
-import os
 import logging
-
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +37,7 @@ def trim_history(chat_session) -> bool:
 
     while len(chat_session.history) >= 2:
         total = sum(
-            estimate_tokens(m.parts[0].text)
-            if hasattr(m, "parts") and m.parts and hasattr(m.parts[0], "text")
-            else 0
+            estimate_tokens(m.parts[0].text) if hasattr(m, "parts") and m.parts and hasattr(m.parts[0], "text") else 0
             for m in chat_session.history
         )
         if total <= MAX_HISTORY_TOKENS:
