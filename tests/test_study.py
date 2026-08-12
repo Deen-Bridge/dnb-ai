@@ -4,9 +4,7 @@ All tests run offline against recorded fixtures — no GEMINI_API_KEY needed.
 """
 
 import json
-import os
 from pathlib import Path
-from typing import List
 
 import pytest
 from pydantic import ValidationError
@@ -300,9 +298,7 @@ class TestParseAndValidate:
                     "difficulty": "beginner",
                 }
             ],
-            "flashcards": [
-                {"front": "F", "back": "B", "tags": ["t"]}
-            ],
+            "flashcards": [{"front": "F", "back": "B", "tags": ["t"]}],
         }
         result = _parse_and_validate(json.dumps(data), ContentKind.both)
         assert "quizzes" in result
@@ -348,20 +344,20 @@ class TestGenerateContent:
         assert result.source_used == "lesson_text"
 
     def test_happy_path_both(self):
-        data = json.dumps({
-            "quizzes": [
-                {
-                    "question": "Q?",
-                    "choices": ["A", "B", "C", "D"],
-                    "correct_index": 0,
-                    "explanation": "E",
-                    "difficulty": "beginner",
-                }
-            ],
-            "flashcards": [
-                {"front": "F", "back": "B", "tags": ["t"]}
-            ],
-        })
+        data = json.dumps(
+            {
+                "quizzes": [
+                    {
+                        "question": "Q?",
+                        "choices": ["A", "B", "C", "D"],
+                        "correct_index": 0,
+                        "explanation": "E",
+                        "difficulty": "beginner",
+                    }
+                ],
+                "flashcards": [{"front": "F", "back": "B", "tags": ["t"]}],
+            }
+        )
         gen = FakeGenerator(responses=[data])
         result = _generate_content(
             generator=gen,

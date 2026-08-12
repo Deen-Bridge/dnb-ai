@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -26,7 +25,7 @@ MADHHAB_MAP = {
 VALID_MADHHABS = frozenset({"hanafi", "maliki", "shafii", "hanbali"})
 
 
-def normalize_madhhab(raw: Optional[str]) -> Optional[str]:
+def normalize_madhhab(raw: str | None) -> str | None:
     if not raw:
         return None
     cleaned = raw.strip().casefold()
@@ -39,27 +38,88 @@ def normalize_madhhab(raw: Optional[str]) -> Optional[str]:
     return None
 
 
-FIQH_KEYWORDS = frozenset({
-    "wudu", "wudhu", "ghusl", "tayammum", "salah", "salat", "namaz",
-    "prayer", "pray", "rak'ah", "raka", "sajdah", "sujud", "ruku",
-    "fajr", "dhuhr", "zuhr", "asr", "maghrib", "isha",
-    "qiblah", "qibla", "adhan", "azan",
-    "fasting", "siyam", "sawm", "zakat", "zakah",
-    "hajj", "umrah", "umra",
-    "halal", "haram", "makruh", "mustahabb", "mubah", "wajib", "fard",
-    "sunna", "sunnah", "bid'ah", "bida",
-    "riba", "usury", "interest", "mortgage", "loan",
-    "contract", "marriage", "nikah", "divorce", "talaq",
-    "inheritance", "mirath", "wasiyya",
-    "impurity", "najis", "najasa", "taharah",
-    "menstruation", "hayd", "nifas", "istihada",
-    "fatwa", "ruling", "permissible", "prohibited",
-    "ijtihad", "taqlid", "madhhab",
-    "is it allowed", "is it permissible", "can i",
-    "does it break", "does it invalidate",
-    "what does islam say about",
-    "what is the ruling on",
-})
+FIQH_KEYWORDS = frozenset(
+    {
+        "wudu",
+        "wudhu",
+        "ghusl",
+        "tayammum",
+        "salah",
+        "salat",
+        "namaz",
+        "prayer",
+        "pray",
+        "rak'ah",
+        "raka",
+        "sajdah",
+        "sujud",
+        "ruku",
+        "fajr",
+        "dhuhr",
+        "zuhr",
+        "asr",
+        "maghrib",
+        "isha",
+        "qiblah",
+        "qibla",
+        "adhan",
+        "azan",
+        "fasting",
+        "siyam",
+        "sawm",
+        "zakat",
+        "zakah",
+        "hajj",
+        "umrah",
+        "umra",
+        "halal",
+        "haram",
+        "makruh",
+        "mustahabb",
+        "mubah",
+        "wajib",
+        "fard",
+        "sunna",
+        "sunnah",
+        "bid'ah",
+        "bida",
+        "riba",
+        "usury",
+        "interest",
+        "mortgage",
+        "loan",
+        "contract",
+        "marriage",
+        "nikah",
+        "divorce",
+        "talaq",
+        "inheritance",
+        "mirath",
+        "wasiyya",
+        "impurity",
+        "najis",
+        "najasa",
+        "taharah",
+        "menstruation",
+        "hayd",
+        "nifas",
+        "istihada",
+        "fatwa",
+        "ruling",
+        "permissible",
+        "prohibited",
+        "ijtihad",
+        "taqlid",
+        "madhhab",
+        "is it allowed",
+        "is it permissible",
+        "can i",
+        "does it break",
+        "does it invalidate",
+        "what does islam say about",
+        "what is the ruling on",
+    }
+)
 
 
 def keyword_match(text: str) -> bool:
@@ -99,4 +159,4 @@ MADHHAB_LEAD_INSTRUCTION = """
 
 class FiqhInfo(BaseModel):
     is_fiqh_question: bool
-    madhhab_requested: Optional[str] = None
+    madhhab_requested: str | None = None

@@ -3,8 +3,8 @@
 Fake embedding function returns hand-built vectors so all tests run offline.
 """
 
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 from unittest.mock import patch
 
 import numpy as np
@@ -23,6 +23,7 @@ from semantic_cache import (
 @dataclass
 class FakeMessage:
     """Mirrors main.Message without importing from main.py (avoids genai dep)."""
+
     role: str
     content: str
 
@@ -176,8 +177,16 @@ class TestStatsCounters:
         cache = get_cache()
         stats = cache.get_stats()
         expected_keys = {
-            "hits", "misses", "bypasses", "evictions", "hit_rate",
-            "size", "max_entries", "threshold", "ttl_seconds", "enabled",
+            "hits",
+            "misses",
+            "bypasses",
+            "evictions",
+            "hit_rate",
+            "size",
+            "max_entries",
+            "threshold",
+            "ttl_seconds",
+            "enabled",
         }
         assert set(stats.keys()) == expected_keys
 
