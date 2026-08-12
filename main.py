@@ -1409,7 +1409,7 @@ def _strip_system_context(text: str) -> str:
     return text
 
 
-async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session) -> None:
+async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session: Any) -> None:
     """Persist chat history and user-chat mapping."""
     try:
         if chat_session and hasattr(chat_session, "history") and chat_session.history:
@@ -1430,11 +1430,11 @@ async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session)
 
 
 @app.get("/user/{user_id}/chats")
-async def get_user_chats(user_id: str):
+async def get_user_chats(user_id: str) -> dict[str, Any]:
     """List all chat IDs for a user."""
     try:
         chat_ids = await session_store.get_user_chats(user_id)
-        chats = []
+        chats: list[dict[str, Any]] = []
         for cid in chat_ids:
             history = await session_store.load_history(cid)
             # Strip system context from stored user messages
@@ -1467,7 +1467,7 @@ async def get_user_chats(user_id: str):
 
 
 @app.get("/chat/{chat_id}/history")
-async def get_chat_history(chat_id: str):
+async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
     """Get the message history for a specific chat."""
     try:
         history = await session_store.load_history(chat_id)
