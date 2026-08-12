@@ -201,7 +201,7 @@ def calculate_prayer_times(
                 fallback_applied = True
 
     # Convert float hours to UTC datetime
-    res = {}
+    res: dict[str, str | None] = {}
     for k, v in times_hours.items():
         if v is None:
             res[k] = None
