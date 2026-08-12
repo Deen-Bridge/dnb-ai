@@ -106,6 +106,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from worship import router as worship_router
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,8 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
 app.include_router(study_router)
+# Worship utilities: prayer times and Hijri/Gregorian date conversion
+app.include_router(worship_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
 app.include_router(tafsir_router)
 # Scholar review: the human end of the abstention loop

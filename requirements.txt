@@ -10,3 +10,5 @@ redis>=5.0.0,<6.0.0
 httpx==0.28.1
 slowapi==0.1.9
 firebase-admin>=6.6.0,<8.0.0
+hijridate>=2.6.0
+tzdata
