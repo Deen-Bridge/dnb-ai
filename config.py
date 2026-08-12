@@ -1,5 +1,4 @@
 from functools import lru_cache
-from typing import List
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,7 +25,7 @@ class Settings(BaseSettings):
 
     gemini_timeout: int = Field(default=30, ge=1)
 
-    cors_origins: List[str] = Field(
+    cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
             "https://deenbridge.vercel.app",
