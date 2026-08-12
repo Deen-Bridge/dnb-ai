@@ -67,6 +67,7 @@ from fiqh import (
     normalize_madhhab,
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from history import trim_history
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -241,6 +242,7 @@ class ChatResponse(BaseModel):
     chat_id: str
     message_id: str | None = None  # stable id of the answer just returned
     history: list[Message] = []
+    truncated: bool = False  # True when oldest turn-pairs were dropped for the token budget
     moderation: Moderation | None = None
     fiqh: FiqhInfo | None = None
     hadith_references: list[HadithReference] | None = None
@@ -745,6 +747,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             semantic_cache.bypasses += 1
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
+        truncated = False
+
         async def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
@@ -753,6 +757,11 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 persisted = await session_store.load_history(chat_id)
                 history = dicts_to_contents(persisted) if persisted else []
                 active_chats[chat_id] = model.start_chat(history=history)
+
+            # Enforce the conversation-history token/turn budget before sending,
+            # dropping oldest turn-pairs so the prompt can't grow unbounded (#13).
+            nonlocal truncated
+            truncated = trim_history(active_chats[chat_id])
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
             if is_fiqh:
@@ -924,6 +933,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             chat_id=chat_id,
             message_id=message_id,
             history=history,
+            truncated=truncated,
             moderation=Moderation(
                 category_id=safety_result.category_id,
                 action=safety_result.action,
