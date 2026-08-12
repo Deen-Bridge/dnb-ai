@@ -1,7 +1,14 @@
 """Test configuration for importing repository modules without packaging the app."""
 
+import os
 import sys
 from pathlib import Path
+
+# Settings (config.py) requires GEMINI_API_KEY and is built when `main` is
+# imported. Provide a dummy so tests that import the app collect in the hermetic
+# CI env — the safety pipeline is disabled and Gemini is mocked, so no real key
+# or network is ever used.
+os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

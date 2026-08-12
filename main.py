@@ -1,14 +1,14 @@
-import os
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
-from config import get_settings
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,10 +29,10 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from pydantic import BaseModel, Field, field_validator
 
 import telemetry
 from citations import (
@@ -43,7 +42,6 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
-from store import create_session_store, history_to_dicts, dicts_to_contents
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -52,6 +50,7 @@ from confidence import (
     build_signals,
     thresholds as confidence_thresholds,
 )
+from config import get_settings
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -96,6 +95,7 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
     TafsirContext,
@@ -125,19 +125,16 @@ AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "ye
 if not AUTH_DISABLED and not SERVICE_API_KEY:
     if os.getenv("ENVIRONMENT", "").lower() == "production":
         raise RuntimeError(
-            "SERVICE_API_KEY must be set in production. "
-            "Set AUTH_DISABLED=true to run without authentication locally."
+            "SERVICE_API_KEY must be set in production. Set AUTH_DISABLED=true to run without authentication locally."
         )
-    logger.warning(
-        "SERVICE_API_KEY is not set; authenticated endpoints will reject all requests."
-    )
+    logger.warning("SERVICE_API_KEY is not set; authenticated endpoints will reject all requests.")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_api_key(
     request: Request,
-    api_key: Optional[str] = Security(api_key_header),
+    api_key: str | None = Security(api_key_header),
 ) -> str:
     """Dependency that enforces X-API-Key on protected routes.
 
@@ -180,6 +177,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
         content={"detail": f"Rate limit exceeded: {exc.detail}"},
         headers={"Retry-After": str(retry_after)},
     )
+
 
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
@@ -826,10 +824,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
                 if message.role == "user":
                     content = _strip_system_context(content)
-                history.append(Message(
-                    role="user" if message.role == "user" else "model",
-                    content=content
-                ))
+                history.append(Message(role="user" if message.role == "user" else "model", content=content))
             except Exception as e:
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
@@ -948,9 +943,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _succeeded = True
 
         # --- Persist chat history ---
-        asyncio.create_task(
-            _persist_chat_history(chat_id, request.user_id, chat_session)
-        )
+        asyncio.create_task(_persist_chat_history(chat_id, request.user_id, chat_session))
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
@@ -1416,7 +1409,7 @@ def _strip_system_context(text: str) -> str:
     return text
 
 
-async def _persist_chat_history(chat_id: str, user_id: Optional[str], chat_session) -> None:
+async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session: Any) -> None:
     """Persist chat history and user-chat mapping."""
     try:
         if chat_session and hasattr(chat_session, "history") and chat_session.history:
@@ -1437,11 +1430,11 @@ async def _persist_chat_history(chat_id: str, user_id: Optional[str], chat_sessi
 
 
 @app.get("/user/{user_id}/chats")
-async def get_user_chats(user_id: str):
+async def get_user_chats(user_id: str) -> dict[str, Any]:
     """List all chat IDs for a user."""
     try:
         chat_ids = await session_store.get_user_chats(user_id)
-        chats = []
+        chats: list[dict[str, Any]] = []
         for cid in chat_ids:
             history = await session_store.load_history(cid)
             # Strip system context from stored user messages
@@ -1456,13 +1449,15 @@ async def get_user_chats(user_id: str):
                     title = msg.get("text", "")[:80]
                 snippet = msg.get("text", "")[:120]
             created_at = await session_store.get_chat_created_at(cid)
-            chats.append({
-                "chat_id": cid,
-                "title": title or f"Chat {cid[:8]}",
-                "snippet": snippet,
-                "message_count": len(history),
-                "created_at": created_at,
-            })
+            chats.append(
+                {
+                    "chat_id": cid,
+                    "title": title or f"Chat {cid[:8]}",
+                    "snippet": snippet,
+                    "message_count": len(history),
+                    "created_at": created_at,
+                }
+            )
         # Most recent first
         chats.sort(key=lambda c: c["created_at"] or 0, reverse=True)
         return {"chats": chats}
@@ -1472,7 +1467,7 @@ async def get_user_chats(user_id: str):
 
 
 @app.get("/chat/{chat_id}/history")
-async def get_chat_history(chat_id: str):
+async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
     """Get the message history for a specific chat."""
     try:
         history = await session_store.load_history(chat_id)
@@ -1488,7 +1483,7 @@ async def get_chat_history(chat_id: str):
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str, user_id: Optional[str] = None) -> dict[str, str]:
+async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str]:
     try:
         existed = chat_id in active_chats
         active_chats.pop(chat_id, None)

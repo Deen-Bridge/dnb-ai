@@ -50,8 +50,7 @@ except ImportError:
 
 try:
     import firebase_admin
-    from firebase_admin import credentials as fb_credentials
-    from firebase_admin import firestore as fb_firestore
+    from firebase_admin import credentials as fb_credentials, firestore as fb_firestore
     from google.cloud.firestore import FieldFilter
 
     _firebase_available = True
@@ -91,7 +90,9 @@ class SessionStore:
     def __init__(self) -> None:
         # Typed Any: only ever touched behind the _use_redis flag below.
         self._redis: Any = None
-        self._local: dict[str, tuple[float, list[dict[str, str]]]] = {}
+        # Value shape varies by key: session history keys store
+        # (expires_at, list[dict]); user_chats: keys store (expires_at, set[str]).
+        self._local: dict[str, tuple[float, Any]] = {}
         self._local_meta: dict[str, tuple[float, float]] = {}
         self._use_redis = False
 
@@ -148,12 +149,16 @@ class SessionStore:
             await self._redis.hsetnx(meta_key, "created_at", str(now))
             await self._redis.expire(meta_key, SESSION_TTL_SECONDS)
         else:
-            # user_chats set
-            entry = self._local.get(key, [time.monotonic() + SESSION_TTL_SECONDS, set()])
-            if time.monotonic() > entry[0]:
-                entry = [time.monotonic() + SESSION_TTL_SECONDS, set()]
-            entry[1].add(chat_id)
-            self._local[key] = entry
+            # user_chats set — value is (expires_at, set[str])
+            entry = self._local.get(key)
+            if entry is None or time.monotonic() > entry[0]:
+                expires_at = time.monotonic() + SESSION_TTL_SECONDS
+                chats: set[str] = set()
+            else:
+                expires_at = entry[0]
+                chats = entry[1]
+            chats.add(chat_id)
+            self._local[key] = (expires_at, chats)
             # chat meta (only set once)
             if meta_key not in self._local_meta:
                 self._local_meta[meta_key] = (time.monotonic() + SESSION_TTL_SECONDS, now)
@@ -374,10 +379,7 @@ class FirestoreSessionStore:
 
     def _load_history_sync(self, chat_id: str) -> list[dict[str, str]]:
         docs = self._messages_ref(chat_id).order_by("seq").stream()
-        return [
-            {"role": d.to_dict().get("role", ""), "text": d.to_dict().get("text", "")}
-            for d in docs
-        ]
+        return [{"role": d.to_dict().get("role", ""), "text": d.to_dict().get("text", "")} for d in docs]
 
     def _save_history_sync(self, chat_id: str, history: list[dict[str, str]]) -> None:
         chat_ref = self._chat_ref(chat_id)
@@ -438,7 +440,7 @@ class FirestoreSessionStore:
                 }
             )
         else:
-            update = {"user_id": user_id}
+            update: dict[str, object] = {"user_id": user_id}
             if chat_doc.to_dict().get("created_at") is None:
                 # save_history may have created the doc first; backfill the
                 # creation time so chat lists can sort by it.
@@ -447,9 +449,7 @@ class FirestoreSessionStore:
 
     def _get_user_chats_sync(self, user_id: str) -> list[str]:
         chats = []
-        docs = self._db.collection(self._collection).where(
-            filter=FieldFilter("user_id", "==", user_id)
-        ).stream()
+        docs = self._db.collection(self._collection).where(filter=FieldFilter("user_id", "==", user_id)).stream()
         for doc in docs:
             chats.append(doc.id)
         return chats
@@ -511,8 +511,7 @@ def create_session_store() -> SessionStore | FirestoreSessionStore:
             return store
         except Exception as exc:  # noqa: BLE001 - degrade gracefully
             logger.warning(
-                "Could not initialise Firestore chat storage (%s); "
-                "falling back to Redis/in-memory",
+                "Could not initialise Firestore chat storage (%s); falling back to Redis/in-memory",
                 exc,
             )
     return SessionStore()
