@@ -68,5 +68,7 @@ module = [
     "stellar_sdk.*",
     "redis.*",
     "yaml.*",
+    "firebase_admin",
+    "firebase_admin.*",
 ]
 ignore_missing_imports = true
