@@ -28,6 +28,11 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests routinely rebind fixtures and assert on broad exception shapes.
 "tests/**" = ["B011"]
+# main.py calls load_dotenv() before importing modules that read env at import
+# time, so module-level imports intentionally follow that setup call.
+"main.py" = ["E402"]
+# conftest.py adjusts sys.path before importing test dependencies.
+"tests/conftest.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -63,5 +68,7 @@ module = [
     "stellar_sdk.*",
     "redis.*",
     "yaml.*",
+    "firebase_admin",
+    "firebase_admin.*",
 ]
 ignore_missing_imports = true
