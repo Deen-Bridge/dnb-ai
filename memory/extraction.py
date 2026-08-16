@@ -28,6 +28,8 @@ from memory.models import (
     TopicEntry,
     UserProfile,
 )
+from safety.policy import load_policy
+from safety.untrusted import detect_injection, neutralize_injection
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +48,25 @@ Return ONLY strict JSON with exactly the keys that apply.
 If nothing meaningful changed, return {"none": true}."""
 
 
+def _reject_injected_fact(fact_text: str) -> bool:
+    """True when a candidate fact carries an injected instruction and must be dropped."""
+    return detect_injection(load_policy(), fact_text)
+
+
+def _sanitize_summary(text: str) -> str:
+    """Neutralize any injected instruction in a summary before it is stored."""
+    sanitized = neutralize_injection(load_policy(), text)
+    if sanitized != text:
+        logger.warning("Neutralized potential instruction in a memory summary")
+    return sanitized
+
+
 def apply_updates(profile: UserProfile, updates: dict) -> UserProfile:
     """Validate and apply structured extraction proposals.
 
-    Invalid individual entries are **rejected** (logged, skipped).
+    Invalid individual entries are **rejected** (logged, skipped), as are
+    facts that carry an injected instruction — an injected fact is dropped
+    here so it is never persisted and replayed on later turns.
     Valid entries that cause a collection to exceed its cap trigger
     oldest-first eviction of that collection.
     """
@@ -86,6 +103,9 @@ def apply_updates(profile: UserProfile, updates: dict) -> UserProfile:
     for fact_text in new_facts:
         if not isinstance(fact_text, str) or len(fact_text) > MAX_FACT_LENGTH or not fact_text.strip():
             logger.warning("Rejected invalid fact: %s", str(fact_text)[:80])
+            continue
+        if _reject_injected_fact(fact_text):
+            logger.warning("Rejected fact carrying an injected instruction: %s", fact_text[:80])
             continue
         profile.remembered_facts.append(FactEntry(fact=fact_text.strip(), created_at=__import__("time").time()))
     while len(profile.remembered_facts) > MAX_FACTS:
@@ -160,7 +180,7 @@ async def summarize_conversation_turns(evicted_turns: list[dict[str, str]]) -> s
     """
     turns_text = "\n".join(f"{t.get('role', 'unknown')}: {t.get('text', '')}" for t in evicted_turns)
     prompt = f"{_SUMMARY_INSTRUCTION}\n\nTurns:\n{turns_text}"
-    return await _call_summary_gemini(prompt)
+    return _sanitize_summary(await _call_summary_gemini(prompt))
 
 
 async def _call_summary_gemini(prompt: str) -> str:
@@ -220,5 +240,5 @@ async def merge_summaries(existing: str, new: str) -> str:
     """Merge two summaries — deterministic concatenation first, Gemini on overflow."""
     result = merge_summaries_deterministic(existing, new)
     if result is not None:
-        return result
-    return await _call_recompress_gemini(existing, new)
+        return _sanitize_summary(result)
+    return _sanitize_summary(await _call_recompress_gemini(existing, new))
