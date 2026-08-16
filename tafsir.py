@@ -1127,12 +1127,32 @@ def summarize_tafsir_context(context: TafsirContext) -> TafsirInfo:
     )
 
 
-def tafsir_system_context(context: TafsirContext) -> str:
-    """System-prompt addition for a chat turn that has retrieved tafsir."""
+def tafsir_grounding_instructions(context: TafsirContext) -> str:
+    """Trusted synthesis instructions for a chat turn with retrieved tafsir.
+
+    Kept separate from ``tafsir_retrieved_passages`` so callers can isolate the
+    retrieved (untrusted) text while the rules here remain trusted system
+    instructions.
+    """
     block = TAFSIR_SYNTHESIS_CONTEXT
     if not context.has_tafsir:
         block += NO_TAFSIR_NOTE
-    return f"{block}\nRETRIEVED TAFSIR PASSAGES:\n{context.prompt_block}\n"
+    return block
+
+
+def tafsir_retrieved_passages(context: TafsirContext) -> str:
+    """The retrieved tafsir text itself, which must be treated as untrusted data."""
+    return context.prompt_block
+
+
+def tafsir_system_context(context: TafsirContext) -> str:
+    """Combined system-prompt addition (backward-compatible form).
+
+    Prefer ``tafsir_grounding_instructions`` + ``tafsir_retrieved_passages`` so
+    the retrieved passages can be wrapped in the untrusted-data delimiters.
+    """
+    block = tafsir_grounding_instructions(context)
+    return f"{block}\nRETRIEVED TAFSIR PASSAGES:\n{tafsir_retrieved_passages(context)}\n"
 
 
 # Type alias for the chat handler's retrieval hook, so main.py can inject a

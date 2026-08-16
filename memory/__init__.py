@@ -14,6 +14,8 @@ from memory.store import (
     MemoryStore,
     RedisMemoryStore,
 )
+from safety.policy import load_policy
+from safety.untrusted import neutralize_injection
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,14 @@ def create_memory_store() -> MemoryStore:
         return RedisMemoryStore(url)
     logger.info("MemoryStore using in-memory dict (local development)")
     return InMemoryMemoryStore()
+
+
+def _neutralize(text: str) -> str:
+    """Neutralize injected instructions in memory text before it is rendered."""
+    sanitized = neutralize_injection(load_policy(), text)
+    if sanitized != text:
+        logger.warning("Neutralized potential instruction while rendering user context")
+    return sanitized
 
 
 def render_user_context(
@@ -62,11 +72,13 @@ def render_user_context(
             lines.append(f"Topics studied: {topics_str}")
         if profile.remembered_facts:
             for fact in profile.remembered_facts[-5:]:
-                lines.append(f"- {fact.fact}")
+                # Re-check on render so an injected instruction persisted by an
+                # older build is replayed harmlessly, not as an instruction.
+                lines.append(f"- {_neutralize(fact.fact)}")
         parts.append("\n".join(lines))
 
     if summary is not None and summary.content:
-        parts.append(f"--- Conversation summary ---\n{summary.content}")
+        parts.append(f"--- Conversation summary ---\n{_neutralize(summary.content)}")
 
     if not parts:
         return ""

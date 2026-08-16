@@ -78,7 +78,18 @@ from memory.extraction import (
 )
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
-from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
+from safety import (
+    INJECTION_CATEGORY_ID,
+    UNTRUSTED_DATA_DIRECTIVE,
+    InputGate,
+    OutputCheck,
+    SafetyPipeline,
+    SafetyResult,
+    UntrustedBlock,
+    injected_block,
+    load_policy,
+    render_blocks,
+)
 from semantic_cache import (
     SEMANTIC_CACHE_ENABLED,
     embed_text,
@@ -104,7 +115,8 @@ from tafsir import (
     build_chat_tafsir_context,
     router as tafsir_router,
     summarize_tafsir_context,
-    tafsir_system_context,
+    tafsir_grounding_instructions,
+    tafsir_retrieved_passages,
 )
 from worship import router as worship_router
 
@@ -323,6 +335,57 @@ def classify_for_safety(prompt: str, candidate_ids: list[str]) -> dict[str, Any]
 
 safety_policy = load_policy()
 safety_pipeline = SafetyPipeline(InputGate(safety_policy, classify_for_safety), OutputCheck(safety_policy))
+
+
+def collect_untrusted_blocks(
+    *,
+    extra_context: str | None,
+    tafsir_context: TafsirContext | None,
+    zakat_context: ZakatContext | None,
+    purchase_context: PurchaseContext | None,
+    memory_block: str = "",
+) -> list[UntrustedBlock]:
+    """Collect every retrieved or client-supplied chunk as an isolated untrusted block.
+
+    These chunks are reference material, not instructions; each is wrapped in
+    delimiters and scanned for injection before generation.
+    """
+    blocks: list[UntrustedBlock] = []
+    if extra_context:
+        blocks.append(UntrustedBlock("client context", extra_context))
+    if tafsir_context is not None:
+        blocks.append(UntrustedBlock("retrieved tafsir", tafsir_retrieved_passages(tafsir_context)))
+    if zakat_context is not None:
+        blocks.append(UntrustedBlock("zakat calculation", zakat_context.prompt_block))
+    if purchase_context is not None:
+        blocks.append(UntrustedBlock("purchase history", purchase_context.prompt_block))
+    if memory_block:
+        blocks.append(UntrustedBlock("user memory", memory_block))
+    return blocks
+
+
+def build_chat_prompt(system_context: str, user_question: str, blocks: list[UntrustedBlock]) -> str:
+    """Assemble the full model prompt with instruction-isolated untrusted blocks."""
+    rendered = render_blocks(*blocks)
+    prompt = f"{system_context}\n{UNTRUSTED_DATA_DIRECTIVE}"
+    if rendered:
+        prompt += f"\n{rendered}\n"
+    return f"{prompt}\nUser question: {user_question}"
+
+
+def _injection_refusal() -> SafetyResult:
+    """A refusal result for an injection attempt found in untrusted context."""
+    category = safety_policy.categories[INJECTION_CATEGORY_ID]
+    return SafetyResult(
+        text=category.refusal,
+        category_id=INJECTION_CATEGORY_ID,
+        action="refuse",
+        confidence=1.0,
+        stages_fired=["untrusted_injection_refused"],
+        latency_ms=0.0,
+        generator_called=False,
+    )
+
 
 # Semantic response cache
 semantic_cache = get_cache()
@@ -752,6 +815,25 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         # --- Normal flow (cache miss / bypass / not cacheable) ---
         truncated = False
 
+        # Trusted system framing is assembled once per turn; retrieved and
+        # client-supplied data is kept apart as untrusted blocks so it can be
+        # delimited and scanned for injection before generation.
+        system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
+        if is_fiqh:
+            system_context += FIQH_IKHTILAF_CONTEXT
+            if madhhab:
+                system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
+        if tafsir_context is not None:
+            system_context += tafsir_grounding_instructions(tafsir_context)
+        memory_block = render_user_context(profile, summary)
+        untrusted_blocks = collect_untrusted_blocks(
+            extra_context=extra_context,
+            tafsir_context=tafsir_context,
+            zakat_context=zakat_context,
+            purchase_context=purchase_context,
+            memory_block=memory_block,
+        )
+
         async def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
@@ -766,22 +848,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             nonlocal truncated
             truncated = trim_history(active_chats[chat_id])
 
-            system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
-            if is_fiqh:
-                system_context += FIQH_IKHTILAF_CONTEXT
-                if madhhab:
-                    system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
-            if tafsir_context is not None:
-                system_context += tafsir_system_context(tafsir_context)
-            if zakat_context is not None:
-                system_context += zakat_context.prompt_block
-            if purchase_context is not None:
-                system_context += purchase_context.prompt_block
-            memory_block = render_user_context(profile, summary)
-            if memory_block:
-                system_context += f"\n\n{memory_block}"
-            context = f"Additional context: {extra_context}\n\n" if extra_context else ""
-            full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
+            full_prompt = build_chat_prompt(system_context, safety_prompt, untrusted_blocks)
             logger.info("Sending message to chat...")
             _t0 = time.perf_counter()
             response = await send_message_with_retry(
@@ -802,8 +869,14 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             return text
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
+        # Deny-by-default: any injection attempt in an untrusted block refuses
+        # the turn before the model is ever called.
+        injected_block_hit = injected_block(safety_policy, *untrusted_blocks) if enabled else None
         with trace.span("generation"):
-            if enabled:
+            if injected_block_hit is not None:
+                logger.warning("Refusing chat turn: injection in untrusted %s", injected_block_hit.label)
+                safety_result = _injection_refusal()
+            elif enabled:
                 safety_result = await safety_pipeline.run_async(prompt, generate)
             else:
                 safety_result = None
@@ -1131,6 +1204,27 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
         # --- Purchase history ---
         purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
 
+        # Trusted system framing + isolated untrusted blocks (mirrors /chat).
+        system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
+        if effective_language:
+            system_context += LANGUAGE_INSTRUCTIONS
+            system_context += f"\nresponse_language: {effective_language}"
+        else:
+            system_context += LANGUAGE_INSTRUCTIONS
+            system_context += "\nresponse_language: auto (respond in the user's language)"
+        if is_fiqh:
+            system_context += FIQH_IKHTILAF_CONTEXT
+            if madhhab:
+                system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
+        if tafsir_context is not None:
+            system_context += tafsir_grounding_instructions(tafsir_context)
+        untrusted_blocks = collect_untrusted_blocks(
+            extra_context=extra_context,
+            tafsir_context=tafsir_context,
+            zakat_context=zakat_context,
+            purchase_context=purchase_context,
+        )
+
         async def event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
             nonlocal combined_text, chat_session
@@ -1162,6 +1256,20 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                         yield f"data: {err}\n\n"
                         return
 
+                    # Deny-by-default: refuse injected instructions smuggled in
+                    # retrieved or client-supplied context, exactly as /chat does.
+                    injected = injected_block(safety_policy, *untrusted_blocks)
+                    if injected is not None:
+                        logger.warning("Refusing streaming turn: injection in untrusted %s", injected.label)
+                        err = json.dumps(
+                            {
+                                "type": "error",
+                                "message": "Your message was not processed due to content policy.",
+                            }
+                        )
+                        yield f"data: {err}\n\n"
+                        return
+
                     if decision.action == "allow_with_guidance":
                         generation_prompt = f"{decision.guidance}\n\nUser question: {prompt}"
                     else:
@@ -1182,26 +1290,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 chat_session = active_chats[chat_id]
 
                 # --- Build system context + prompt ---
-                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
-                if effective_language:
-                    system_context += LANGUAGE_INSTRUCTIONS
-                    system_context += f"\nresponse_language: {effective_language}"
-                else:
-                    system_context += LANGUAGE_INSTRUCTIONS
-                    system_context += "\nresponse_language: auto (respond in the user's language)"
-                if is_fiqh:
-                    system_context += FIQH_IKHTILAF_CONTEXT
-                    if madhhab:
-                        system_context += MADHHAB_LEAD_INSTRUCTION.format(madhhab=madhhab)
-                if tafsir_context is not None:
-                    system_context += tafsir_system_context(tafsir_context)
-                if zakat_context is not None:
-                    system_context += zakat_context.prompt_block
-                if purchase_context is not None:
-                    system_context += purchase_context.prompt_block
-
-                ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
-                full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
+                full_prompt = build_chat_prompt(system_context, generation_prompt, untrusted_blocks)
 
                 # --- Async streaming generation ---
                 with trace.span("generation"):
