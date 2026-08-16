@@ -7,6 +7,23 @@ never be served to someone else. Therefore we consult/populate the cache
 *only* when the chat has no prior history (new chat_id / first turn) AND
 request.context is None.
 
+Per-user cache partitioning
+---------------------------
+Per-user answers (any request where a principal_user_id is known) are stored
+in a namespace keyed by that principal so they are *structurally* unreachable
+from any other principal's lookups, even when two queries produce the same
+embedding.  Pass ``scope_key`` to ``get()``/``put()`` — built by
+``retrieval.scope.cache_scope_key(scope, text_key)``:
+
+* Public (anonymous) entries: ``scope_key=None`` → no namespace prefix.
+* Per-user entries: ``scope_key="user:{user_id}:{text_key}"`` → namespaced;
+  a lookup with a different scope_key can never match.
+
+The existing bypass (``request.user_id is not None → is_cacheable = False``)
+continues to apply so that personalized answers are never cached at all for
+now.  The scope_key mechanism is the foundation for safe *future* per-user
+caching if that is ever enabled.
+
 Store choice
 ------------
 In-memory store with numpy for cosine similarity. Chosen over ChromaDB to
@@ -86,7 +103,7 @@ def embed_text(text: str) -> np.ndarray:
 
 
 class CacheEntry:
-    __slots__ = ("embedding", "response", "chat_id", "history", "expires_at")
+    __slots__ = ("embedding", "response", "chat_id", "history", "expires_at", "scope_key")
 
     def __init__(
         self,
@@ -95,12 +112,17 @@ class CacheEntry:
         chat_id: str,
         history: list[Any],
         expires_at: float,
+        scope_key: str | None = None,
     ) -> None:
         self.embedding = embedding
         self.response = response
         self.chat_id = chat_id
         self.history = history
         self.expires_at = expires_at
+        # Partition key.  ``None`` means "public / no principal".
+        # A non-None value means the entry belongs to a specific principal
+        # namespace and must only be served to lookups with the same key.
+        self.scope_key = scope_key
 
     @property
     def expired(self) -> bool:
@@ -124,10 +146,22 @@ class SemanticCache:
 
     # -- public API ---------------------------------------------------------
 
-    def get(self, embedding: np.ndarray) -> CacheEntry | None:
+    def get(self, embedding: np.ndarray, *, scope_key: str | None = None) -> CacheEntry | None:
+        """Look up a cache entry by embedding similarity.
+
+        Parameters
+        ----------
+        embedding:
+            Query embedding vector.
+        scope_key:
+            Partition key derived from ``retrieval.scope.cache_scope_key()``.
+            ``None`` means the public (anonymous) partition.  A per-user entry
+            stored under a different ``scope_key`` will *never* be returned,
+            even when the cosine similarity exceeds the threshold.
+        """
         if not SEMANTIC_CACHE_ENABLED:
             return None
-        match = self._find_best_match(embedding)
+        match = self._find_best_match(embedding, scope_key=scope_key)
         if match is not None:
             entry, idx = match
             self._access_times[idx] = time.time()
@@ -142,7 +176,17 @@ class SemanticCache:
         response: str,
         chat_id: str,
         history: list[Any],
+        *,
+        scope_key: str | None = None,
     ) -> None:
+        """Store a cache entry.
+
+        Parameters
+        ----------
+        scope_key:
+            Partition key.  Entries stored with a non-``None`` scope_key are
+            only retrievable with the same scope_key.
+        """
         if not SEMANTIC_CACHE_ENABLED:
             return
         self._evict_lru_if_full()
@@ -152,6 +196,7 @@ class SemanticCache:
             chat_id=chat_id,
             history=history,
             expires_at=time.time() + SEMANTIC_CACHE_TTL_SECONDS,
+            scope_key=scope_key,
         )
         self._entries.append(entry)
         self._access_times.append(time.time())
@@ -177,7 +222,7 @@ class SemanticCache:
 
     # -- internals ----------------------------------------------------------
 
-    def _find_best_match(self, embedding: np.ndarray) -> tuple[CacheEntry, int] | None:
+    def _find_best_match(self, embedding: np.ndarray, *, scope_key: str | None = None) -> tuple[CacheEntry, int] | None:
         best_score = SEMANTIC_CACHE_THRESHOLD
         best_idx: int | None = None
 
@@ -195,6 +240,10 @@ class SemanticCache:
         self._access_times = surviving_times
 
         for i, entry in enumerate(self._entries):
+            # Enforce scope partition — a per-user entry must never be served
+            # to a lookup from a different scope (or from no scope at all).
+            if entry.scope_key != scope_key:
+                continue
             score = cosine_similarity(embedding, entry.embedding)
             if score >= best_score:
                 best_score = score

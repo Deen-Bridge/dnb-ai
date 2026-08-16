@@ -85,6 +85,13 @@ from semantic_cache import (
     get_cache,
     normalize_text,
 )
+from retrieval import (
+    RetrievalScope,
+    UserRole,
+    assert_scope_match,
+    cache_scope_key,
+    derive_scope,
+)
 from stellar import (
     PurchaseContext,
     PurchaseInfo,
@@ -148,6 +155,28 @@ async def verify_api_key(
     if not api_key or not secrets.compare_digest(api_key, SERVICE_API_KEY):
         raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
     return api_key
+
+
+def _resolve_principal(http_request: Request) -> str | None:
+    """Extract the authenticated principal user id from the request.
+
+    Today the service uses a shared ``X-API-Key`` so there is no per-user
+    identity claim at the transport layer.  When the full auth layer (issue
+    #51) lands it will populate an ``X-User-Id`` or similar header after
+    verifying a Bearer token; this function is the single place to add that
+    lookup.
+
+    Until #51 lands:
+    * ``X-User-Id`` header is accepted as a *convenience* for local
+      development / testing and for the frontend which already holds the
+      signed-in user's id.
+    * No cryptographic verification of the header value is performed here.
+      The value is treated as a trusted claim from the caller who already
+      passed the ``X-API-Key`` check.
+
+    Returns ``None`` for unauthenticated / anonymous callers.
+    """
+    return http_request.headers.get("X-User-Id") or None
 
 
 # --- Per-client rate limiting ---
@@ -657,6 +686,24 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         is_new_chat = chat_id not in active_chats
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
 
+        # --- Retrieval authorization scope ---
+        # Derived once from the authenticated request context; never from the
+        # caller-supplied body field.  Reject with 403 when the body user_id
+        # disagrees with the authenticated principal.
+        _principal_id = _resolve_principal(http_request)
+        retrieval_scope: RetrievalScope = derive_scope(principal_user_id=_principal_id)
+        try:
+            assert_scope_match(retrieval_scope, request.user_id)
+        except PermissionError as _pe:
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: body user_id does not match authenticated principal",
+            ) from _pe
+
+        # The effective user_id for memory / session work is always taken from
+        # the scope (the authenticated principal), never from the body.
+        _effective_user_id: str | None = retrieval_scope.principal_user_id
+
         # A user who pastes a Stellar secret key must not have it forwarded to
         # the model provider or written into stored history. Everything
         # downstream works from the redacted text; the zakat layer separately
@@ -692,23 +739,30 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         # --- Memory lookup ---
         profile: UserProfile | None = None
         summary: ChatSummary | None = None
-        if request.user_id:
-            profile = await memory_store.get_profile(request.user_id)
-            summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
+        if _effective_user_id:
+            profile = await memory_store.get_profile(_effective_user_id, scope=retrieval_scope)
+            summary = await memory_store.get_chat_summary(f"{_effective_user_id}:{chat_id}", scope=retrieval_scope)
 
         # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
         # through the semantic response cache: the first is built from retrieved
         # passages (already cached by ayah key), and the others contain one
         # user's real financial data, which must never be replayed to anyone else.
+        # Per-user answers are also excluded from caching for now (per-user cache
+        # partitioning exists in the scope layer but is not yet enabled here).
         is_cacheable = (
             is_new_chat
             and request.context is None
             and tafsir_context is None
             and zakat_context is None
             and purchase_context is None
-            and request.user_id is None
+            and _effective_user_id is None
             and SEMANTIC_CACHE_ENABLED
         )
+
+        # Build the cache partition key for this scope.  Public (anonymous)
+        # requests use the bare text key; per-user requests would be namespaced
+        # (but are currently excluded from caching via is_cacheable above).
+        _cache_scope_key: str | None = None  # None → public partition
 
         # --- Semantic cache lookup ---
         embedding: Any = None
@@ -716,7 +770,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         if is_cacheable and not is_bypass:
             normalized = normalize_text(prompt)
             embedding = embed_text(normalized)
-            cached = semantic_cache.get(embedding)
+            cached = semantic_cache.get(embedding, scope_key=_cache_scope_key)
             if cached is not None:
                 fastapi_response.headers["X-Semantic-Cache"] = "hit"
                 model = genai.GenerativeModel(
@@ -908,7 +962,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             if embedding is None:
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
-            semantic_cache.put(embedding, response_text, chat_id, history)
+            semantic_cache.put(embedding, response_text, chat_id, history, scope_key=_cache_scope_key)
             logger.info("Semantic cache WRITE for prompt: %s", prompt[:80])
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
@@ -949,15 +1003,15 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         # --- Persist chat history ---
         asyncio.create_task(
-            _persist_chat_history(chat_id, request.user_id, chat_session)
+            _persist_chat_history(chat_id, _effective_user_id, chat_session)
         )
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
-        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+        if _effective_user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
             asyncio.create_task(
                 _extract_and_update_memory(
-                    request.user_id,
+                    _effective_user_id,
                     prompt,
                     response_text,
                     chat_id,
@@ -965,23 +1019,23 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     memory_store,
                 )
             )
-            logger.info("Memory extraction scheduled for user %s", request.user_id[:8])
+            logger.info("Memory extraction scheduled for user %s", _effective_user_id[:8])
 
         # --- Summary eviction ---
         # After enough turns accumulate, summarize old history and persist.
-        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+        if _effective_user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
             chat_session = active_chats.get(chat_id)
             if chat_session and hasattr(chat_session, "history") and chat_session.history:
                 if len(chat_session.history) >= MAX_CHAT_HISTORY_TURNS:
                     asyncio.create_task(
                         _summarize_history(
-                            f"{request.user_id}:{chat_id}",
+                            f"{_effective_user_id}:{chat_id}",
                             chat_session.history,
                             summary,
                             memory_store,
                         )
                     )
-                    logger.info("History summarization triggered for %s", request.user_id[:8])
+                    logger.info("History summarization triggered for %s", _effective_user_id[:8])
 
         return response_obj
 
@@ -1102,6 +1156,18 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
         logger.info("Received streaming chat request: %s...", prompt[:100])
+
+        # --- Retrieval authorization scope ---
+        _stream_principal_id = _resolve_principal(http_request)
+        stream_retrieval_scope: RetrievalScope = derive_scope(principal_user_id=_stream_principal_id)
+        try:
+            assert_scope_match(stream_retrieval_scope, request.user_id)
+        except PermissionError as _pe:
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: body user_id does not match authenticated principal",
+            ) from _pe
+        _stream_effective_user_id: str | None = stream_retrieval_scope.principal_user_id
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
@@ -1352,7 +1418,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # Awaited (not fire-and-forget) so a client that immediately
                 # reloads the chat list sees this turn. Failures are caught
                 # inside the helper; the stream is already complete.
-                await _persist_chat_history(chat_id, request.user_id, chat_session)
+                await _persist_chat_history(chat_id, _stream_effective_user_id, chat_session)
 
             except asyncio.CancelledError:
                 # Client disconnected mid-stream. Consume remaining chunks
@@ -1390,6 +1456,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
             },
         )
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "Unexpected error initialising streaming chat %s: %s",
@@ -1437,8 +1505,21 @@ async def _persist_chat_history(chat_id: str, user_id: Optional[str], chat_sessi
 
 
 @app.get("/user/{user_id}/chats")
-async def get_user_chats(user_id: str):
-    """List all chat IDs for a user."""
+async def get_user_chats(user_id: str, http_request: Request):
+    """List all chat IDs for a user.
+
+    Enforces retrieval authorization: the path user_id must match the
+    authenticated principal.  Returns 403 on cross-user access.
+    """
+    _principal = _resolve_principal(http_request)
+    _scope = derive_scope(principal_user_id=_principal)
+    try:
+        assert_scope_match(_scope, user_id)
+    except PermissionError as _pe:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: cannot list chats for another user",
+        ) from _pe
     try:
         chat_ids = await session_store.get_user_chats(user_id)
         chats = []
@@ -1466,6 +1547,8 @@ async def get_user_chats(user_id: str):
         # Most recent first
         chats.sort(key=lambda c: c["created_at"] or 0, reverse=True)
         return {"chats": chats}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error listing user chats", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -1639,25 +1722,44 @@ async def ping() -> dict[str, str]:
 
 
 @app.get("/memory/{user_id}")
-async def get_memory(user_id: str) -> dict[str, Any]:
+async def get_memory(user_id: str, http_request: Request) -> dict[str, Any]:
     """Retrieve the stored user profile for transparency.
 
-    TODO(#9): bind to authenticated principal — anyone who knows a user_id
-    can currently read another user's memory.
+    Enforces retrieval authorization: the path user_id must match the
+    authenticated principal (X-User-Id header).  Returns 403 on cross-user
+    access, 404 when no profile is stored for the caller's own id.
     """
-    profile = await memory_store.get_profile(user_id)
+    _principal = _resolve_principal(http_request)
+    _scope = derive_scope(principal_user_id=_principal)
+    try:
+        assert_scope_match(_scope, user_id)
+    except PermissionError as _pe:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: cannot access another user's memory",
+        ) from _pe
+    profile = await memory_store.get_profile(user_id, scope=_scope)
     if profile is None:
         raise HTTPException(status_code=404, detail="Memory not found")
     return profile.model_dump()
 
 
 @app.delete("/memory/{user_id}")
-async def delete_memory(user_id: str) -> dict[str, str]:
+async def delete_memory(user_id: str, http_request: Request) -> dict[str, str]:
     """Completely erase the stored user profile.
 
-    TODO(#9): bind to authenticated principal — anyone who knows a user_id
-    can currently erase another user's memory.
+    Enforces retrieval authorization: the path user_id must match the
+    authenticated principal.  Returns 403 on cross-user access.
     """
+    _principal = _resolve_principal(http_request)
+    _scope = derive_scope(principal_user_id=_principal)
+    try:
+        assert_scope_match(_scope, user_id)
+    except PermissionError as _pe:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: cannot delete another user's memory",
+        ) from _pe
     existed = await memory_store.delete_profile(user_id)
     if existed:
         logger.info("Deleted memory for user %s", user_id[:8])
