@@ -76,6 +76,14 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from prompts import (
+    ExperimentAssignment,
+    ExperimentConfig,
+    ExperimentHarness,
+    Variant,
+    get_registry,
+    register_defaults,
+)
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -117,6 +125,11 @@ GEMINI_API_KEY = settings.gemini_api_key
 genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
+
+# --- Prompt template registry and A/B experimentation ---
+register_defaults()
+prompt_registry = get_registry()
+experiment_harness = ExperimentHarness(prompt_registry)
 
 # --- Service API-key authentication ---
 # A shared secret between the DeenBridge backend/frontend and this service.
@@ -257,6 +270,8 @@ class ChatResponse(BaseModel):
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
+    # A/B experiment assignment (None when no experiment is active).
+    experiment: ExperimentAssignment | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -457,15 +472,9 @@ async def require_admin(token: str | None = Depends(_admin_header)) -> None:
         raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
 
 
-ISLAMIC_CONTEXT = (
-    "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
-    "Provide respectful, accurate, and context-aware responses grounded in authentic Islamic knowledge.\n\n"
-    "POLICY ON CITATIONS:\n"
-    "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
-    "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
-    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
-    "general knowledge—do NOT fabricate references.\n"
-)
+_islamic_ctx_tpl = prompt_registry.get("islamic_context")
+assert _islamic_ctx_tpl is not None, "islamic_context template not registered"
+ISLAMIC_CONTEXT = _islamic_ctx_tpl.render()
 
 SUPPORTED_LANGUAGES = {
     "ar": "Arabic",
@@ -482,18 +491,9 @@ SUPPORTED_LANGUAGES = {
     "tl": "Tagalog",
 }
 
-LANGUAGE_INSTRUCTIONS = (
-    "\n\nLANGUAGE POLICY:\n"
-    "- When a response_language code is provided, respond entirely in that language.\n"
-    "- When no response_language is provided (auto mode), respond in the same language as the user's question.\n"
-    "- ALWAYS quote Quran in the original Arabic script (e.g. بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ) "
-    "followed by a translation in the response language, with the surah:ayah reference.\n"
-    "- Use standard transliteration for core Islamic terms (e.g. salat, zakat, hajj, shahada) "
-    "when writing in Latin-script languages.\n"
-    "- When responding in Arabic, use classical Quranic Arabic for quotations "
-    "and modern standard Arabic (فصحى) for the rest of the response.\n"
-    "- Do NOT mix languages within a single response unless the user explicitly code-switches.\n"
-)
+_lang_instr_tpl = prompt_registry.get("language_instructions")
+assert _lang_instr_tpl is not None, "language_instructions template not registered"
+LANGUAGE_INSTRUCTIONS = _lang_instr_tpl.render(response_language="auto")
 
 
 def normalize_language(lang: str | None) -> str | None:
@@ -667,6 +667,15 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
         logger.info(f"Received chat request: {prompt[:100]}...")
+
+        # --- A/B experiment assignment (populated if any experiment is active) ---
+        _current_experiment: ExperimentAssignment | None = None
+        for exp_id in experiment_harness.active_experiments():
+            try:
+                _current_experiment = experiment_harness.assign(exp_id, chat_id)
+                break
+            except Exception:  # noqa: BLE001 — experiments are best-effort
+                pass
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
@@ -951,6 +960,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             purchases=purchase_info,
             language=effective_language,
             citations=citation_extraction.citations,
+            experiment=_current_experiment,
         )
         _finalize()
         _succeeded = True
@@ -1109,6 +1119,15 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
         extra_context = redact_secret_keys(request.context)
         logger.info("Received streaming chat request: %s...", prompt[:100])
 
+        # --- A/B experiment assignment ---
+        _current_experiment: ExperimentAssignment | None = None
+        for exp_id in experiment_harness.active_experiments():
+            try:
+                _current_experiment = experiment_harness.assign(exp_id, chat_id)
+                break
+            except Exception:  # noqa: BLE001 — experiments are best-effort
+                pass
+
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
             madhhab = normalize_madhhab(request.madhhab)
@@ -1184,11 +1203,13 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # --- Build system context + prompt ---
                 system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
                 if effective_language:
-                    system_context += LANGUAGE_INSTRUCTIONS
-                    system_context += f"\nresponse_language: {effective_language}"
+                    _lang_tpl = prompt_registry.get("language_instructions")
+                    assert _lang_tpl is not None
+                    system_context += _lang_tpl.render(
+                        response_language=effective_language,
+                    )
                 else:
                     system_context += LANGUAGE_INSTRUCTIONS
-                    system_context += "\nresponse_language: auto (respond in the user's language)"
                 if is_fiqh:
                     system_context += FIQH_IKHTILAF_CONTEXT
                     if madhhab:
@@ -1347,6 +1368,15 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
+                        "experiment": (
+                            {
+                                "experiment_id": _current_experiment.experiment_id,
+                                "variant_name": _current_experiment.variant_name,
+                                "kill_switch_active": _current_experiment.kill_switch_active,
+                            }
+                            if _current_experiment
+                            else None
+                        ),
                     },
                     ensure_ascii=False,
                 )
@@ -1722,6 +1752,112 @@ async def confidence_policy() -> dict[str, Any]:
         "thresholds": confidence_thresholds(),
         "review_queue": await review_store.stats(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Prompt registry & experiment management
+# ---------------------------------------------------------------------------
+
+
+@app.get("/prompts")
+async def list_prompt_templates() -> dict[str, str]:
+    """List all registered prompt templates and their latest versions."""
+    return prompt_registry.list_templates()
+
+
+@app.get("/prompts/{name}")
+async def get_prompt_template(name: str, version: str | None = None) -> dict[str, Any]:
+    """Retrieve a prompt template by name (and optional version)."""
+    template = prompt_registry.get(name, version)
+    if template is None:
+        raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
+    return {
+        "name": template.name,
+        "version": template.version,
+        "variables": list(template.variables),
+        "changelog": template.changelog,
+        "body": template.body,
+    }
+
+
+@app.get("/experiments")
+async def list_experiments() -> dict[str, Any]:
+    """List registered experiments and their status."""
+    experiments = {}
+    for eid, cfg in experiment_harness._experiments.items():
+        all_variants = [cfg.control] + cfg.variants
+        experiments[eid] = {
+            "experiment_id": cfg.experiment_id,
+            "kill_switch": cfg.kill_switch,
+            "variants": [{"name": v.name, "template_name": v.template_name, "weight": v.weight} for v in all_variants],
+        }
+    return {"experiments": experiments}
+
+
+class ExperimentCreateRequest(BaseModel):
+    experiment_id: str = Field(..., max_length=128)
+    control_template: str = Field(..., max_length=128)
+    control_version: str | None = None
+    variants: list[dict[str, Any]] = Field(default_factory=list)
+    kill_switch: bool = False
+
+
+@app.post("/experiments", dependencies=[Depends(require_admin)])
+async def create_experiment(body: ExperimentCreateRequest) -> dict[str, Any]:
+    """Create or update an A/B experiment (admin only).
+
+    Variants are a list of ``{"name": ..., "template_name": ..., "weight": ...}``.
+    """
+    control = Variant(
+        name="control",
+        template_name=body.control_template,
+        template_version=body.control_version,
+        weight=1.0,
+    )
+    variant_list = [
+        Variant(
+            name=v["name"],
+            template_name=v["template_name"],
+            template_version=v.get("template_version"),
+            weight=v.get("weight", 1.0),
+        )
+        for v in body.variants
+    ]
+    config = ExperimentConfig(
+        experiment_id=body.experiment_id,
+        control=control,
+        variants=variant_list,
+        kill_switch=body.kill_switch,
+    )
+    experiment_harness.register_experiment(config)
+    return {"status": "ok", "experiment_id": body.experiment_id}
+
+
+@app.post("/experiments/{experiment_id}/kill", dependencies=[Depends(require_admin)])
+async def kill_experiment(experiment_id: str) -> dict[str, Any]:
+    """Activate the kill switch for an experiment (admin only)."""
+    cfg = experiment_harness._experiments.get(experiment_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    cfg.kill_switch = True
+    return {"status": "ok", "experiment_id": experiment_id, "kill_switch": True}
+
+
+@app.post("/experiments/{experiment_id}/resume", dependencies=[Depends(require_admin)])
+async def resume_experiment(experiment_id: str) -> dict[str, Any]:
+    """Deactivate the kill switch for an experiment (admin only)."""
+    cfg = experiment_harness._experiments.get(experiment_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    cfg.kill_switch = False
+    return {"status": "ok", "experiment_id": experiment_id, "kill_switch": False}
+
+
+@app.delete("/experiments/{experiment_id}", dependencies=[Depends(require_admin)])
+async def delete_experiment(experiment_id: str) -> dict[str, str]:
+    """Remove an experiment (admin only)."""
+    experiment_harness.unregister_experiment(experiment_id)
+    return {"status": "ok", "experiment_id": experiment_id}
 
 
 if __name__ == "__main__":

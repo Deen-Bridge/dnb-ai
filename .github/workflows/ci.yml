@@ -87,6 +87,9 @@ jobs:
       - name: Run memory integration tests
         run: pytest -q tests/test_memory_integration.py
 
+      - name: Run prompt registry and A/B experiment tests
+        run: pytest -q tests/test_prompt_registry.py
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 
