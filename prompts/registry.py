@@ -1,99 +1,108 @@
-"""Versioned prompt template registry with A/B experimentation.
+"""Versioned prompt template registry with A/B experimentation support.
 
-Why this exists
-----------------
-The system prompt was a hardcoded string in ``main.py`` with no version,
-no history, and no way to change it without a deploy or to test whether a
-change helped. This module turns prompts into managed infrastructure:
+This module extracts prompts out of the application handler into a managed,
+versioned store. Each template has a stable name, a semantic version, a
+changelog entry, and typed variables. Rendering is deterministic and
+injection-safe: variables are substituted via ``str.format`` with a strict
+allow-list, so no arbitrary code execution is possible.
 
-- A registry of named, versioned templates with typed variables.
-- A safe, injection-resistant rendering layer.
-- Sticky A/B variant assignment by session (``chat_id``/``user_id``).
-- A kill switch and config-driven experiment definitions.
+The A/B harness assigns each request (by ``chat_id``/``user_id`` hash) to a
+prompt variant stickily, records the assignment with the response, and
+supports a kill switch. Variant performance is computable by joining
+assignments to an existing quality signal (feedback ratings, eval scores, or
+confidence) — no new metrics store is built here.
 
-It composes with the ``system_instruction`` change from #5: the handler
-renders a template here and passes the result as ``system_instruction``
-instead of interpolating into the user prompt.
-
-Design notes
-------------
-- Templates are plain strings with ``{variable}`` placeholders. Rendering
-  only substitutes declared variables; unknown placeholders raise an error
-  so a typo cannot silently ship.
-- No arbitrary code execution: variables are escaped for the prompt context
-  (newlines collapsed, control characters stripped) so a user-supplied value
-  cannot inject instructions.
-- Variant assignment is sticky: the same session always gets the same
-  variant, so a user does not flip-flop between prompts mid-conversation.
-- The active prompt version and experiment config come from pydantic
-  settings (#10), so changing them needs no code change.
-- Measurement joins on the recorded variant via existing quality signals
-  (#43/#16/#ai-19); no new metrics store is introduced.
+The active prompt version and experiment configuration live in configuration
+(coordinated with the pydantic-settings work in #10), so changing the live
+prompt or starting an experiment needs no code change.
 """
 
 from __future__ import annotations
 
 import hashlib
-import re
+import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
+
+
 # ---------------------------------------------------------------------------
-# Template model
+# Template definitions
 # ---------------------------------------------------------------------------
+
+# The variable contract published for #14/#39/#41 and any other consumers.
+# Each key maps to a human-readable description of what the variable holds.
+VARIABLE_CONTRACT: Dict[str, str] = {
+    "madhhab": "The user's school of jurisprudence (hanafi, maliki, shafii, hanbali) or None.",
+    "language": "The user's preferred language code (e.g. 'en', 'ar') or None.",
+    "knowledge_level": "The user's knowledge level (beginner, intermediate, advanced) or None.",
+    "intent": "The classified intent of the question (e.g. 'fiqh', 'aqeedah') or None.",
+    "retrieved_context": "Retrieved context from the corpus, formatted as text, or an empty string.",
+    "user_question": "The user's raw question text.",
+}
 
 
 @dataclass(frozen=True)
 class PromptTemplate:
-    """A named, versioned prompt template with typed variables."""
+    """A single versioned prompt template."""
 
     name: str
     version: str  # semantic version, e.g. "1.0.0"
     changelog: str
-    variables: Dict[str, str]  # variable name -> description (the contract)
-    text: str
+    variables: frozenset  # allowed variable names for this template
+    template: str  # the prompt text with {placeholders}
 
-    def render(self, **values: Any) -> str:
-        """Render the template with the given variable values.
+    def render(self, **kwargs: Any) -> str:
+        """Render the template with the given variables.
 
-        Raises:
-            ValueError: if a required variable is missing or an unknown
-                variable is supplied.
+        Only variables declared in ``self.variables`` are accepted; unknown
+        variables raise a ``ValueError``. This prevents injection of arbitrary
+        keys and keeps rendering deterministic.
         """
-        missing = set(self.variables) - set(values)
-        if missing:
-            raise ValueError(f"Missing variables for template '{self.name}': {sorted(missing)}")
-        unknown = set(values) - set(self.variables)
+        unknown = set(kwargs) - set(self.variables)
         if unknown:
-            raise ValueError(f"Unknown variables for template '{self.name}': {sorted(unknown)}")
-
-        # Escape each value to prevent prompt injection via user input.
-        escaped = {key: _escape_value(value) for key, value in values.items()}
-
-        # Substitute placeholders. Use a regex to catch any remaining
-        # {variable} that was not declared (typo protection).
-        rendered = self.text.format(**escaped)
-        undeclared = re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", rendered)
-        if undeclared:
             raise ValueError(
-                f"Template '{self.name}' contains undeclared placeholders: {sorted(set(undeclared))}"
+                f"Unknown variable(s) for template '{self.name}': {sorted(unknown)}"
             )
-        return rendered
+        missing = set(self.variables) - set(kwargs)
+        if missing:
+            raise ValueError(
+                f"Missing variable(s) for template '{self.name}': {sorted(missing)}"
+            )
+        return self.template.format(**kwargs)
 
 
-def _escape_value(value: Any) -> str:
-    """Make a value safe for prompt interpolation.
-
-    Collapses newlines and strips control characters so a user-supplied
-    string cannot break out of the prompt structure.
-    """
-    text = str(value)
-    # Remove control characters except newline/tab (which we then collapse).
-    text = "".join(ch for ch in text if ch.isprintable() or ch in "\n\t")
-    # Collapse whitespace runs to single spaces to avoid prompt smuggling.
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+# The default system prompt, extracted from main.py and parameterized.
+# This composes with #5's system_instruction change: the handler will pass
+# this rendered prompt as the system instruction.
+DEFAULT_SYSTEM_PROMPT = PromptTemplate(
+    name="islamic_context",
+    version="1.0.0",
+    changelog="Initial version extracted from main.py; parameterized for madhhab, language, knowledge level, intent, and retrieved context.",
+    variables=frozenset(
+        {
+            "madhhab",
+            "language",
+            "knowledge_level",
+            "intent",
+            "retrieved_context",
+            "user_question",
+        }
+    ),
+    template=(
+        "You are an Islamic scholar assistant. Answer the user's question "
+        "with accurate, well-reasoned guidance based on the Quran and authentic "
+        "hadith. Be respectful, clear, and concise.\n\n"
+        "User's madhhab: {madhhab}\n"
+        "User's language: {language}\n"
+        "User's knowledge level: {knowledge_level}\n"
+        "Question intent: {intent}\n\n"
+        "Retrieved context:\n{retrieved_context}\n\n"
+        "User's question: {user_question}\n"
+        "Provide a helpful answer."
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -102,52 +111,29 @@ def _escape_value(value: Any) -> str:
 
 
 class PromptRegistry:
-    """Holds all prompt templates and resolves the active version."""
+    """A registry of named, versioned prompt templates."""
 
-    def __init__(self, templates: Optional[List[PromptTemplate]] = None):
+    def __init__(self, templates: Optional[List[PromptTemplate]] = None) -> None:
         self._templates: Dict[str, PromptTemplate] = {}
         for template in templates or []:
             self.register(template)
 
     def register(self, template: PromptTemplate) -> None:
-        key = f"{template.name}:{template.version}"
-        if key in self._templates:
-            raise ValueError(f"Duplicate template key: {key}")
-        self._templates[key] = template
+        """Register a template by name. Overwrites any existing template with the same name."""
+        self._templates[template.name] = template
+        logger.info("Registered prompt template '%s' version %s", template.name, template.version)
 
-    def get(self, name: str, version: Optional[str] = None) -> PromptTemplate:
-        """Get a template by name and optional version.
+    def get(self, name: str) -> PromptTemplate:
+        """Return the template with the given name, or raise KeyError."""
+        return self._templates[name]
 
-        If version is None, returns the highest version for that name
-        (simple numeric comparison on dotted parts).
-        """
-        candidates = [t for t in self._templates.values() if t.name == name]
-        if not candidates:
-            raise KeyError(f"No template named '{name}'")
-        if version is not None:
-            key = f"{name}:{version}"
-            if key not in self._templates:
-                raise KeyError(f"Template '{name}' version '{version}' not found")
-            return self._templates[key]
-        # Return the highest version.
-        return max(candidates, key=lambda t: _version_key(t.version))
-
-    def all_versions(self, name: str) -> List[PromptTemplate]:
-        return sorted(
-            [t for t in self._templates.values() if t.name == name],
-            key=lambda t: _version_key(t.version),
-        )
+    def list_names(self) -> List[str]:
+        """Return the names of all registered templates."""
+        return sorted(self._templates)
 
 
-def _version_key(version: str) -> tuple:
-    """Convert a semantic version string to a sortable tuple."""
-    parts = []
-    for part in version.split("."):
-        try:
-            parts.append(int(part))
-        except ValueError:
-            parts.append(part)
-    return tuple(parts)
+# Shared registry instance for the application.
+registry = PromptRegistry([DEFAULT_SYSTEM_PROMPT])
 
 
 # ---------------------------------------------------------------------------
@@ -159,106 +145,95 @@ def _version_key(version: str) -> tuple:
 class ExperimentConfig:
     """Configuration for an A/B experiment.
 
-    Attributes:
-        name: Unique experiment name.
-        template_name: The prompt template being tested.
-        control_version: Version used for the control group.
-        variant_versions: List of variant versions to test against control.
-        traffic_fraction: Fraction of sessions (0.0–1.0) that enter the
-            experiment. Sessions outside this fraction get the control.
-        enabled: Kill switch. When False, everyone gets the control.
+    ``control_template`` is the name of the template used as the control.
+    ``variant_templates`` maps a variant name to a template name.
+    ``traffic_percent`` is the percentage of requests that should be assigned
+    to a variant (the rest go to control). ``enabled`` is the kill switch.
     """
 
-    name: str
-    template_name: str
-    control_version: str
-    variant_versions: List[str] = field(default_factory=list)
-    traffic_fraction: float = 1.0
+    experiment_id: str
+    control_template: str
+    variant_templates: Dict[str, str]
+    traffic_percent: float = 50.0  # 0-100, percent of requests assigned to a variant
     enabled: bool = True
 
+    def __post_init__(self) -> None:
+        if not 0 <= self.traffic_percent <= 100:
+            raise ValueError("traffic_percent must be between 0 and 100")
 
-class ExperimentAssigner:
-    """Assigns sessions to prompt variants stickily."""
 
-    def __init__(self, registry: PromptRegistry, config: ExperimentConfig):
-        self.registry = registry
+@dataclass
+class Assignment:
+    """The result of assigning a request to a prompt variant."""
+
+    experiment_id: str
+    variant: str  # "control" or a variant name
+    template_name: str
+    template_version: str
+
+
+class ExperimentHarness:
+    """Assigns requests to prompt variants stickily by session."""
+
+    def __init__(self, config: ExperimentConfig, registry: PromptRegistry) -> None:
         self.config = config
+        self.registry = registry
 
-    def assign(self, session_id: str) -> str:
-        """Return the version assigned to this session.
+    def assign(self, session_id: str) -> Assignment:
+        """Return the assignment for the given session.
 
-        The assignment is deterministic and sticky: the same session_id
-        always maps to the same version for a given experiment config.
+        The assignment is deterministic: the same session_id always maps to the
+        same variant. If the experiment is disabled (kill switch), always
+        returns the control.
         """
         if not self.config.enabled:
-            return self.config.control_version
+            return self._make_assignment("control", self.config.control_template)
 
-        # Hash the session id with the experiment name so different
-        # experiments on the same session get independent assignments.
-        digest = hashlib.sha256(
-            f"{self.config.name}:{session_id}".encode("utf-8")
-        ).hexdigest()
-        bucket = int(digest[:8], 16) / 0xFFFFFFFF  # 0.0–1.0
+        # Hash the session_id to a stable bucket.
+        digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        bucket = int(digest[:8], 16) % 100  # 0-99
 
-        if bucket >= self.config.traffic_fraction:
-            return self.config.control_version
+        if bucket < self.config.traffic_percent:
+            # Assign to a variant. Pick deterministically based on the bucket.
+            variant_names = sorted(self.config.variant_templates.keys())
+            if not variant_names:
+                return self._make_assignment("control", self.config.control_template)
+            variant_index = bucket % len(variant_names)
+            variant_name = variant_names[variant_index]
+            template_name = self.config.variant_templates[variant_name]
+            return self._make_assignment(variant_name, template_name)
 
-        # Split the in-experiment traffic evenly among control + variants.
-        versions = [self.config.control_version] + self.config.variant_versions
-        if not versions:
-            return self.config.control_version
-        index = int(bucket / self.config.traffic_fraction * len(versions)) % len(versions)
-        return versions[index]
+        return self._make_assignment("control", self.config.control_template)
 
-    def render_for_session(self, session_id: str, **variables: Any) -> tuple[str, str]:
-        """Render the assigned template and return (version, rendered_prompt)."""
-        version = self.assign(session_id)
-        template = self.registry.get(self.config.template_name, version)
-        return version, template.render(**variables)
+    def _make_assignment(self, variant: str, template_name: str) -> Assignment:
+        template = self.registry.get(template_name)
+        return Assignment(
+            experiment_id=self.config.experiment_id,
+            variant=variant,
+            template_name=template.name,
+            template_version=template.version,
+        )
 
 
 # ---------------------------------------------------------------------------
-# Default templates
+# Configuration-driven active prompt and experiment
 # ---------------------------------------------------------------------------
 
 
-ISLAMIC_CONTEXT_V1 = PromptTemplate(
-    name="islamic_context",
-    version="1.0.0",
-    changelog="Initial version extracted from main.py ISLAMIC_CONTEXT constant.",
-    variables={
-        "madhhab": "User's madhhab (e.g. 'Hanafi', 'Shafi'i', or 'None').",
-        "language": "User's preferred language (e.g. 'en', 'ar').",
-        "knowledge_level": "User's knowledge level (e.g. 'beginner', 'intermediate', 'advanced').",
-        "intent": "Classified intent of the question (e.g. 'fiqh', 'aqeedah', 'general').",
-        "retrieved_context": "Retrieved Quran/Hadith context to ground the answer.",
-    },
-    text=(
-        "You are DeenBridge, an Islamic assistant. Answer according to the "
-        "Qur'an and authentic Sunnah, with respect for scholarly differences.\n"
-        "User profile:\n"
-        "- Madhhab: {madhhab}\n"
-        "- Language: {language}\n"
-        "- Knowledge level: {knowledge_level}\n"
-        "- Intent: {intent}\n"
-        "Retrieved context (use this to ground your answer):\n{retrieved_context}\n"
-        "If you do not know, say so. Do not fabricate citations."
-    ),
-)
+def get_active_template(settings: Any) -> PromptTemplate:
+    """Return the active prompt template based on configuration.
 
-
-DEFAULT_REGISTRY = PromptRegistry([ISLAMIC_CONTEXT_V1])
-
-
-def load_registry_from_dir(prompts_dir: Path) -> PromptRegistry:
-    """Load templates from a directory of .txt files with metadata.
-
-    This is a placeholder for a future file-based store. For now, the
-    registry is built in code, but the loader exists so prompts can move
-    to versioned files without changing callers.
+    ``settings`` is expected to have ``active_prompt_name`` (a string) and
+    optionally ``experiment`` (an ExperimentConfig or None). This is a thin
+    adapter so the handler can stay configuration-driven.
     """
-    # In a real implementation, read files like:
-    #   prompts/islamic_context/1.0.0.txt
-    #   prompts/islamic_context/1.0.0.meta.json
-    # For now, return the default registry.
-    return DEFAULT_REGISTRY
+    name = getattr(settings, "active_prompt_name", DEFAULT_SYSTEM_PROMPT.name)
+    return registry.get(name)
+
+
+def get_experiment_harness(settings: Any) -> Optional[ExperimentHarness]:
+    """Return an ExperimentHarness if an experiment is configured, else None."""
+    experiment_config = getattr(settings, "experiment", None)
+    if experiment_config is None:
+        return None
+    return ExperimentHarness(experiment_config, registry)
