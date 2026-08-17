@@ -8,7 +8,12 @@ from __future__ import annotations
 import logging
 import os
 
-from memory.models import ChatSummary, UserProfile
+from memory.models import ChatSummary, PersonalContextBundle, PersonalRecord, UserProfile
+from memory.personal_context import (
+    PersonalContext,
+    PersonalContextInfo,
+    build_personal_context,
+)
 from memory.store import (
     InMemoryMemoryStore,
     MemoryStore,
@@ -78,8 +83,13 @@ __all__ = [
     "ChatSummary",
     "InMemoryMemoryStore",
     "MemoryStore",
+    "PersonalContext",
+    "PersonalContextBundle",
+    "PersonalContextInfo",
+    "PersonalRecord",
     "RedisMemoryStore",
     "UserProfile",
+    "build_personal_context",
     "create_memory_store",
     "render_user_context",
 ]
