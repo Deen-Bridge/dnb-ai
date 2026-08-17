@@ -86,44 +86,79 @@ HEIRS: Dict[str, Dict[str, Any]] = {
         "radd_eligible": True,
     },
     "grandson": {
-        "name": "Grandson",
+        "name": "Grandson (son's son)",
         "category": "asaba",
         "base_share": None,
         "blocked_by": ["son"],
         "radd_eligible": False,
     },
+    "granddaughter": {
+        "name": "Granddaughter (son's daughter)",
+        "category": "fard",
+        "base_share": Fraction(1, 2),
+        "blocked_by": ["son"],
+        "radd_eligible": True,
+    },
     "grandfather": {
-        "name": "Grandfather",
+        "name": "Grandfather (father's father)",
         "category": "fard",
         "base_share": Fraction(1, 6),
         "blocked_by": ["father"],
         "radd_eligible": True,
     },
     "grandmother": {
-        "name": "Grandmother",
+        "name": "Grandmother (mother's mother)",
         "category": "fard",
         "base_share": Fraction(1, 6),
         "blocked_by": ["mother"],
         "radd_eligible": True,
     },
     "full_sister": {
-        "name": "Full Sister",
+        "name": "Full sister",
         "category": "fard",
         "base_share": Fraction(1, 2),
-        "blocked_by": ["son", "daughter", "father", "grandson"],
+        "blocked_by": ["son", "grandson", "father", "grandfather"],
         "radd_eligible": True,
     },
     "full_brother": {
-        "name": "Full Brother",
+        "name": "Full brother",
         "category": "asaba",
         "base_share": None,
-        "blocked_by": ["son", "grandson", "father"],
+        "blocked_by": ["son", "grandson", "father", "grandfather"],
         "radd_eligible": False,
+    },
+    "consanguine_sister": {
+        "name": "Consanguine sister",
+        "category": "fard",
+        "base_share": Fraction(1, 2),
+        "blocked_by": ["son", "grandson", "father", "grandfather", "full_brother", "full_sister"],
+        "radd_eligible": True,
+    },
+    "consanguine_brother": {
+        "name": "Consanguine brother",
+        "category": "asaba",
+        "base_share": None,
+        "blocked_by": ["son", "grandson", "father", "grandfather", "full_brother"],
+        "radd_eligible": False,
+    },
+    "uterine_sister": {
+        "name": "Uterine sister",
+        "category": "fard",
+        "base_share": Fraction(1, 6),
+        "blocked_by": ["son", "grandson", "father", "grandfather", "full_brother", "full_sister", "consanguine_brother", "consanguine_sister"],
+        "radd_eligible": True,
+    },
+    "uterine_brother": {
+        "name": "Uterine brother",
+        "category": "fard",
+        "base_share": Fraction(1, 6),
+        "blocked_by": ["son", "grandson", "father", "grandfather", "full_brother", "full_sister", "consanguine_brother", "consanguine_sister"],
+        "radd_eligible": True,
     },
 }
 
 # ---------------------------------------------------------------------------
-# Data models
+# Pydantic models
 # ---------------------------------------------------------------------------
 
 class FaraidRequest(BaseModel):
@@ -131,22 +166,21 @@ class FaraidRequest(BaseModel):
     heirs: List[str] = Field(..., min_length=1, description="List of heir keys")
 
 
-class HeirShare(BaseModel):
+class FaraidStep(BaseModel):
     heir: str
-    name: str
     category: str
     fraction: str
     amount: str
     basis: str
     blocked_by: Optional[str] = None
+    awl_applied: bool = False
+    radd_applied: bool = False
 
 
 class FaraidResponse(BaseModel):
     estate: str
-    shares: List[HeirShare]
-    total_allocated: str
+    steps: List[FaraidStep]
     disclaimer: str
-    steps: List[str]
 
 
 # ---------------------------------------------------------------------------
@@ -156,165 +190,188 @@ class FaraidResponse(BaseModel):
 @dataclass
 class FaraidResult:
     shares: Dict[str, Fraction]
-    steps: List[str]
-    basis: Dict[str, str]
-    blocked: Dict[str, str]
+    steps: List[Dict[str, Any]]
+    awl_applied: bool = False
+    radd_applied: bool = False
 
 
-def _get_heir_def(key: str) -> Dict[str, Any]:
+def _get_heir(key: str) -> Dict[str, Any]:
     if key not in HEIRS:
         raise ValueError(f"Unknown heir: {key}")
     return HEIRS[key]
 
 
-def _apply_hajb(heirs: List[str]) -> Tuple[Dict[str, str], List[str]]:
-    """Return (blocked_by_map, active_heirs)."""
-    blocked_by: Dict[str, str] = {}
-    active = []
-    for key in heirs:
-        heir = _get_heir_def(key)
-        blocker = None
-        for b in heir["blocked_by"]:
-            if b in heirs:
-                blocker = b
-                break
-        if blocker:
-            blocked_by[key] = blocker
-        else:
-            active.append(key)
-    return blocked_by, active
+def _is_blocked(heir_key: str, present_heirs: List[str]) -> Optional[str]:
+    """Return the key of the blocker if this heir is blocked, else None."""
+    heir = _get_heir(heir_key)
+    for blocker in heir["blocked_by"]:
+        if blocker in present_heirs:
+            return blocker
+    return None
 
 
 def distribute(estate: Decimal, heirs: List[str]) -> FaraidResult:
-    """Compute faraid shares for the given heirs and estate."""
-    steps: List[str] = []
-    basis: Dict[str, str] = {}
-    blocked: Dict[str, str] = {}
+    """
+    Compute faraid shares for the given heirs and estate.
 
+    Implements furud (fixed shares), asaba (residuary), awl (proportional
+    reduction when shares over-subscribe), radd (return of surplus when
+    under-subscribed and no asaba), and hajb (blocking).
+
+    Uses exact rational arithmetic (Fraction) throughout.
+    """
     # Validate heirs
     for h in heirs:
-        _get_heir_def(h)
+        _get_heir(h)
 
-    # Apply hajb
-    blocked, active = _apply_hajb(heirs)
-    if blocked:
-        for k, b in blocked.items():
-            steps.append(f"Hajb: {HEIRS[k]['name']} is blocked by {HEIRS[b]['name']}.")
-            basis[k] = HAJB_BASIS
+    # Apply hajb: remove blocked heirs
+    active_heirs = []
+    blocked_info = {}
+    for h in heirs:
+        blocker = _is_blocked(h, heirs)
+        if blocker:
+            blocked_info[h] = blocker
+        else:
+            active_heirs.append(h)
 
-    # Determine fard and asaba heirs
-    fard_keys = [k for k in active if _get_heir_def(k)["category"] == "fard"]
-    asaba_keys = [k for k in active if _get_heir_def(k)["category"] == "asaba"]
+    # Determine if there is any asaba heir (excluding those blocked)
+    has_asaba = any(
+        _get_heir(h)["category"] == "asaba" for h in active_heirs
+    )
 
-    # Compute fixed shares
+    # Compute fixed shares (furud)
+    # For multiple daughters/sisters, adjust the share: 2+ daughters get 2/3,
+    # 2+ sisters get 2/3, etc.
     fixed_shares: Dict[str, Fraction] = {}
-    for k in fard_keys:
-        heir = _get_heir_def(k)
-        share = heir["base_share"]
-        # Adjust for multiple heirs of the same type
-        # For daughters: 1 daughter = 1/2, 2+ daughters = 2/3
-        if k == "daughter":
-            daughters = [x for x in fard_keys if x == "daughter"]
-            if len(daughters) >= 2:
-                share = Fraction(2, 3)
-        if k == "full_sister":
-            sisters = [x for x in fard_keys if x == "full_sister"]
-            if len(sisters) >= 2:
-                share = Fraction(2, 3)
-        # Wife: 1/4 if no children, 1/8 if children
-        if k == "wife":
-            if any(x in active for x in ["son", "daughter", "grandson", "granddaughter"]):
-                share = Fraction(1, 8)
-        # Husband: 1/2 if no children, 1/4 if children
-        if k == "husband":
-            if any(x in active for x in ["son", "daughter", "grandson", "granddaughter"]):
-                share = Fraction(1, 4)
-        # Mother: 1/6 if children or multiple siblings, else 1/3
-        if k == "mother":
-            if any(x in active for x in ["son", "daughter", "grandson", "granddaughter"]) or \
-               sum(1 for x in active if x in ["full_brother", "full_sister", "half_brother", "half_sister"]) >= 2:
-                share = Fraction(1, 6)
-            else:
-                share = Fraction(1, 3)
-        fixed_shares[k] = share
-        basis[k] = QURAN_4_11 if k in ["daughter", "father", "mother", "grandfather", "grandmother"] else QURAN_4_12 if k in ["wife", "husband"] else QURAN_4_176
+    for h in active_heirs:
+        heir = _get_heir(h)
+        if heir["category"] == "fard":
+            base = heir["base_share"]
+            # Adjust for multiple heirs of the same type
+            count = sum(1 for x in active_heirs if x == h)
+            if count >= 2:
+                if h in ("daughter", "granddaughter", "full_sister", "consanguine_sister"):
+                    base = Fraction(2, 3)
+                elif h in ("uterine_sister", "uterine_brother"):
+                    base = Fraction(1, 3)
+            fixed_shares[h] = base
+        else:
+            fixed_shares[h] = Fraction(0)
 
-    # Sum fixed shares
+    # Sum of fixed shares
     total_fixed = sum(fixed_shares.values(), Fraction(0))
 
-    # Determine if asaba exists
-    has_asaba = len(asaba_keys) > 0
+    # Determine the common denominator and apply awl if needed
+    # We'll work with a common denominator that is the LCM of all denominators
+    # For simplicity, we use the product of denominators (or a smarter LCM).
+    denominators = [f.denominator for f in fixed_shares.values() if f != 0]
+    if not denominators:
+        common_den = 1
+    else:
+        # LCM of denominators
+        from math import gcd
+        common_den = 1
+        for d in denominators:
+            common_den = common_den * d // gcd(common_den, d)
 
-    # Awl: if total_fixed > 1, scale down
-    awl_factor = Fraction(1)
-    if total_fixed > 1:
-        awl_factor = Fraction(1, total_fixed)
-        steps.append(f"Awl applied: fixed shares sum to {total_fixed}, scaling by {awl_factor}.")
-        for k in fixed_shares:
-            fixed_shares[k] *= awl_factor
-            basis[k] += " " + AWL_BASIS
+    # Convert fixed shares to numerator over common_den
+    fixed_numerators = {h: f.numerator * (common_den // f.denominator) for h, f in fixed_shares.items() if f != 0}
+    total_fixed_num = sum(fixed_numerators.values(), 0)
 
-    # Radd: if total_fixed < 1 and no asaba, return surplus to eligible fard heirs
+    awl_applied = False
     radd_applied = False
-    if total_fixed < 1 and not has_asaba:
-        eligible = [k for k in fard_keys if _get_heir_def(k)["radd_eligible"]]
-        if eligible:
-            surplus = Fraction(1) - total_fixed
-            radd_applied = True
-            steps.append(f"Radd applied: surplus {surplus} returned to eligible heirs.")
-            # Distribute surplus proportionally among eligible
-            eligible_shares = {k: fixed_shares[k] for k in eligible}
-            total_eligible = sum(eligible_shares.values(), Fraction(0))
-            for k in eligible:
-                fixed_shares[k] += surplus * (eligible_shares[k] / total_eligible)
-                basis[k] += " " + RADD_BASIS
 
-    # Distribute residue to asaba (2:1 male:female)
-    if has_asaba:
-        # Determine if there are female asaba (daughters/sisters) that become asaba with males
-        # For simplicity, treat all asaba as taking residue, with males twice females
-        # This is a simplified model; full implementation would handle daughters becoming asaba with sons
-        # For now, asaba heirs take the residue equally if all male, or 2:1 if mixed
-        residue = Fraction(1) - sum(fixed_shares.values(), Fraction(0))
-        if residue > 0:
-            # Count males and females among asaba
-            males = [k for k in asaba_keys if k in ["son", "full_brother", "grandson"]]
-            females = [k for k in asaba_keys if k in ["daughter", "full_sister"]]
-            # If there are both, daughters/sisters become asaba with males
-            # For simplicity, we treat all asaba as taking residue with 2:1 ratio
-            # This is a simplification; full implementation would handle specific cases
-            # For now, we just divide residue equally among asaba if all male, else 2:1
-            if females and males:
-                # Each male gets 2 units, each female 1 unit
-                total_units = 2 * len(males) + len(females)
-                unit = residue / total_units
-                for k in asaba_keys:
-                    if k in males:
-                        fixed_shares[k] = 2 * unit
+    if total_fixed_num > common_den:
+        # Awl: increase the denominator to total_fixed_num
+        awl_applied = True
+        new_den = total_fixed_num
+        # Each share becomes numerator / new_den
+        shares = {h: Fraction(num, new_den) for h, num in fixed_numerators.items()}
+        # Asaba get nothing
+        for h in active_heirs:
+            if _get_heir(h)["category"] == "asaba":
+                shares[h] = Fraction(0)
+    else:
+        # No awl; fixed shares as is
+        shares = {h: Fraction(num, common_den) for h, num in fixed_numerators.items()}
+        # Asaba get the residue
+        residue = Fraction(1) - sum(shares.values(), Fraction(0))
+        if has_asaba:
+            # Distribute residue among asaba, male gets twice female
+            asaba_heirs = [h for h in active_heirs if _get_heir(h)["category"] == "asaba"]
+            # Compute weights: male=2, female=1
+            weights = {}
+            for h in asaba_heirs:
+                # Determine gender from heir key (simplistic: 'son', 'brother', 'grandson' are male)
+                male = h in ("son", "full_brother", "consanguine_brother", "grandson")
+                weights[h] = 2 if male else 1
+            total_weight = sum(weights.values())
+            for h in asaba_heirs:
+                shares[h] = residue * Fraction(weights[h], total_weight)
+        else:
+            # Radd: return surplus to eligible fard heirs (excluding spouse)
+            # Only if there is surplus and no asaba
+            surplus = Fraction(1) - sum(shares.values(), Fraction(0))
+            if surplus > 0:
+                radd_eligible = [h for h in active_heirs if _get_heir(h)["radd_eligible"]]
+                if radd_eligible:
+                    radd_applied = True
+                    # Distribute surplus proportionally to their fixed shares
+                    eligible_fixed = {h: shares[h] for h in radd_eligible}
+                    total_eligible = sum(eligible_fixed.values(), Fraction(0))
+                    if total_eligible > 0:
+                        for h in radd_eligible:
+                            shares[h] += surplus * Fraction(eligible_fixed[h], total_eligible)
                     else:
-                        fixed_shares[k] = unit
-                    basis[k] = "Asaba (residuary) — takes the residue after fixed shares."
+                        # If no eligible shares (shouldn't happen), give to all equally
+                        for h in radd_eligible:
+                            shares[h] += surplus / len(radd_eligible)
+
+    # Build steps
+    steps = []
+    for h in heirs:
+        if h in blocked_info:
+            steps.append({
+                "heir": h,
+                "category": "blocked",
+                "fraction": "0",
+                "amount": "0",
+                "basis": HAJB_BASIS,
+                "blocked_by": blocked_info[h],
+                "awl_applied": awl_applied,
+                "radd_applied": radd_applied,
+            })
+        else:
+            heir = _get_heir(h)
+            frac = shares.get(h, Fraction(0))
+            amount = estate * Decimal(frac.numerator) / Decimal(frac.denominator)
+            # Determine basis
+            if heir["category"] == "fard":
+                if h in ("wife", "husband"):
+                    basis = QURAN_4_12
+                elif h in ("daughter", "granddaughter", "full_sister", "consanguine_sister", "uterine_sister", "uterine_brother"):
+                    basis = QURAN_4_176 if "sister" in h or "brother" in h else QURAN_4_11
+                else:
+                    basis = QURAN_4_11
             else:
-                # All male or all female asaba
-                share = residue / len(asaba_keys)
-                for k in asaba_keys:
-                    fixed_shares[k] = share
-                    basis[k] = "Asaba (residuary) — takes the residue after fixed shares."
-            steps.append(f"Residue {residue} distributed to asaba heirs.")
+                basis = "Residuary (asaba) — the residue after fixed shares, per the Sunnah and consensus."
+            steps.append({
+                "heir": h,
+                "category": heir["category"],
+                "fraction": f"{frac.numerator}/{frac.denominator}",
+                "amount": str(amount),
+                "basis": basis,
+                "blocked_by": None,
+                "awl_applied": awl_applied,
+                "radd_applied": radd_applied,
+            })
 
-    # Ensure all active heirs have a share (if not assigned, assign 0)
-    for k in active:
-        if k not in fixed_shares:
-            fixed_shares[k] = Fraction(0)
-            basis[k] = "No share assigned."
-
-    # Convert to amounts
-    estate_frac = Fraction(estate)
-    shares_out: Dict[str, Fraction] = {}
-    for k, frac in fixed_shares.items():
-        shares_out[k] = frac
-
-    return FaraidResult(shares=shares_out, steps=steps, basis=basis, blocked=blocked)
+    return FaraidResult(
+        shares=shares,
+        steps=steps,
+        awl_applied=awl_applied,
+        radd_applied=radd_applied,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -333,28 +390,22 @@ async def faraid_endpoint(request: FaraidRequest) -> FaraidResponse:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    estate_frac = Fraction(request.estate)
-    shares = []
-    for key, frac in result.shares.items():
-        heir_def = _get_heir_def(key)
-        amount = estate_frac * frac
-        shares.append(
-            HeirShare(
-                heir=key,
-                name=heir_def["name"],
-                category=heir_def["category"],
-                fraction=str(frac),
-                amount=str(amount),
-                basis=result.basis.get(key, ""),
-                blocked_by=result.blocked.get(key),
-            )
+    steps = [
+        FaraidStep(
+            heir=s["heir"],
+            category=s["category"],
+            fraction=s["fraction"],
+            amount=s["amount"],
+            basis=s["basis"],
+            blocked_by=s.get("blocked_by"),
+            awl_applied=s["awl_applied"],
+            radd_applied=s["radd_applied"],
         )
+        for s in result.steps
+    ]
 
-    total_allocated = sum(result.shares.values(), Fraction(0))
     return FaraidResponse(
         estate=str(request.estate),
-        shares=shares,
-        total_allocated=str(total_allocated),
+        steps=steps,
         disclaimer=DISCLAIMER,
-        steps=result.steps,
     )
