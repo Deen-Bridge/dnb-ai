@@ -87,6 +87,8 @@ jobs:
       - name: Run memory integration tests
         run: pytest -q tests/test_memory_integration.py
 
+      - name: Run per-user personal context tests
+        run: pytest -q tests/test_personal_context.py
 
       - name: Run prompt registry and A/B experiment tests
         run: pytest -q tests/test_prompt_registry.py

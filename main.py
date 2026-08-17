@@ -69,7 +69,14 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from history import trim_history
-from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
+from memory import (
+    ChatSummary,
+    PersonalContext,
+    UserProfile,
+    build_personal_context,
+    create_memory_store,
+    render_user_context,
+)
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
     apply_updates,
@@ -393,6 +400,29 @@ async def purchase_retriever(
         return None
 
 
+async def personal_context_retriever(
+    prompt: str,
+    user_id: str | None,
+    auth_token: str | None,
+) -> PersonalContext | None:
+    """Retrieve this user's most-relevant platform records; never fail the turn.
+
+    Deny-by-default lives in ``build_personal_context``: an unauthenticated turn
+    (no ``user_id``/``auth_token``) returns None and touches no network. Any
+    retrieval error degrades to None so the answer is produced without it.
+    """
+    try:
+        return await build_personal_context(
+            prompt,
+            user_id=user_id,
+            auth_token=auth_token,
+            store=memory_store,
+        )
+    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
+        logger.warning("Personal context retrieval failed; answering without it: %s", exc)
+        return None
+
+
 def get_safety_settings() -> list[dict[str, str]]:
     return [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -703,6 +733,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
 
+            # Per-user retrieval: only this user's most-relevant records (deny by
+            # default without user_id/auth_token; ownership re-checked post-fetch).
+            personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
+
         # --- Memory lookup ---
         profile: UserProfile | None = None
         summary: ChatSummary | None = None
@@ -720,6 +754,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             and tafsir_context is None
             and zakat_context is None
             and purchase_context is None
+            and personal_context is None
             and request.user_id is None
             and SEMANTIC_CACHE_ENABLED
         )
@@ -788,6 +823,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
+            if personal_context is not None:
+                system_context += personal_context.prompt_block
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
@@ -1152,6 +1189,9 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
         # --- Purchase history ---
         purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
 
+        # --- Per-user personal context (deny by default without user_id/token) ---
+        personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
+
         async def event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
             nonlocal combined_text, chat_session
@@ -1222,6 +1262,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                     system_context += zakat_context.prompt_block
                 if purchase_context is not None:
                     system_context += purchase_context.prompt_block
+                if personal_context is not None:
+                    system_context += personal_context.prompt_block
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
