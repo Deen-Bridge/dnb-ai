@@ -51,6 +51,7 @@ from confidence import (
     thresholds as confidence_thresholds,
 )
 from config import get_settings
+from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -197,6 +198,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(faraid_router)
 app.include_router(study_router)
 # Worship utilities: prayer times and Hijri/Gregorian date conversion
 app.include_router(worship_router)
