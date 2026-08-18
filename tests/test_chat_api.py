@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -96,8 +97,9 @@ def test_ping_returns_ok():
 
 
 def test_chat_happy_path_preserves_history_for_same_session(fake_model):
-    first = client.post("/chat", json={"prompt": "What is salah?", "chat_id": "history-test"})
-    second = client.post("/chat", json={"prompt": "How many prayers are there?", "chat_id": "history-test"})
+    chat_id = str(uuid4())
+    first = client.post("/chat", json={"prompt": "What is salah?", "chat_id": chat_id})
+    second = client.post("/chat", json={"prompt": "How many prayers are there?", "chat_id": chat_id})
 
     assert first.status_code == 200
     assert second.status_code == 200

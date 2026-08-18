@@ -11,6 +11,7 @@ handler already reads, so no test here needs a Gemini key or network.
 """
 
 import re
+import uuid
 from unittest.mock import MagicMock
 
 import pytest
@@ -59,7 +60,8 @@ def mock_model_returning(text: str):
 
 def ask(monkeypatch, answer_text: str, chat_id: str, prompt: str = "What does Islam say about patience?"):
     monkeypatch.setattr(main, "get_model", lambda: mock_model_returning(answer_text))
-    response = client.post("/chat", json={"prompt": prompt, "chat_id": chat_id})
+    valid_chat_id = str(uuid.uuid5(uuid.NAMESPACE_URL, chat_id))
+    response = client.post("/chat", json={"prompt": prompt, "chat_id": valid_chat_id})
     assert response.status_code == 200, response.text
     return response.json()
 
