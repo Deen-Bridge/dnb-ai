@@ -13,7 +13,6 @@ import pytest
 from semantic_cache import get_keyed_cache
 from tafsir import (
     DEFAULT_TAFSIR_KEYS,
-    _normalize_surah_name,
     MAX_AYAT_PER_REQUEST,
     TAFSIR_REGISTRY,
     AyahRef,
@@ -22,6 +21,7 @@ from tafsir import (
     TafsirRequest,
     TafsirWork,
     VerseText,
+    _normalize_surah_name,
     build_chat_tafsir_context,
     build_tafsir_prompt_block,
     build_tafsir_response,
@@ -69,7 +69,7 @@ IBN_KATHIR_103 = {
     "slug": "en-tafisr-ibn-kathir",
     "translated_name": {"name": "Ibn Kathir (Abridged)", "language_name": "english"},
     "text": "<h2>Al-'Asr</h2><p>Al-'Asr is the time in which the deeds of "
-            "the children of Adam occur, whether good or bad.</p>",
+    "the children of Adam occur, whether good or bad.</p>",
 }
 
 SAADI_103 = {
@@ -79,7 +79,7 @@ SAADI_103 = {
     "slug": "ar-tafseer-al-saddi",
     "translated_name": {"name": "السعدي Al-Sa'di", "language_name": "arabic"},
     "text": "<p>Allah swears by time, that mankind is at a loss except those "
-            "who possess the four described qualities.</p>",
+    "who possess the four described qualities.</p>",
 }
 
 TABARI_103 = {
@@ -89,8 +89,8 @@ TABARI_103 = {
     "slug": "ar-tafsir-al-tabari",
     "translated_name": {"name": "Tafsir al-Tabari", "language_name": "arabic"},
     "text": "<p>The people of interpretation differed over the meaning of "
-            "al-'Asr: some held it to be the age of time itself, others the "
-            "hour of the afternoon prayer.</p>",
+    "al-'Asr: some held it to be the age of time itself, others the "
+    "hour of the afternoon prayer.</p>",
 }
 
 EMPTY_QURTUBI_103 = {
@@ -133,13 +133,16 @@ class TestSurahIndex:
     def test_total_ayah_count_is_kufan(self):
         assert sum(s.ayah_count for s in load_surah_index()) == 6236
 
-    @pytest.mark.parametrize("number,name,count", [
-        (1, "Al-Fatihah", 7),
-        (2, "Al-Baqarah", 286),
-        (9, "At-Tawbah", 129),
-        (103, "Al-'Asr", 3),
-        (114, "An-Nas", 6),
-    ])
+    @pytest.mark.parametrize(
+        "number,name,count",
+        [
+            (1, "Al-Fatihah", 7),
+            (2, "Al-Baqarah", 286),
+            (9, "At-Tawbah", 129),
+            (103, "Al-'Asr", 3),
+            (114, "An-Nas", 6),
+        ],
+    )
     def test_known_surahs(self, number, name, count):
         surah = surah_by_number(number)
         assert surah is not None
@@ -150,19 +153,22 @@ class TestSurahIndex:
     def test_out_of_range_number_returns_none(self, number):
         assert surah_by_number(number) is None
 
-    @pytest.mark.parametrize("name,expected", [
-        ("Al-'Asr", 103),
-        ("al asr", 103),
-        ("asr", 103),
-        ("Surah al-Asr", 103),
-        ("Al-Baqarah", 2),
-        ("baqara", 2),
-        ("Al-Kahf", 18),
-        ("Ya-Sin", 36),
-        ("yaseen", 36),
-        ("An-Nas", 114),
-        ("الفاتحة", 1),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("Al-'Asr", 103),
+            ("al asr", 103),
+            ("asr", 103),
+            ("Surah al-Asr", 103),
+            ("Al-Baqarah", 2),
+            ("baqara", 2),
+            ("Al-Kahf", 18),
+            ("Ya-Sin", 36),
+            ("yaseen", 36),
+            ("An-Nas", 114),
+            ("الفاتحة", 1),
+        ],
+    )
     def test_lookup_by_name(self, name, expected):
         surah = surah_by_name(name)
         assert surah is not None and surah.number == expected
@@ -170,30 +176,50 @@ class TestSurahIndex:
     def test_unknown_name_returns_none(self):
         assert surah_by_name("Al-Nonexistent") is None
 
-    @pytest.mark.parametrize("name,expected", [
-        # Sun-letter assimilation: the article's lām doubles the consonant, so
-        # the article is not spelled "al" and cannot be stripped as if it were.
-        ("At-Tawbah", 9), ("at-tawbah", 9), ("tawbah", 9),
-        ("As-Sajdah", 32), ("Al-Sajdah", 32), ("sajdah", 32),
-        ("Ash-Shams", 91), ("shams", 91),
-        ("As-Saff", 61), ("saff", 61),
-        ("Ar-Rahman", 55), ("rahman", 55),
-        ("An-Nur", 24), ("nur", 24),
-        ("Adh-Dhariyat", 51), ("dhariyat", 51),
-        ("At-Tin", 95), ("tin", 95),
-        ("Az-Zumar", 39), ("zumar", 39),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            # Sun-letter assimilation: the article's lām doubles the consonant, so
+            # the article is not spelled "al" and cannot be stripped as if it were.
+            ("At-Tawbah", 9),
+            ("at-tawbah", 9),
+            ("tawbah", 9),
+            ("As-Sajdah", 32),
+            ("Al-Sajdah", 32),
+            ("sajdah", 32),
+            ("Ash-Shams", 91),
+            ("shams", 91),
+            ("As-Saff", 61),
+            ("saff", 61),
+            ("Ar-Rahman", 55),
+            ("rahman", 55),
+            ("An-Nur", 24),
+            ("nur", 24),
+            ("Adh-Dhariyat", 51),
+            ("dhariyat", 51),
+            ("At-Tin", 95),
+            ("tin", 95),
+            ("Az-Zumar", 39),
+            ("zumar", 39),
+        ],
+    )
     def test_sun_letter_names_resolve(self, name, expected):
         surah = surah_by_name(name)
         assert surah is not None and surah.number == expected
 
-    @pytest.mark.parametrize("name,expected", [
-        # "an"/"al" here are part of the name, not the article — stripping them
-        # would turn Al-Anfal into "fal".
-        ("Al-Anfal", 8), ("anfal", 8),
-        ("An-Naml", 27), ("naml", 27),
-        ("An-Nahl", 16), ("nahl", 16),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            # "an"/"al" here are part of the name, not the article — stripping them
+            # would turn Al-Anfal into "fal".
+            ("Al-Anfal", 8),
+            ("anfal", 8),
+            ("An-Naml", 27),
+            ("naml", 27),
+            ("An-Nahl", 16),
+            ("nahl", 16),
+        ],
+    )
     def test_names_that_only_look_like_articles(self, name, expected):
         surah = surah_by_name(name)
         assert surah is not None and surah.number == expected
@@ -216,9 +242,7 @@ class TestSurahIndex:
         for surah in load_surah_index():
             for label in [surah.name, surah.arabic_name, *surah.aliases]:
                 key = _normalize_surah_name(label)
-                assert seen.setdefault(key, surah.number) == surah.number, (
-                    f"{label!r} collides with surah {seen[key]}"
-                )
+                assert seen.setdefault(key, surah.number) == surah.number, f"{label!r} collides with surah {seen[key]}"
 
 
 # ---------------------------------------------------------------------------
@@ -248,15 +272,18 @@ class TestReferenceValidation:
         with pytest.raises(InvalidReference):
             validate_reference(103, ayah)
 
-    @pytest.mark.parametrize("raw,expected", [
-        ("103:1", ["103:1"]),
-        (" 103 : 1 ", ["103:1"]),
-        ("103.1", ["103:1"]),
-        ("103:1-3", ["103:1", "103:2", "103:3"]),
-        ("103:1 to 3", ["103:1", "103:2", "103:3"]),
-        ("Al-Asr 1-3", ["103:1", "103:2", "103:3"]),
-        ("Surah al-Baqarah 255", ["2:255"]),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("103:1", ["103:1"]),
+            (" 103 : 1 ", ["103:1"]),
+            ("103.1", ["103:1"]),
+            ("103:1-3", ["103:1", "103:2", "103:3"]),
+            ("103:1 to 3", ["103:1", "103:2", "103:3"]),
+            ("Al-Asr 1-3", ["103:1", "103:2", "103:3"]),
+            ("Surah al-Baqarah 255", ["2:255"]),
+        ],
+    )
     def test_parse_reference(self, raw, expected):
         assert [ref.key for ref in parse_reference(raw)] == expected
 
@@ -284,16 +311,19 @@ class TestReferenceValidation:
 
 
 class TestTafsirKeys:
-    @pytest.mark.parametrize("raw,expected", [
-        ("ibn-kathir", "ibn-kathir"),
-        ("Ibn Kathir", "ibn-kathir"),
-        ("ibnkathir", "ibn-kathir"),
-        ("KATHIR", "ibn-kathir"),
-        ("al-tabari", "tabari"),
-        ("Sa'di", "saadi"),
-        ("qurtubi", "qurtubi"),
-        ("maariful-quran", "maarif-ul-quran"),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("ibn-kathir", "ibn-kathir"),
+            ("Ibn Kathir", "ibn-kathir"),
+            ("ibnkathir", "ibn-kathir"),
+            ("KATHIR", "ibn-kathir"),
+            ("al-tabari", "tabari"),
+            ("Sa'di", "saadi"),
+            ("qurtubi", "qurtubi"),
+            ("maariful-quran", "maarif-ul-quran"),
+        ],
+    )
     def test_normalize(self, raw, expected):
         assert normalize_tafsir_key(raw) == expected
 
@@ -384,57 +414,57 @@ class TestPayloadParsing:
 class TestFetchTafsirs:
     def test_returns_attributed_entries(self):
         source = make_source()
-        available, unavailable = run(fetch_tafsirs_for_ayah(
-            AyahRef(surah=103, ayah=2), ["ibn-kathir", "saadi"], "en", source=source
-        ))
+        available, unavailable = run(
+            fetch_tafsirs_for_ayah(AyahRef(surah=103, ayah=2), ["ibn-kathir", "saadi"], "en", source=source)
+        )
         assert [t.key for t in available] == ["ibn-kathir", "saadi"]
         assert all(t.name and t.author and t.language for t in available)
         assert unavailable == []
 
     def test_missing_entry_degrades_to_unavailable(self):
         source = make_source()
-        available, unavailable = run(fetch_tafsirs_for_ayah(
-            AyahRef(surah=103, ayah=2), ["ibn-kathir", "qurtubi"], "en", source=source
-        ))
+        available, unavailable = run(
+            fetch_tafsirs_for_ayah(AyahRef(surah=103, ayah=2), ["ibn-kathir", "qurtubi"], "en", source=source)
+        )
         assert [t.key for t in available] == ["ibn-kathir"]
         assert [u.key for u in unavailable] == ["qurtubi"]
         assert "103:2" in unavailable[0].reason
 
     def test_empty_text_degrades_to_unavailable(self):
         source = make_source(tafsirs={("ar-tafseer-al-qurtubi", "103:2"): EMPTY_QURTUBI_103})
-        available, unavailable = run(fetch_tafsirs_for_ayah(
-            AyahRef(surah=103, ayah=2), ["qurtubi"], "en", source=source
-        ))
+        available, unavailable = run(
+            fetch_tafsirs_for_ayah(AyahRef(surah=103, ayah=2), ["qurtubi"], "en", source=source)
+        )
         assert available == []
         assert "no commentary text" in unavailable[0].reason
 
     def test_language_fallback_labels_actual_language(self):
         """al-Sa'di has no English edition; the Arabic text is labelled Arabic."""
         source = make_source()
-        available, _ = run(fetch_tafsirs_for_ayah(
-            AyahRef(surah=103, ayah=2), ["saadi"], "en", source=source
-        ))
+        available, _ = run(fetch_tafsirs_for_ayah(AyahRef(surah=103, ayah=2), ["saadi"], "en", source=source))
         assert available[0].language == "arabic"
         assert source.tafsir_calls == [("ar-tafseer-al-saddi", "103:2")]
 
     def test_language_fallback_disabled_marks_unavailable(self):
         source = make_source()
-        available, unavailable = run(fetch_tafsirs_for_ayah(
-            AyahRef(surah=103, ayah=2),
-            ["saadi"],
-            "en",
-            allow_language_fallback=False,
-            source=source,
-        ))
+        available, unavailable = run(
+            fetch_tafsirs_for_ayah(
+                AyahRef(surah=103, ayah=2),
+                ["saadi"],
+                "en",
+                allow_language_fallback=False,
+                source=source,
+            )
+        )
         assert available == []
         assert "Not available in 'en'" in unavailable[0].reason
         assert source.tafsir_calls == []
 
     def test_unknown_key_is_skipped(self):
         source = make_source()
-        available, unavailable = run(fetch_tafsirs_for_ayah(
-            AyahRef(surah=103, ayah=2), ["not-a-real-tafsir"], "en", source=source
-        ))
+        available, unavailable = run(
+            fetch_tafsirs_for_ayah(AyahRef(surah=103, ayah=2), ["not-a-real-tafsir"], "en", source=source)
+        )
         assert available == [] and unavailable == []
 
     def test_second_lookup_is_served_from_cache(self):
@@ -460,9 +490,7 @@ class TestFetchTafsirs:
 class TestBuildResponse:
     def test_single_ayah_response(self):
         source = make_source()
-        response = run(build_tafsir_response(
-            TafsirRequest(reference="103:2", tafsirs=["ibn-kathir", "saadi"]), source
-        ))
+        response = run(build_tafsir_response(TafsirRequest(reference="103:2", tafsirs=["ibn-kathir", "saadi"]), source))
         assert response.reference == "103:2"
         assert len(response.ayat) == 1
         ayah = response.ayat[0]
@@ -484,9 +512,7 @@ class TestBuildResponse:
     def test_diverging_tafsirs_are_both_surfaced(self):
         """al-Tabari reports a disagreement al-Sa'di does not — both are kept."""
         source = make_source()
-        response = run(build_tafsir_response(
-            TafsirRequest(reference="103:2", tafsirs=["tabari", "saadi"]), source
-        ))
+        response = run(build_tafsir_response(TafsirRequest(reference="103:2", tafsirs=["tabari", "saadi"]), source))
         texts = {t.key: t.text for t in response.ayat[0].tafsirs}
         assert set(texts) == {"tabari", "saadi"}
         assert "differed" in texts["tabari"]
@@ -494,29 +520,23 @@ class TestBuildResponse:
 
     def test_unavailable_tafsir_does_not_break_response(self):
         source = make_source()
-        response = run(build_tafsir_response(
-            TafsirRequest(reference="103:2", tafsirs=["ibn-kathir", "qurtubi"]), source
-        ))
+        response = run(
+            build_tafsir_response(TafsirRequest(reference="103:2", tafsirs=["ibn-kathir", "qurtubi"]), source)
+        )
         ayah = response.ayat[0]
         assert [t.key for t in ayah.tafsirs] == ["ibn-kathir"]
         assert [u.key for u in ayah.unavailable] == ["qurtubi"]
 
     def test_missing_verse_text_degrades(self):
-        source = FakeTafsirSource(
-            tafsirs={("en-tafisr-ibn-kathir", "103:2"): IBN_KATHIR_103}
-        )
-        response = run(build_tafsir_response(
-            TafsirRequest(reference="103:2", tafsirs=["ibn-kathir"]), source
-        ))
+        source = FakeTafsirSource(tafsirs={("en-tafisr-ibn-kathir", "103:2"): IBN_KATHIR_103})
+        response = run(build_tafsir_response(TafsirRequest(reference="103:2", tafsirs=["ibn-kathir"]), source))
         ayah = response.ayat[0]
         assert ayah.arabic is None and ayah.translation is None
         assert ayah.tafsirs[0].key == "ibn-kathir"
 
     def test_range_returns_one_entry_per_ayah(self):
         source = make_source()
-        response = run(build_tafsir_response(
-            TafsirRequest(reference="103:1-3", tafsirs=["ibn-kathir"]), source
-        ))
+        response = run(build_tafsir_response(TafsirRequest(reference="103:1-3", tafsirs=["ibn-kathir"]), source))
         assert [a.ayah for a in response.ayat] == ["103:1", "103:2", "103:3"]
 
     def test_invalid_reference_raises(self):
@@ -531,13 +551,11 @@ class TestBuildResponse:
 
 class TestEndpoint:
     def test_valid_reference_returns_attributed_tafsirs(self):
-        from tafsir import get_tafsir, set_source, QuranComTafsirSource
+        from tafsir import QuranComTafsirSource, get_tafsir, set_source
 
         set_source(make_source())
         try:
-            response = run(get_tafsir(
-                TafsirRequest(reference="103:2", tafsirs=["ibn-kathir", "saadi"])
-            ))
+            response = run(get_tafsir(TafsirRequest(reference="103:2", tafsirs=["ibn-kathir", "saadi"])))
         finally:
             set_source(QuranComTafsirSource())
         assert len(response.ayat[0].tafsirs) == 2
@@ -546,7 +564,7 @@ class TestEndpoint:
     def test_invalid_reference_returns_400(self, reference):
         from fastapi import HTTPException
 
-        from tafsir import get_tafsir, set_source, QuranComTafsirSource
+        from tafsir import QuranComTafsirSource, get_tafsir, set_source
 
         set_source(make_source())
         try:
@@ -573,34 +591,43 @@ class TestEndpoint:
 
 
 class TestIntentDetection:
-    @pytest.mark.parametrize("prompt,expected", [
-        ("What does Surah al-Asr mean?", ["103:1", "103:2", "103:3"]),
-        ("Explain 2:255", ["2:255"]),
-        ("What is the tafsir of 2:255?", ["2:255"]),
-        ("Explain surah al-baqarah 255", ["2:255"]),
-        ("What does 103:1-2 mean?", ["103:1", "103:2"]),
-        ("Give me the commentary on Al-Ikhlas 1", ["112:1"]),
-    ])
+    @pytest.mark.parametrize(
+        "prompt,expected",
+        [
+            ("What does Surah al-Asr mean?", ["103:1", "103:2", "103:3"]),
+            ("Explain 2:255", ["2:255"]),
+            ("What is the tafsir of 2:255?", ["2:255"]),
+            ("Explain surah al-baqarah 255", ["2:255"]),
+            ("What does 103:1-2 mean?", ["103:1", "103:2"]),
+            ("Give me the commentary on Al-Ikhlas 1", ["112:1"]),
+        ],
+    )
     def test_detects_verse_questions(self, prompt, expected):
         assert [r.key for r in detect_ayah_references(prompt)] == expected
 
-    @pytest.mark.parametrize("prompt", [
-        "Hello, how are you?",
-        "How do I perform wudu?",
-        "What time is Maghrib in Lagos?",
-        "",
-        "Tell me about Surah al-Baqarah",  # no explanation cue
-    ])
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Hello, how are you?",
+            "How do I perform wudu?",
+            "What time is Maghrib in Lagos?",
+            "",
+            "Tell me about Surah al-Baqarah",  # no explanation cue
+        ],
+    )
     def test_ignores_non_verse_questions(self, prompt):
         assert detect_ayah_references(prompt) == []
 
-    @pytest.mark.parametrize("prompt", [
-        # Names of Allah and personal names share spelling with surah names;
-        # without the word "surah" an explicit ayah number is required.
-        "What does ar-Rahman mean?",
-        "What does the name Muhammad mean?",
-        "Explain the meaning of Maryam as a name",
-    ])
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            # Names of Allah and personal names share spelling with surah names;
+            # without the word "surah" an explicit ayah number is required.
+            "What does ar-Rahman mean?",
+            "What does the name Muhammad mean?",
+            "Explain the meaning of Maryam as a name",
+        ],
+    )
     def test_bare_names_are_not_read_as_surah_references(self, prompt):
         assert detect_ayah_references(prompt) == []
 
@@ -608,13 +635,16 @@ class TestIntentDetection:
         refs = detect_ayah_references("What does Surah al-Baqarah mean?")
         assert [r.key for r in refs] == ["2:1"]
 
-    @pytest.mark.parametrize("prompt,expected", [
-        ("Explain surah at-tawbah 5", ["9:5"]),
-        ("What does surah as-sajdah 5 mean?", ["32:5"]),
-        ("Explain surah ash-shams 1", ["91:1"]),
-        ("What is the tafsir of As-Saff 4?", ["61:4"]),
-        ("Explain surah al-anfal 1", ["8:1"]),
-    ])
+    @pytest.mark.parametrize(
+        "prompt,expected",
+        [
+            ("Explain surah at-tawbah 5", ["9:5"]),
+            ("What does surah as-sajdah 5 mean?", ["32:5"]),
+            ("Explain surah ash-shams 1", ["91:1"]),
+            ("What is the tafsir of As-Saff 4?", ["61:4"]),
+            ("Explain surah al-anfal 1", ["8:1"]),
+        ],
+    )
     def test_detects_sun_letter_surah_names(self, prompt, expected):
         assert [r.key for r in detect_ayah_references(prompt)] == expected
 
@@ -701,9 +731,7 @@ class TestChatIntegration:
                 return VerseText()
 
         started = time.monotonic()
-        context = run(build_chat_tafsir_context(
-            "Explain 103:2", "en", SlowSource(), timeout=0.05
-        ))
+        context = run(build_chat_tafsir_context("Explain 103:2", "en", SlowSource(), timeout=0.05))
         assert context is None
         assert time.monotonic() - started < 2
 
@@ -719,16 +747,9 @@ class TestChatIntegration:
                 await asyncio.sleep(0.05)
                 return await super().fetch_verse(verse_key, language)
 
-        source = SlowishSource(
-            tafsirs={
-                ("en-tafisr-ibn-kathir", f"103:{n}"): IBN_KATHIR_103
-                for n in (1, 2, 3)
-            }
-        )
+        source = SlowishSource(tafsirs={("en-tafisr-ibn-kathir", f"103:{n}"): IBN_KATHIR_103 for n in (1, 2, 3)})
         started = time.monotonic()
-        context = run(build_chat_tafsir_context(
-            "What does Surah al-Asr mean?", "en", source, timeout=None
-        ))
+        context = run(build_chat_tafsir_context("What does Surah al-Asr mean?", "en", source, timeout=None))
         elapsed = time.monotonic() - started
         assert context is not None and len(context.ayat) == 3
         # 3 ayat x (verse + 4 works) x 50ms would be 750ms if serialized.

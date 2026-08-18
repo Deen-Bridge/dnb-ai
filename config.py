@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
+        # Many project settings live in .env but are consumed directly via
+        # os.getenv by the module that owns them (redis, tafsir, review, …).
+        # Treat anything not declared here as ignorable.
+        extra="ignore",
     )
 
     gemini_api_key: str

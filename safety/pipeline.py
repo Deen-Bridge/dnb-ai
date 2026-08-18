@@ -1,9 +1,9 @@
 """A single orchestration seam for input and output safety stages."""
 
-from dataclasses import dataclass
 import inspect
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from time import perf_counter
-from typing import Callable, List, Optional
 
 from .input_gate import InputGate
 from .output_check import OutputCheck
@@ -12,10 +12,10 @@ from .output_check import OutputCheck
 @dataclass(frozen=True)
 class SafetyResult:
     text: str
-    category_id: Optional[str]
+    category_id: str | None
     action: str
     confidence: float
-    stages_fired: List[str]
+    stages_fired: list[str]
     latency_ms: float
     generator_called: bool
 
@@ -30,10 +30,11 @@ class SafetyPipeline:
         decision = self.input_gate.evaluate(prompt)
         return self._complete(prompt, generator, decision, started)
 
-    async def run_async(
-        self, prompt: str, generator: Callable[[str], str]
-    ) -> SafetyResult:
-        """Run the pipeline while keeping classification off the event loop."""
+    async def run_async(self, prompt: str, generator: Callable[[str], str | Awaitable[str]]) -> SafetyResult:
+        """Run the pipeline while keeping classification off the event loop.
+
+        ``generator`` may be sync or async; the async path is awaited.
+        """
         started = perf_counter()
         decision = await self.input_gate.evaluate_async(prompt)
         return await self._complete_async(prompt, generator, decision, started)

@@ -1,6 +1,11 @@
 # Environment variables
 .env
 
+# Firebase service-account keys — NEVER commit these (they grant full access)
+*firebase-adminsdk*.json
+*service-account*.json
+firebase-service-account.json
+
 # Python
 __pycache__/
 *.py[cod]
@@ -26,7 +31,11 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 ENV/
+.venv_linux/
+venv_linux/
+
 
 # IDE
 .idea/
@@ -38,3 +47,15 @@ ENV/
 *.log 
 # Scholar-review export (contains user questions)
 data/review/
+venv/
+.DS_Store
+
+# Local session store (in-memory fallback persistence)
+data/store.json
+
+# Local feedback database (SQLite fallback store)
+feedback.db
+feedback.db-*
+
+# Committed virtual environments are machine-specific — never commit them
+venv_linux/

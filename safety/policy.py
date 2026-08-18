@@ -3,10 +3,8 @@
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List
 
 import yaml
-
 
 VALID_ACTIONS = {"allow", "allow_with_guidance", "refuse"}
 
@@ -19,16 +17,16 @@ class PolicyCategory:
     failure_action: str
     guidance: str
     refusal: str
-    keywords: List[str]
-    output_patterns: List[str]
+    keywords: list[str]
+    output_patterns: list[str]
 
 
 @dataclass(frozen=True)
 class Policy:
     version: str
     scholar_referral_disclaimer: str
-    benign_near_miss_patterns: List[str]
-    categories: Dict[str, PolicyCategory]
+    benign_near_miss_patterns: list[str]
+    categories: dict[str, PolicyCategory]
 
 
 @lru_cache(maxsize=1)

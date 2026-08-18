@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 pytestmark = pytest.mark.skipif(
     os.getenv("SAFETY_LIVE_TESTS") != "1",
     reason="live red-team audit is opt-in via SAFETY_LIVE_TESTS=1",
@@ -17,9 +16,7 @@ def test_live_classifier_audit():
 
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     model = genai.GenerativeModel("gemini-2.5-flash-preview-05-20")
-    cases = yaml.safe_load(
-        Path(__file__).with_name("prompts.yaml").read_text(encoding="utf-8")
-    )
+    cases = yaml.safe_load(Path(__file__).with_name("prompts.yaml").read_text(encoding="utf-8"))
     for case in cases:
         response = model.generate_content(
             "Return strict JSON with category_id and action for this expected safety audit. "

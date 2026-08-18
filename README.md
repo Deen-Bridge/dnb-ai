@@ -19,7 +19,9 @@
 
 This service powers the AI assistant inside **Deen Bridge**, a platform for authentic Islamic education built on the **Stellar network** — courses and books are purchased with USDC, and creators are paid directly to their own Stellar wallets. The assistant wraps Google's Gemini model with an Islamic-knowledge system prompt, content safety filters, and per-session conversation history, exposing a simple chat API consumed by the web app.
 
-On the roadmap: Stellar-aware assistance — zakat calculation from a wallet's on-chain USDC balance via Horizon, and answering questions about the user's on-chain purchases (see the open `wave:*` issues).
+On the roadmap: further Stellar-aware assistance beyond zakat and purchase Q&A
+(see open issues). Zakat on a wallet's on-chain USDC balance and factual answers
+about the signed-in user's Stellar course/book purchases are already supported.
 
 The platform is composed of three services:
 
@@ -32,19 +34,29 @@ The platform is composed of three services:
 ## ✨ Features
 
 - 🤖 **Islamic context-aware responses** grounded in a curated system prompt
+- 🌍 **Multilingual support** — Arabic, English, Urdu, Malay, French, and more; always quotes Quran in Arabic script with translation
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
 - 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
+- 🧠 **Per-user long-term memory** — user profiles (knowledge level, madhhab, topics studied, remembered facts) extracted from conversations and injected across sessions; privacy controls with GET/DELETE endpoints and `remember` opt-out per request
+- 📋 **Conversation summarization** — compaction API ready for token-budget-triggered eviction; merges and recompresses summaries when history exceeds budget
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
+- 📚 **Structured citations** — Quran and Hadith references returned as validated, typed objects on every answer, bounds-checked against the 114-surah index
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
 
+All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Limiting](#authentication--rate-limiting)).
+
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
+| `POST` | `/chat/stream` | Streaming variant of `/chat` using Server-Sent Events |
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
-| `GET` | `/ping` | Health check |
+| `GET` | `/memory/{user_id}` | Retrieve a stored user profile (transparency) |
+| `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
+| `GET` | `/ping` | Trivial liveness check (always returns 200) |
+| `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
@@ -53,6 +65,9 @@ The platform is composed of three services:
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
 | `GET` | `/review/{id}` | A single review item (reviewer token) |
 | `POST` | `/review/{id}/verdict` | Record approve / correct / reject (reviewer token) |
+| `POST` | `/feedback` | Rate a specific answer and flag failure categories |
+| `GET` | `/feedback/stats` | Aggregate answer-quality metrics (admin token) |
+| `GET` | `/feedback/records` | Browse flagged records, filterable (admin token) |
 
 ## 🚀 Getting Started
 
@@ -82,17 +97,53 @@ uvicorn main:app --reload
 
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
+### Docker
+
+The included `Dockerfile` produces a production-ready image with Python 3.12,
+non-root user, cached dependency layer, and a health-check on `/ping`.
+
+```bash
+# Build
+docker build -t deenbridge-ai .
+
+# Run — pass your Gemini API key via .env file
+docker run --env-file .env -p 8000:8000 deenbridge-ai
+
+# …or inline
+docker run -e GEMINI_API_KEY=your_key_here -p 8000:8000 deenbridge-ai
+```
+
+The container listens on `PORT` (default `8000`), matching Render's runtime
+behaviour.  A `HEALTHCHECK` hits `GET /ping` every 30 seconds.
+
+To switch Render from the Python buildpack to Docker, change `render.yaml`:
+
+```yaml
+services:
+  - type: web
+    name: deenbridge-ai
+    runtime: docker          # was: env: python
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+```
+
+> **Note:** this PR does **not** flip production to Docker — that is a
+> deliberate post-merge step for the team.
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | Google Gemini API key | — |
-| `MODEL_NAME` | Gemini model used by the application |	gemini-1.5-flash |
-| `TEMPERATURE`|	Model temperature	| 0.7 |
-| `TOP_P` |	Nucleus sampling value	| 0.8 |
-| `TOP_K`	| Top-K sampling value |	40 |
-| `MAX_OUTPUT_TOKENS` |	Maximum response tokens	| 2048 |
-| `PORT` |Server port used by Uvicorn	| 8000 |
+| `SERVICE_API_KEY` | Shared secret for API-key auth; required in production. Clients must send `X-API-Key` header. | — |
+| `AUTH_DISABLED` | Set to `true` to skip API-key auth (local development only) | `false` |
+| `MODEL_NAME` | Gemini model used by the application | gemini-1.5-flash |
+| `TEMPERATURE` | Model temperature | 0.7 |
+| `TOP_P` | Nucleus sampling value | 0.8 |
+| `TOP_K` | Top-K sampling value | 40 |
+| `MAX_OUTPUT_TOKENS` | Maximum response tokens | 2048 |
+| `PORT` | Server port used by Uvicorn | 8000 |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
@@ -106,16 +157,58 @@ The API runs at `http://localhost:8000` — interactive docs at `http://localhos
 | `CONFIDENCE_UNVERIFIED_CEILING` | Cap when nothing external corroborated the answer | `0.65` |
 | `SCHOLAR_REVIEW_TOKEN` | Enables the reviewer endpoints; required as `X-Review-Token` | — (endpoints disabled) |
 | `REVIEW_EXPORT_PATH` | JSONL export of reviewed answers | `data/review/reviewed.jsonl` |
-| `REDIS_URL` | Makes the scholar-review queue durable across restarts | — (in-memory) |
+| `REDIS_URL` | Makes the scholar-review queue and memory store durable across restarts | — (in-memory) |
+| `MEMORY_TTL_DAYS` | Time-to-live for stored user profiles and chat summaries in days | `90` |
+| `MEMORY_EXTRACTION_ENABLED` | Background memory extraction from conversation turns | `true` |
 | `STELLAR_NETWORK` | Stellar network for zakat lookups (`testnet` or `public`) | `testnet` |
 | `ZAKAT_NISAB_USD` | Fallback nisab when no gold price can be fetched | `6000` |
 | `NISAB_CACHE_TTL_SECONDS` | How long a fetched gold price is reused | `21600` (6h) |
 | `GOLD_PRICE_TIMEOUT` | Gold price request timeout in seconds | `8` |
+| `ADMIN_TOKEN` | Enables the feedback admin endpoints; required as `X-Admin-Token` | — (endpoints disabled) |
+| `FEEDBACK_DB_PATH` | SQLite path for the feedback store (when Redis is not used) | `feedback.db` |
+| `FEEDBACK_RATE_LIMIT_MAX` | Max feedback submissions per IP per window | `20` |
+| `FEEDBACK_RATE_LIMIT_WINDOW` | Feedback rate-limit window in seconds | `60` |
 | `QURAN_API_BASE` | Base URL for tafsir/ayah retrieval | `https://api.quran.com/api/v4` |
 | `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+
+### Multilingual support (language field)
+
+Pass a `language` field (BCP-47 code) in `ChatRequest` to get a response in that
+language. When omitted, the model auto-detects and responds in the user's
+language.
+
+```jsonc
+{
+  "prompt": "ما هي أركان الإسلام؟",
+  "language": "ar"
+}
+```
+
+Quran quotations are always rendered in **Arabic script** with a translation in
+the response language and a `surah:ayah` reference, regardless of which language
+the response is in.
+
+| Code | Language |
+|------|----------|
+| `ar` | Arabic |
+| `en` | English |
+| `ur` | Urdu |
+| `ms` | Malay |
+| `fr` | French |
+| `tr` | Turkish |
+| `id` | Indonesian |
+| `bn` | Bengali |
+| `fa` | Persian |
+| `ha` | Hausa |
+| `sw` | Swahili |
+| `tl` | Tagalog |
+
+An unrecognized code falls back to auto-detection (warns in logs, never 422).
+The effective language is echoed in `ChatResponse.language` so the frontend can
+set `dir="rtl"` correctly.
 
 ### Confidence, abstention, and scholar review
 
@@ -129,7 +222,7 @@ drops out of the average instead of being guessed at:
 | Signal | Weight | Produced by |
 |--------|--------|-------------|
 | `self_consistency` | 0.40 | the self-consistency work (#ai-18) — **passed in, never recomputed here** |
-| `citation_verification` | 0.30 | citation verification (#40) — passed in the same way |
+| `citation_verification` | 0.30 | [structured citation extraction](citations.py) (#15) — the share of a turn's citations that validated |
 | `expressed_certainty` | 0.30 | derived here from the answer's own hedging language |
 
 ```
@@ -190,6 +283,168 @@ valuable eval case.
 
 `ChatResponse` gains an optional `confidence: {score, band, abstained, queued,
 signals, review_id}` block. It is additive; existing clients are unaffected.
+
+### Structured Quran & Hadith citations
+
+Every chat answer carries a `citations` list of **validated, typed** references --
+`2:153` arrives as a surah number, an ayah number, and the surah's name from the
+index, not as a substring the client has to parse back out of prose.
+
+```jsonc
+{
+  "response": "Allah counsels the believers to seek help in patience and prayer...",
+  "citations": [
+    {"type": "quran", "surah": 2, "ayah_start": 153, "ayah_end": null, "surah_name": "Al-Baqarah"},
+    {"type": "hadith", "collection": "Sahih al-Bukhari", "number": 1, "grading": "sahih"},
+    {"type": "scholarly", "work": "Riyad as-Salihin", "author": "Al-Nawawi", "detail": "Book of Patience"}
+  ]
+}
+```
+
+**How the model is asked.** Whole-response JSON was rejected deliberately: it
+degrades prose quality, and one malformed brace loses the entire answer. The
+model instead appends a single delimited block after its normal prose, which is
+parsed off and never shown to the user:
+
+```
+<<<CITATIONS>>>
+{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}
+<<<END_CITATIONS>>>
+```
+
+On `/chat/stream` the block is withheld from the SSE deltas by a small hold-back
+filter, so a half-emitted marker never flickers into the UI; the finished
+`citations` array arrives on the terminal `done` event.
+
+**Parsing is total.** A malformed, truncated, or absent block yields an empty
+list and the prose is still returned -- nothing in this path can fail a chat
+turn. A block cut off by `max_output_tokens` is stripped from the prose anyway:
+half a JSON object is worse than no citations at all.
+
+**Validation.** Quran references are bounds-checked against
+[`data/quran/surah_index.json`](data/quran/surah_index.json) through the same
+114-surah index the tafsir layer validates against, so the two cannot drift
+apart -- `2:300` is refused against Al-Baqarah's real 286 ayat. `surah_name` is
+always taken from that index and never from the model, which is what makes the
+field trustworthy. Hadith collections are normalised through
+`hadith.normalize_collection`'s existing alias table (Bukhari, Muslim, Tirmidhi,
+Abu Dawud, Nasa'i, Ibn Majah and their variants) and gradings are read from the
+bundled grading dataset rather than from the model's claim. A citation naming an
+unrecognised collection is rejected, not echoed back. Citations are deduplicated
+and capped at 24 per answer.
+
+**It feeds confidence.** The share of a turn's attempted citations that validated
+is exactly the `citation_verification` signal [`confidence.py`](confidence.py)
+already reserves at weight 0.30 -- this completes machinery that was previously
+declared and never fed. A well-cited answer is no longer capped by
+`CONFIDENCE_UNVERIFIED_CEILING` (0.65); an answer that cites nothing produces no
+signal at all and is not penalised for it.
+
+#### Offline evaluation
+
+`scripts/eval_citations.py` scores a 15-case set at
+`data/eval/citations_eval.jsonl` with no API key and no network, and runs in CI:
+
+```bash
+python scripts/eval_citations.py --verbose               # offline, canned answers
+python scripts/eval_citations.py --live --url http://localhost:8000
+```
+
+Three metrics, each with a floor the script enforces:
+
+| Metric | Floor | Meaning |
+|--------|-------|---------|
+| extraction rate | 90% | answers that should have cited, and did |
+| validity rate | 90% | genuine citations that survived validation |
+| rejection rate | 100% | planted fabrications that were refused |
+
+Four of the fifteen cases plant fabrications -- an out-of-range surah, an ayah
+past a surah's real bound, an unknown collection, and a block mixing one real
+citation with one invented one. They are excluded from the validity denominator
+and scored only by the rejection rate, so a correct parser is never punished for
+refusing them, and a parser that accepts everything cannot pass.
+
+**Known limitation.** A semantic-cache hit replays stored prose with an empty
+citation list, because the cache stores text only. No markers leak, and
+re-asking with `X-Cache-Bypass` returns citations. Widening the cache record
+shape is out of scope for this change.
+
+### Streaming chat responses (Server-Sent Events)
+
+`POST /chat/stream` is a streaming variant of the chat endpoint that returns
+tokens incrementally via Server-Sent Events (SSE). Rather than waiting for the
+entire Gemini generation to finish, text deltas are forwarded as they arrive
+— a modern chat UI shows text appearing in real-time instead of a spinner.
+
+#### Request schema
+
+The same request body as `POST /chat`:
+
+```json
+{
+  "prompt": "What does Islam say about patience?",
+  "chat_id": "optional-existing-session-id",
+  "context": "optional-additional-context",
+  "madhhab": "hanafi",
+  "language": "en"
+}
+```
+
+#### SSE event protocol
+
+Each line is a `data:` event conforming to the SSE spec. Events are separated
+by double newlines (`\n\n`):
+
+1. **Metadata** — emitted first, carries the `chat_id`:
+   ```
+   data: {"type": "metadata", "chat_id": "<uuid>"}
+   ```
+
+2. **Content deltas** — one or more events carrying incremental text. Each
+   `delta` is a newly generated token fragment that should be appended to
+   whatever the client has already received:
+   ```
+   data: {"type": "content", "delta": "In "}
+   data: {"type": "content", "delta": "the "}
+   data: {"type": "content", "delta": "name "}
+   ```
+
+3. **Done** — terminal event with the complete response, chat history, and
+   metadata (confidence, hadith references, fiqh info, tafsir info, zakat info):
+   ```json
+   data: {"type": "done", "chat_id": "<uuid>", "history": [...], "text": "...", "confidence": {...}}
+   ```
+
+4. **Error** — if an upstream error occurs mid-stream, a terminal error event
+   is emitted instead of silently truncating:
+   ```json
+   data: {"type": "error", "message": "An error occurred during response generation."}
+   ```
+
+#### Session behaviour
+
+Streamed turns are stored in the same `active_chats` session store as
+non-streamed ones. A follow-up `POST /chat` or `POST /chat/stream` request
+with the same `chat_id` will see the streamed answer as context.
+
+#### Example
+
+```bash
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "What does Islam say about patience?"}'
+```
+
+The `-N` flag disables curl's output buffering so text appears incrementally.
+
+#### Safety, telemetry, and confidence
+
+The streaming endpoint applies the same safety pipeline (InputGate before
+generation, OutputCheck on the final text), telemetry (Trace spans, model call
+recording), hadith authenticity grading, and confidence / abstention assessment
+as the non-streaming `/chat` endpoint. All metadata is included in the terminal
+`done` event.
+
 ### Tafsir (ayah explanation)
 
 `POST /tafsir` explains an ayah from **named** tafsir works instead of from the
@@ -308,6 +563,70 @@ validation like any other malformed input, so one can never reach Horizon. If a
 message looks like it contains a secret key, the assistant refuses to use it and
 warns the user to treat it as compromised — without repeating it back.
 
+**Purchase history in chat.** A signed-in frontend can pass a short
+`transactions` summary (hash, amount, status, item title, date, optional memo)
+on `POST /chat`, or an `auth_token` so this service fetches
+`/api/stellar/payment/transactions` from dnb-backend. Purchase questions then
+get factual answers with a [stellar.expert](https://stellar.expert) explorer
+link per hash. Without history the assistant says it cannot see purchases;
+memos are treated as untrusted data so injection text cannot change behavior.
+Purchase answers are never written to the semantic cache and include a
+`purchases` block on the response.
+
+### Answer feedback & the quality loop
+
+Every chat answer carries a stable `message_id`, so the frontend can rate a
+specific turn. `POST /feedback` attaches an up/down rating and optional failure
+categories to that answer:
+
+```bash
+curl -sX POST http://localhost:8000/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{"chat_id": "…", "message_id": "…", "rating": "down",
+       "categories": ["wrong_or_missing_citation"], "comment": "Ayah number is off"}'
+```
+
+- **Snapshot resolution.** The prompt and the *displayed* answer (after any
+  safety, hadith, or confidence shaping) are resolved server-side from what the
+  user actually saw — the client never has to be trusted for them. On a
+  free-tier restart the snapshot is gone; the client then supplies `prompt` and
+  `answer`, and a request missing both is a `422`.
+- **Validation.** `rating` must be `up`/`down`, categories are checked against a
+  fixed taxonomy, and `comment` is length-capped — bad input is a `422`.
+- **Idempotent.** Resubmitting for the same `(chat_id, message_id)` overwrites,
+  so a user changing their mind never double-counts.
+- **Rate-limited** per IP (in-process sliding window), and durably stored in
+  SQLite locally or Redis when `REDIS_URL` is set — the same store direction the
+  session and scholar-review work use, not a parallel one.
+
+Maintainers read the aggregate signal through two **admin** endpoints, gated on
+`X-Admin-Token` and disabled entirely until `ADMIN_TOKEN` is set:
+
+```bash
+curl -s http://localhost:8000/feedback/stats   -H "X-Admin-Token: $ADMIN_TOKEN"
+curl -s "http://localhost:8000/feedback/records?rating=down&category=too_vague" \
+     -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+#### Eval-candidate export
+
+Down-rated answers become candidates for the evaluation dataset (issue #16
+format). Each carries `needs_review: true` and an `answer_draft` for the
+reviewer to judge — the script **never** fabricates an expected answer for
+religious content:
+
+```bash
+# Reads whichever store the service is configured to use (Redis or SQLite):
+python scripts/export_eval_candidates.py --output candidates.jsonl
+REDIS_URL=redis://localhost:6379 python scripts/export_eval_candidates.py --output candidates.jsonl
+
+# …or force a specific SQLite file:
+python scripts/export_eval_candidates.py --db feedback.db --output candidates.jsonl
+```
+
+Near-duplicate prompts are deduplicated; approved candidates feed the harness
+and, via #56, the semantic cache.
+
 ### Content-safety testing
 
 The versioned policy lives in [`safety/policy.yaml`](safety/policy.yaml), with
@@ -321,7 +640,7 @@ Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI ru
 
 ## 🌊 Contributing & Drips Wave
 
-This repository participates in the **[Stellar Drips Wave](https://www.drips.network/wave/stellar)** bounty program — contributors earn Points (and real rewards) for resolving this repo's issues during a Wave, with complexity tiers set in the Drips Wave app.
+This repository is hoping to  participates in the  **[Stellar Drips Wave](https://www.drips.network/wave/stellar)** bounty program — contributors earn Points (and real rewards) for resolving this repo's issues during a Wave, with complexity tiers set in the Drips Wave app.
 
 - All pull requests target the **`dev`** branch (`main` is releases only)
 - CI must pass before review

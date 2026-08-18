@@ -25,13 +25,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest flake8
+          pip install -r requirements-dev.txt
 
-      - name: Run linting
-        run: flake8 main.py stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py tests/test_zakat.py tests/test_telemetry.py scripts/build_hadith_data.py scripts/build_surah_index.py --max-line-length=120 --ignore=E501,W503
+      - name: Lint (ruff)
+        run: ruff check .
 
-      - name: Check syntax
-        run: python -m compileall -q main.py stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py scripts/build_hadith_data.py scripts/build_surah_index.py
+      - name: Check formatting (ruff format)
+        run: ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy .
 
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam
@@ -48,6 +51,9 @@ jobs:
       - name: Run hadith grading tests
         run: pytest -q tests/test_hadith.py
 
+      - name: Run structured citation tests
+        run: pytest -q tests/test_citations.py tests/test_citations_integration.py
+
       - name: Run confidence and abstention tests
         run: pytest -q tests/test_confidence.py
 
@@ -60,5 +66,43 @@ jobs:
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
 
+      - name: Run purchase history chat tests
+        run: pytest -q tests/test_purchases.py
+
+      - name: Run feedback loop tests
+        run: pytest -q tests/test_feedback.py
+
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
+
+      - name: Run multilingual support tests
+        run: pytest -q tests/test_multilingual.py
+
+      - name: Run memory profile tests
+        run: pytest -q tests/test_memory_profile.py
+
+      - name: Run memory extraction tests
+        run: pytest -q tests/test_memory_extraction.py
+
+      - name: Run memory integration tests
+        run: pytest -q tests/test_memory_integration.py
+
+      - name: Run offline citation extraction eval
+        run: python scripts/eval_citations.py
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t deenbridge-ai:ci .
+
+      - name: Verify container starts and /ping returns 200
+        run: |
+          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
+          sleep 5
+          curl -sf http://localhost:8000/ping
+          docker stop test-ai

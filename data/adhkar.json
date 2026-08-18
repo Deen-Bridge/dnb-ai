@@ -1,0 +1,44 @@
+{
+  "entries": [
+    {
+      "id": "morning_1",
+      "title": "Morning adhkar",
+      "arabic": "أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ",
+      "transliteration": "Asbahna wa asbaha al-mulku lillah",
+      "translation": "We have reached the morning and the dominion belongs to Allah.",
+      "category": "morning",
+      "source": "Hisnul Muslim",
+      "grading": "authentic"
+    },
+    {
+      "id": "evening_1",
+      "title": "Evening adhkar",
+      "arabic": "أَمْسَيْنَا وَأَمْسَى الْمُلْكُ لِلَّهِ",
+      "transliteration": "Amsayna wa amsa al-mulku lillah",
+      "translation": "We have reached the evening and the dominion belongs to Allah.",
+      "category": "evening",
+      "source": "Hisnul Muslim",
+      "grading": "authentic"
+    },
+    {
+      "id": "sleep_1",
+      "title": "Before sleep du'a",
+      "arabic": "بِاسْمِكَ اللَّهُمَّ أَمُوتُ وَأَحْيَا",
+      "transliteration": "Bismika Allahumma amutu wa ahya",
+      "translation": "In Your name, O Allah, I die and I live.",
+      "category": "before_sleep",
+      "source": "Sahih al-Bukhari",
+      "grading": "authentic"
+    },
+    {
+      "id": "anxiety_1",
+      "title": "Relief from anxiety",
+      "arabic": "اللَّهُمَّ إِنِّي أَعُوذُ بِكَ مِنَ الْهَمِّ وَالْحَزَنِ",
+      "transliteration": "Allahumma inni a'udhu bika min al-hammi wal-hazani",
+      "translation": "O Allah, I seek refuge in You from anxiety and grief.",
+      "category": "distress",
+      "source": "Sahih al-Bukhari",
+      "grading": "authentic"
+    }
+  ]
+}

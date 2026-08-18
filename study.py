@@ -11,7 +11,7 @@ import json
 import logging
 import os
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -49,7 +49,7 @@ When generating flashcards:
 - Tag with relevant subject categories
 """
 
-DIFFICULTY_PROMPTS: Dict[str, str] = {
+DIFFICULTY_PROMPTS: dict[str, str] = {
     "beginner": (
         "BEGINNER level — test recall of well-known, foundational Islamic knowledge. "
         "Questions should cover basic facts that most Muslims would know. "
@@ -105,7 +105,7 @@ class LessonTextSource(BaseModel):
 
 
 class StudyGenerateRequest(BaseModel):
-    source: Union[TopicSource, LessonTextSource] = Field(
+    source: TopicSource | LessonTextSource = Field(
         ...,
         description="Source of content: either a topic or lesson text",
         json_schema_extra={
@@ -134,14 +134,14 @@ class StudyGenerateRequest(BaseModel):
 
 class QuizQuestion(BaseModel):
     question: str = Field(..., min_length=1, description="The quiz question")
-    choices: List[str] = Field(..., description="Exactly 4 answer choices")
+    choices: list[str] = Field(..., description="Exactly 4 answer choices")
     correct_index: int = Field(..., ge=0, le=3, description="Index of the correct answer (0-3)")
     explanation: str = Field(..., min_length=1, description="Explanation of the correct answer")
     difficulty: str = Field(..., description="Difficulty level of this question")
 
     @field_validator("choices")
     @classmethod
-    def choices_must_be_exactly_four_distinct_nonempty(cls, v: List[str]) -> List[str]:
+    def choices_must_be_exactly_four_distinct_nonempty(cls, v: list[str]) -> list[str]:
         if len(v) != 4:
             raise ValueError(f"Must have exactly 4 choices, got {len(v)}")
         stripped = [c.strip() for c in v]
@@ -165,12 +165,12 @@ class QuizQuestion(BaseModel):
 class Flashcard(BaseModel):
     front: str = Field(..., min_length=1, description="Front of the flashcard (question/term)")
     back: str = Field(..., min_length=1, description="Back of the flashcard (answer/definition)")
-    tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+    tags: list[str] = Field(default_factory=list, description="Tags for categorization")
 
 
 class StudyGenerateResponse(BaseModel):
-    quizzes: Optional[List[QuizQuestion]] = Field(default=None, description="Generated quiz questions")
-    flashcards: Optional[List[Flashcard]] = Field(default=None, description="Generated flashcards")
+    quizzes: list[QuizQuestion] | None = Field(default=None, description="Generated quiz questions")
+    flashcards: list[Flashcard] | None = Field(default=None, description="Generated flashcards")
     source_used: str = Field(..., description="Whether 'topic' or 'lesson_text' was used")
 
     model_config = {
@@ -258,7 +258,7 @@ class BaseGenerator:
 class GeminiGenerator(BaseGenerator):
     """Real generator that calls the Gemini API."""
 
-    def __init__(self, model_name: str = "gemini-2.5-flash-preview-05-20"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         self.model_name = model_name
 
     def generate(self, prompt: str, schema: dict) -> str:
@@ -279,7 +279,7 @@ class GeminiGenerator(BaseGenerator):
 class FakeGenerator(BaseGenerator):
     """Generator that returns pre-recorded responses (for tests)."""
 
-    def __init__(self, responses: Optional[List[str]] = None):
+    def __init__(self, responses: list[str] | None = None):
         self.responses = responses or ["{}"]
         self.call_count = 0
 
@@ -295,11 +295,11 @@ class FakeGenerator(BaseGenerator):
 
 
 def _build_prompt(
-    source: Union[TopicSource, LessonTextSource],
+    source: TopicSource | LessonTextSource,
     kind: ContentKind,
     difficulty: Difficulty,
     count: int,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Build the generation prompt and return ``(prompt, source_used)``."""
     if isinstance(source, TopicSource):
         source_text = f"Topic: {source.topic}"
@@ -330,9 +330,7 @@ def _build_prompt(
     lines.append("")
     lines.append(_output_format_instruction(kind))
     lines.append("")
-    lines.append(
-        "Output ONLY valid JSON. No markdown, no code fences, no extra text."
-    )
+    lines.append("Output ONLY valid JSON. No markdown, no code fences, no extra text.")
     return "\n".join(lines), source_used
 
 
@@ -344,10 +342,7 @@ def _output_format_instruction(kind: ContentKind) -> str:
             "correct_index (int 0-3), explanation (str), difficulty (str)."
         )
     if kind == ContentKind.flashcards:
-        return (
-            'Output a JSON object with key "flashcards" (array). '
-            "Each item: front (str), back (str), tags ([str])."
-        )
+        return 'Output a JSON object with key "flashcards" (array). Each item: front (str), back (str), tags ([str]).'
     return (
         'Output a JSON object with keys "quizzes" (array) and "flashcards" (array). '
         "Quiz items: question (str), choices ([str; 4 items]), "
@@ -364,17 +359,13 @@ def _build_output_schema(kind: ContentKind) -> dict:
     if kind == ContentKind.quiz:
         return {
             "type": "object",
-            "properties": {
-                "quizzes": {"type": "array", "items": quiz_schema}
-            },
+            "properties": {"quizzes": {"type": "array", "items": quiz_schema}},
             "required": ["quizzes"],
         }
     if kind == ContentKind.flashcards:
         return {
             "type": "object",
-            "properties": {
-                "flashcards": {"type": "array", "items": flash_schema}
-            },
+            "properties": {"flashcards": {"type": "array", "items": flash_schema}},
             "required": ["flashcards"],
         }
     return {
@@ -401,13 +392,13 @@ def _parse_and_validate(response_text: str, kind: ContentKind) -> dict:
     try:
         data = json.loads(response_text)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON: {e}")
+        raise ValueError(f"Invalid JSON: {e}") from e
 
     if not isinstance(data, dict):
         raise ValueError(f"Expected a JSON object, got {type(data).__name__}")
 
-    result: Dict[str, Any] = {}
-    errors: List[str] = []
+    result: dict[str, Any] = {}
+    errors: list[str] = []
 
     if kind in (ContentKind.quiz, ContentKind.both):
         raw = data.get("quizzes")
@@ -427,13 +418,13 @@ def _parse_and_validate(response_text: str, kind: ContentKind) -> dict:
         if not isinstance(raw, list):
             errors.append("'flashcards' must be a non-empty array")
         else:
-            validated = []
+            validated_cards = []
             for i, item in enumerate(raw):
                 try:
-                    validated.append(Flashcard.model_validate(item))
+                    validated_cards.append(Flashcard.model_validate(item))
                 except Exception as exc:
                     errors.append(f"flashcard[{i}]: {exc}")
-            result["flashcards"] = validated
+            result["flashcards"] = validated_cards
 
     if errors:
         raise ValueError("; ".join(errors))
@@ -448,7 +439,7 @@ def _parse_and_validate(response_text: str, kind: ContentKind) -> dict:
 
 def _generate_content(
     generator: BaseGenerator,
-    source: Union[TopicSource, LessonTextSource],
+    source: TopicSource | LessonTextSource,
     kind: ContentKind,
     difficulty: Difficulty,
     count: int,
@@ -458,7 +449,7 @@ def _generate_content(
     base_prompt, source_used = _build_prompt(source, kind, difficulty, count)
     output_schema = _build_output_schema(kind)
 
-    last_error: Optional[str] = None
+    last_error: str | None = None
 
     for attempt in range(max_retries + 1):
         prompt = base_prompt

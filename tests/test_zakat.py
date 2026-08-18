@@ -113,12 +113,15 @@ class TestComputeZakat:
     def test_zero_balance(self):
         assert compute_zakat(Decimal("0"), Decimal("6000")) == Decimal("0")
 
-    @pytest.mark.parametrize("balance,expected", [
-        # Quantized to USDC's 7 decimal places, never more.
-        ("6000.1234567", "150.0030864"),
-        ("9999.9999999", "250.0000000"),
-        ("12345.6789012", "308.6419725"),
-    ])
+    @pytest.mark.parametrize(
+        "balance,expected",
+        [
+            # Quantized to USDC's 7 decimal places, never more.
+            ("6000.1234567", "150.0030864"),
+            ("9999.9999999", "250.0000000"),
+            ("12345.6789012", "308.6419725"),
+        ],
+    )
     def test_quantized_to_usdc_precision(self, balance, expected):
         due = compute_zakat(Decimal(balance), Decimal("6000"))
         assert due == Decimal(expected)
@@ -141,16 +144,19 @@ class TestKeyValidation:
     def test_whitespace_is_trimmed(self):
         assert validate_public_key(f"  {VALID_KEY}\n") == VALID_KEY
 
-    @pytest.mark.parametrize("key", [
-        "",
-        "   ",
-        "not-a-key",
-        "GINVALID",
-        VALID_KEY[:-1],           # too short
-        VALID_KEY + "A",          # too long
-        VALID_KEY[:-1] + "X",     # bad checksum
-        "MBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",  # wrong prefix
-    ])
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "",
+            "   ",
+            "not-a-key",
+            "GINVALID",
+            VALID_KEY[:-1],  # too short
+            VALID_KEY + "A",  # too long
+            VALID_KEY[:-1] + "X",  # bad checksum
+            "MBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",  # wrong prefix
+        ],
+    )
     def test_invalid_key_is_400(self, key):
         with pytest.raises(HTTPException) as exc:
             validate_public_key(key)
@@ -176,24 +182,18 @@ class TestFetchBalance:
         return server
 
     def test_trustline_returns_balance(self):
-        server = self._server_returning(
-            horizon_account([usdc_balance_entry("1234.5670000")])
-        )
+        server = self._server_returning(horizon_account([usdc_balance_entry("1234.5670000")]))
         with patch.object(stellar, "Server", return_value=server):
             assert fetch_usdc_balance(VALID_KEY) == Decimal("1234.5670000")
 
     def test_no_trustline_returns_none(self):
-        server = self._server_returning(
-            horizon_account([{"asset_type": "native", "balance": "100.0"}])
-        )
+        server = self._server_returning(horizon_account([{"asset_type": "native", "balance": "100.0"}]))
         with patch.object(stellar, "Server", return_value=server):
             assert fetch_usdc_balance(VALID_KEY) is None
 
     def test_usdc_from_another_issuer_is_ignored(self):
         """Only the platform's USDC counts — a lookalike asset is not USDC."""
-        server = self._server_returning(
-            horizon_account([usdc_balance_entry("500.0", issuer=OTHER_KEY)])
-        )
+        server = self._server_returning(horizon_account([usdc_balance_entry("500.0", issuer=OTHER_KEY)]))
         with patch.object(stellar, "Server", return_value=server):
             assert fetch_usdc_balance(VALID_KEY) is None
 
@@ -201,9 +201,7 @@ class TestFetchBalance:
         from stellar_sdk.exceptions import NotFoundError
 
         server = MagicMock()
-        server.accounts.return_value.account_id.return_value.call.side_effect = (
-            NotFoundError(MagicMock())
-        )
+        server.accounts.return_value.account_id.return_value.call.side_effect = NotFoundError(MagicMock())
         with patch.object(stellar, "Server", return_value=server):
             with pytest.raises(HTTPException) as exc:
                 fetch_usdc_balance(VALID_KEY)
@@ -227,8 +225,15 @@ class TestBuildResponse:
     def test_above_nisab_response_shape(self):
         response = build_zakat_response(VALID_KEY, Decimal("10000"), FIXED_NISAB)
         assert response.model_dump().keys() >= {
-            "network", "public_key", "has_usdc_trustline", "usdc_balance",
-            "nisab_usd", "zakat_rate", "zakat_due", "message", "disclaimer",
+            "network",
+            "public_key",
+            "has_usdc_trustline",
+            "usdc_balance",
+            "nisab_usd",
+            "zakat_rate",
+            "zakat_due",
+            "message",
+            "disclaimer",
             "nisab",
         }
         assert response.has_usdc_trustline is True
@@ -282,9 +287,7 @@ class TestBuildResponse:
 class TestNisabMath:
     def test_85g_gold_conversion(self):
         # 85g / 31.1034768 g-per-oz × price
-        expected = (Decimal("4000") / GRAMS_PER_TROY_OUNCE * NISAB_GOLD_GRAMS).quantize(
-            Decimal("0.01")
-        )
+        expected = (Decimal("4000") / GRAMS_PER_TROY_OUNCE * NISAB_GOLD_GRAMS).quantize(Decimal("0.01"))
         assert nisab_from_ounce_price(Decimal("4000")) == expected
 
     def test_conversion_is_monotonic(self):
@@ -304,12 +307,15 @@ class TestPriceParsing:
         payload = {"pax-gold": {"usd": 4059.87}}
         assert parse_price(payload, FALLBACK_SOURCE) == Decimal("4059.87")
 
-    @pytest.mark.parametrize("payload", [
-        {},
-        {"error": "rate limited"},
-        {"price": None},
-        {"price": "not-a-number"},
-    ])
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {},
+            {"error": "rate limited"},
+            {"price": None},
+            {"price": "not-a-number"},
+        ],
+    )
     def test_unusable_payload_returns_none(self, payload):
         assert parse_price(payload, PRIMARY_SOURCE) is None
 
@@ -382,6 +388,7 @@ class TestGetNisab:
 
     def test_fallback_is_not_cached(self):
         """A price outage must not pin the default in place for hours."""
+
         def down(request):
             return httpx.Response(500)
 
@@ -407,15 +414,13 @@ class TestNoLiveNetworkInCI:
     """Detection must be free — an ordinary prompt reaches no network at all."""
 
     def test_non_zakat_prompt_touches_neither_horizon_nor_the_price_api(self):
-        with patch.object(stellar, "Server") as server, \
-             patch.object(stellar, "get_nisab") as get_nisab_mock:
+        with patch.object(stellar, "Server") as server, patch.object(stellar, "get_nisab") as get_nisab_mock:
             assert run(build_chat_zakat_context("How do I make wudu?")) is None
         server.assert_not_called()
         get_nisab_mock.assert_not_called()
 
     def test_zakat_prompt_without_a_key_touches_neither(self):
-        with patch.object(stellar, "Server") as server, \
-             patch.object(stellar, "get_nisab") as get_nisab_mock:
+        with patch.object(stellar, "Server") as server, patch.object(stellar, "get_nisab") as get_nisab_mock:
             context = run(build_chat_zakat_context("How much zakat do I owe?"))
         assert context.info.calculated is False
         server.assert_not_called()
@@ -423,14 +428,17 @@ class TestNoLiveNetworkInCI:
 
 
 class TestChatDetection:
-    @pytest.mark.parametrize("prompt,expected", [
-        ("How much zakat do I owe?", True),
-        ("What is the nisab this year?", True),
-        ("Explain zakah on savings", True),
-        ("What time is Maghrib?", False),
-        ("How do I pray?", False),
-        ("", False),
-    ])
+    @pytest.mark.parametrize(
+        "prompt,expected",
+        [
+            ("How much zakat do I owe?", True),
+            ("What is the nisab this year?", True),
+            ("Explain zakah on savings", True),
+            ("What time is Maghrib?", False),
+            ("How do I pray?", False),
+            ("", False),
+        ],
+    )
     def test_zakat_intent(self, prompt, expected):
         assert is_zakat_question(prompt) is expected
 
@@ -441,11 +449,14 @@ class TestChatDetection:
     def test_extracts_from_the_context_field(self):
         assert extract_public_key("How much zakat do I owe?", VALID_KEY) == VALID_KEY
 
-    @pytest.mark.parametrize("text", [
-        "How much zakat do I owe?",
-        "My wallet is GINVALID",
-        f"My wallet is {VALID_KEY[:-1]}X",  # right shape, bad checksum
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "How much zakat do I owe?",
+            "My wallet is GINVALID",
+            f"My wallet is {VALID_KEY[:-1]}X",  # right shape, bad checksum
+        ],
+    )
     def test_no_valid_key_found(self, text):
         assert extract_public_key(text) is None
 
@@ -502,11 +513,11 @@ class TestChatZakatContext:
 
     def test_computes_from_the_real_balance(self):
         quote = NisabQuote(nisab_usd="6000", live=True, source="gold-api.com")
-        with patch.object(stellar, "fetch_usdc_balance", return_value=Decimal("10000")), \
-             patch.object(stellar, "get_nisab", returns(quote)):
-            context = run(build_chat_zakat_context(
-                f"How much zakat do I owe on my wallet {VALID_KEY}?"
-            ))
+        with (
+            patch.object(stellar, "fetch_usdc_balance", return_value=Decimal("10000")),
+            patch.object(stellar, "get_nisab", returns(quote)),
+        ):
+            context = run(build_chat_zakat_context(f"How much zakat do I owe on my wallet {VALID_KEY}?"))
         assert context.info.calculated is True
         assert context.info.public_key == VALID_KEY
         assert context.info.usdc_balance == "10000"
@@ -521,8 +532,10 @@ class TestChatZakatContext:
         def missing(_key):
             raise HTTPException(status_code=404, detail="Account not found.")
 
-        with patch.object(stellar, "fetch_usdc_balance", side_effect=missing), \
-             patch.object(stellar, "get_nisab", returns(FIXED_NISAB)):
+        with (
+            patch.object(stellar, "fetch_usdc_balance", side_effect=missing),
+            patch.object(stellar, "get_nisab", returns(FIXED_NISAB)),
+        ):
             context = run(build_chat_zakat_context(f"zakat for {VALID_KEY}"))
         assert context.info.calculated is False
         assert context.info.public_key == VALID_KEY
@@ -535,8 +548,10 @@ class TestChatZakatContext:
             source="gold-api.com",
             gold_price_usd_per_ounce="4066.20",
         )
-        with patch.object(stellar, "fetch_usdc_balance", return_value=Decimal("20000")), \
-             patch.object(stellar, "get_nisab", returns(live)):
+        with (
+            patch.object(stellar, "fetch_usdc_balance", return_value=Decimal("20000")),
+            patch.object(stellar, "get_nisab", returns(live)),
+        ):
             context = run(build_chat_zakat_context(f"zakat for {VALID_KEY}"))
         assert "85g gold" in context.prompt_block
         assert "live gold price" in context.prompt_block

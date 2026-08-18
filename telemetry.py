@@ -26,10 +26,11 @@ import os
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 # the model (priced=False / $0) instead of erroring.
 GEMINI_MODEL = "gemini-2.5-flash"
 
-_DEFAULT_PRICE_TABLE: Dict[str, Dict[str, float]] = {
+_DEFAULT_PRICE_TABLE: dict[str, dict[str, float]] = {
     # Gemini 2.5 Flash: the model this service currently calls.
     GEMINI_MODEL: {"input": 0.000075, "output": 0.0003},
     # The superseded preview alias, kept priced so telemetry replayed from
@@ -59,7 +60,7 @@ _DEFAULT_PRICE_TABLE: Dict[str, Dict[str, float]] = {
 }
 
 
-def _load_price_table() -> Dict[str, Dict[str, float]]:
+def _load_price_table() -> dict[str, dict[str, float]]:
     table = dict(_DEFAULT_PRICE_TABLE)
     raw = os.getenv("LLM_PRICE_TABLE")
     if raw:
@@ -77,12 +78,10 @@ def _load_price_table() -> Dict[str, Dict[str, float]]:
     return table
 
 
-PRICE_TABLE: Dict[str, Dict[str, float]] = _load_price_table()
+PRICE_TABLE: dict[str, dict[str, float]] = _load_price_table()
 
 
-def estimate_cost(
-    model: str, input_tokens: int, output_tokens: int
-) -> "CostEstimate":
+def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> CostEstimate:
     """Estimate the USD cost of a single model call.
 
     Returns a CostEstimate whose ``priced`` flag is False when the model is not
@@ -92,9 +91,7 @@ def estimate_cost(
     prices = PRICE_TABLE.get(model)
     if prices is None:
         return CostEstimate(usd=0.0, priced=False)
-    usd = (input_tokens / 1000.0) * prices["input"] + (
-        output_tokens / 1000.0
-    ) * prices["output"]
+    usd = (input_tokens / 1000.0) * prices["input"] + (output_tokens / 1000.0) * prices["output"]
     return CostEstimate(usd=round(usd, 8), priced=True)
 
 
@@ -121,7 +118,7 @@ class LlmCall:
     trace_id: str
     stage: str = "generation"
 
-    def as_labels(self) -> Dict[str, Any]:
+    def as_labels(self) -> dict[str, Any]:
         """A content-free dict safe to log or expose."""
         return {
             "trace_id": self.trace_id,
@@ -162,9 +159,7 @@ def capture_usage(
     usage = getattr(response, "usage_metadata", None)
     input_tokens = _usage_field(usage, "prompt_token_count")
     output_tokens = _usage_field(usage, "candidates_token_count")
-    total_tokens = _usage_field(usage, "total_token_count") or (
-        input_tokens + output_tokens
-    )
+    total_tokens = _usage_field(usage, "total_token_count") or (input_tokens + output_tokens)
     cost = estimate_cost(model, input_tokens, output_tokens)
     return LlmCall(
         model=model,
@@ -193,10 +188,10 @@ class Trace:
     """Accumulates the stage spans of one request, keyed by a trace id."""
 
     trace_id: str = field(default_factory=lambda: new_trace_id())
-    spans: List[Span] = field(default_factory=list)
-    calls: List["LlmCall"] = field(default_factory=list)
+    spans: list[Span] = field(default_factory=list)
+    calls: list[LlmCall] = field(default_factory=list)
 
-    def request_totals(self) -> Dict[str, Any]:
+    def request_totals(self) -> dict[str, Any]:
         """Sum this request's model calls, for optional response metadata."""
         return {
             "trace_id": self.trace_id,
@@ -225,7 +220,7 @@ class Trace:
         finally:
             self.add_span(name, (time.perf_counter() - start) * 1000.0)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
             "spans": [{"stage": s.name, "duration_ms": s.duration_ms} for s in self.spans],
@@ -240,7 +235,7 @@ def new_trace_id() -> str:
 # ---------------------------------------------------------------------------
 # In-memory aggregate registry
 # ---------------------------------------------------------------------------
-def _percentile(samples: List[float], pct: float) -> float:
+def _percentile(samples: list[float], pct: float) -> float:
     if not samples:
         return 0.0
     ordered = sorted(samples)
@@ -269,9 +264,9 @@ class MetricsRegistry:
         self.output_tokens = 0
         self.total_tokens = 0
         self.cost_usd = 0.0
-        self._handler_latencies: List[float] = []
-        self._model_latencies: List[float] = []
-        self._by_model: Dict[str, Dict[str, float]] = {}
+        self._handler_latencies: list[float] = []
+        self._model_latencies: list[float] = []
+        self._by_model: dict[str, dict[str, float]] = {}
 
     def record_call(self, call: LlmCall) -> None:
         with self._lock:
@@ -297,19 +292,17 @@ class MetricsRegistry:
             self._handler_latencies.append(handler_latency_ms)
             self._trim(self._handler_latencies)
 
-    def _trim(self, samples: List[float]) -> None:
+    def _trim(self, samples: list[float]) -> None:
         if len(samples) > self._max_samples:
             del samples[: len(samples) - self._max_samples]
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {
                 "requests": {
                     "total": self.request_count,
                     "errors": self.error_count,
-                    "error_rate": round(self.error_count / self.request_count, 4)
-                    if self.request_count
-                    else 0.0,
+                    "error_rate": round(self.error_count / self.request_count, 4) if self.request_count else 0.0,
                 },
                 "tokens": {
                     "input": self.input_tokens,
@@ -356,7 +349,7 @@ registry = MetricsRegistry()
 # Current request's Trace, so a model call made deep in the request (e.g. the
 # safety classifier) can be correlated without threading the id through every
 # call site. #11 should eventually own this.
-current_trace: ContextVar[Optional[Trace]] = ContextVar("current_trace", default=None)
+current_trace: ContextVar[Trace | None] = ContextVar("current_trace", default=None)
 
 
 def record_model_call(
@@ -364,7 +357,7 @@ def record_model_call(
     model: str,
     latency_ms: float,
     stage: str = "generation",
-    trace: Optional[Trace] = None,
+    trace: Trace | None = None,
 ) -> LlmCall:
     """Capture one model call, record it globally and on the request's trace.
 

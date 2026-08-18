@@ -1,7 +1,8 @@
-import re
 import difflib
+import re
 from enum import Enum
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from corpus import corpus
 
 
@@ -13,20 +14,20 @@ class VerificationStatus(str, Enum):
 
 
 # Arabic Tashkeel / Diacritical Marks
-TASHKEEL_REGEX = re.compile(r'[\u0617-\u061A\u064B-\u0652\u0670]')
+TASHKEEL_REGEX = re.compile(r"[\u0617-\u061A\u064B-\u0652\u0670]")
 
 # Extraction Regex: Matches "Quran 2:255", "Surah 2:255", "[2:255]", "(2:255)", etc.
 QURAN_REF_REGEX = re.compile(
-    r'(?:Surah|Quran|Qur\'an)?\s*\[?\b([1-9]|[1-9]\d|1[0-0]\d|11[0-4])\s*:\s*([1-9]\d*)\b\]?'
-    r'(?:\s*[\"\'«”](.*?)[\"\'»“])?',
-    re.IGNORECASE | re.DOTALL
+    r"(?:Surah|Quran|Qur\'an)?\s*\[?\b([1-9]|[1-9]\d|1[0-0]\d|11[0-4])\s*:\s*([1-9]\d*)\b\]?"
+    r"(?:\s*[\"\'«”](.*?)[\"\'»“])?",
+    re.IGNORECASE | re.DOTALL,
 )
 
 HADITH_REF_REGEX = re.compile(
-    r'\b(Bukhari|Muslim|Abu Dawud|Tirmidhi|Nasa\'i|Ibn Majah|Muwatta|Ahmad)\b'
-    r'\s*(?:hadith|no\.|number|#)?\s*(\d+)?'
-    r'(?:\s*[\"\'«”](.*?)[\"\'»“])?',
-    re.IGNORECASE
+    r"\b(Bukhari|Muslim|Abu Dawud|Tirmidhi|Nasa\'i|Ibn Majah|Muwatta|Ahmad)\b"
+    r"\s*(?:hadith|no\.|number|#)?\s*(\d+)?"
+    r"(?:\s*[\"\'«”](.*?)[\"\'»“])?",
+    re.IGNORECASE,
 )
 
 
@@ -34,9 +35,9 @@ def normalize_arabic(text: str) -> str:
     """Strip tashkeel/diacritics and normalize Alef variants."""
     if not text:
         return ""
-    text = TASHKEEL_REGEX.sub('', text)
+    text = TASHKEEL_REGEX.sub("", text)
     # Unify Alef forms (أ, إ, آ -> ا)
-    text = re.sub(r'[\u0622\u0623\u0625]', '\u0627', text)
+    text = re.sub(r"[\u0622\u0623\u0625]", "\u0627", text)
     return text.strip()
 
 
@@ -45,8 +46,8 @@ def normalize_english(text: str) -> str:
     if not text:
         return ""
     text = text.lower()
-    text = re.sub(r'[^\w\s]', '', text)
-    return ' '.join(text.split())
+    text = re.sub(r"[^\w\s]", "", text)
+    return " ".join(text.split())
 
 
 def calculate_similarity(generated_quote: str, corpus_text: str) -> float:
@@ -58,7 +59,7 @@ def calculate_similarity(generated_quote: str, corpus_text: str) -> float:
     return difflib.SequenceMatcher(None, norm_gen, norm_corp).ratio()
 
 
-def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) -> Dict[str, Any]:
+def verify_quran_citation(surah: int, ayah: int, quote: str | None = None) -> dict[str, Any]:
     """Verify a single Quran reference against the corpus."""
     max_ayahs = corpus.get_ayah_count(surah)
 
@@ -69,7 +70,7 @@ def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) ->
             "surah": surah,
             "ayah": ayah,
             "status": VerificationStatus.MISMATCH,
-            "reason": f"Surah {surah} only has {max_ayahs or 0} ayahs; ayah {ayah} does not exist."
+            "reason": f"Surah {surah} only has {max_ayahs or 0} ayahs; ayah {ayah} does not exist.",
         }
 
     ayah_data = corpus.get_ayah(surah, ayah)
@@ -81,7 +82,7 @@ def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) ->
             "surah": surah,
             "ayah": ayah,
             "status": VerificationStatus.NOT_QUOTED,
-            "reason": "Reference exists; no quote provided for verification."
+            "reason": "Reference exists; no quote provided for verification.",
         }
 
     # 2. Check quote similarity (English translation)
@@ -95,7 +96,7 @@ def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) ->
             "surah": surah,
             "ayah": ayah,
             "status": VerificationStatus.VERIFIED,
-            "similarity": round(similarity, 2)
+            "similarity": round(similarity, 2),
         }
     else:
         return {
@@ -105,15 +106,11 @@ def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) ->
             "status": VerificationStatus.MISMATCH,
             "similarity": round(similarity, 2),
             "correct_text": corpus_english,
-            "reason": f"Quote does not match Surah {surah}:{ayah} text in corpus."
+            "reason": f"Quote does not match Surah {surah}:{ayah} text in corpus.",
         }
 
 
-def verify_hadith_citation(
-    collection: str,
-    number: Optional[str] = None,
-    quote: Optional[str] = None
-) -> Dict[str, Any]:
+def verify_hadith_citation(collection: str, number: str | None = None, quote: str | None = None) -> dict[str, Any]:
     """Verification for Hadith citations (defaults to honest unverified label when corpus is unavailable)."""
     if not corpus.has_hadith_corpus():
         return {
@@ -121,7 +118,7 @@ def verify_hadith_citation(
             "collection": collection,
             "number": number,
             "status": VerificationStatus.UNVERIFIED,
-            "reason": "Hadith corpus not available for verification."
+            "reason": "Hadith corpus not available for verification.",
         }
     # Future expansion for #24 when Hadith corpus lands
     return {
@@ -129,11 +126,11 @@ def verify_hadith_citation(
         "collection": collection,
         "number": number,
         "status": VerificationStatus.UNVERIFIED,
-        "reason": "Hadith verification not implemented."
+        "reason": "Hadith verification not implemented.",
     }
 
 
-def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
+def extract_and_verify_all(text: str) -> list[dict[str, Any]]:
     """Extract all citations from text and return their verification statuses."""
     results = []
 
