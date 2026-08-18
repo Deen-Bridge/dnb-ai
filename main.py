@@ -236,7 +236,7 @@ class CitationVerificationResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(..., min_length=1, description="The user's nonempty question.")
     chat_id: str | None = None
     context: str | None = None  # Additional context for specific queries
     madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
@@ -551,6 +551,7 @@ def get_model() -> genai.GenerativeModel:
     return genai.GenerativeModel(
         model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
+        safety_settings=get_safety_settings(),
     )
 
 
