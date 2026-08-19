@@ -40,6 +40,7 @@ The platform is composed of three services:
 - 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
 - 🧠 **Per-user long-term memory** — user profiles (knowledge level, madhhab, topics studied, remembered facts) extracted from conversations and injected across sessions; privacy controls with GET/DELETE endpoints and `remember` opt-out per request
 - 📋 **Conversation summarization** — compaction API ready for token-budget-triggered eviction; merges and recompresses summaries when history exceeds budget
+- 🗺️ **Personalized learning paths** — an ordered, justified "what to study next" drawn strictly from a caller-supplied course catalog, with grounding enforced in code so the model can never recommend a non-catalog or already-completed course
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
 - 📚 **Structured citations** — Quran and Hadith references returned as validated, typed objects on every answer, bounds-checked against the 114-surah index
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
@@ -58,6 +59,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
+| `POST` | `/learning-path` | Personalized, catalog-grounded study path from a learner profile + progress (see [Learning-path contract](#learning-path-contract-for-dnb-backend)) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
@@ -68,6 +70,59 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `POST` | `/feedback` | Rate a specific answer and flag failure categories |
 | `GET` | `/feedback/stats` | Aggregate answer-quality metrics (admin token) |
 | `GET` | `/feedback/records` | Browse flagged records, filterable (admin token) |
+
+### Learning-path contract (for `dnb-backend`)
+
+`POST /learning-path` returns a personalized, ordered study path for a learner.
+It is a companion to `/study/generate`: same structured-output machinery
+(Gemini JSON mode, schema-validated, bounded retry-to-`502`), plus **deterministic
+grounding guardrails** on top.
+
+**This service is stateless about the catalog.** Course and book data lives in
+[`dnb-backend`](https://github.com/Deen-Bridge/dnb-backend), not here — this AI
+service only ever sees purchase *metadata* and holds no catalog or database. So
+**the caller (`dnb-backend`) supplies the candidate courses in the request body**,
+and that `catalog` is the single source of truth for what may be recommended. The
+service **never invents course ids** and never recommends a course absent from the
+submitted catalog.
+
+Request body:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `profile.level` | `beginner \| intermediate \| advanced` | required |
+| `profile.goals` | `[goal]` | required, 1–10; enum: `quran_reading`, `tajweed`, `memorization`, `arabic`, `fiqh_basics`, `aqeedah`, `seerah`, `hadith`, `tafsir` |
+| `profile.time_per_week_hours` | `float` | optional, `0 < h ≤ 168` |
+| `profile.notes` | `string` | optional, ≤ 1000 chars |
+| `progress[]` | `{course_id, title, category, level, completion_pct, quiz_scores?}` | what the learner has studied (`completion_pct` 0–100) |
+| `catalog[]` | `{course_id, title, category, level, prerequisites[], description}` | **required, 1–200 items, unique ids** — the courses the learner may be recommended |
+
+Response (`LearningPath`): ordered `steps[]`, each
+`{course_id, title, order, reason, prerequisites_satisfied, estimated_weeks}`,
+plus a path-level `summary` and a `scholarly_note`.
+
+**Grounding is enforced in code, not just the prompt.** After the model responds,
+any step is dropped when its `course_id` is not in `catalog`, when the course is
+already completed (`completion_pct ≥ 90`), or when its prerequisites are not yet
+satisfied; survivors are renumbered contiguously from 1. If nothing grounded
+survives, the request is retried with the violations fed back, and exhaustion
+returns `502`. Empty catalog and oversized inputs return `422` **before** any
+model call.
+
+```bash
+curl -s -X POST "http://localhost:8000/learning-path" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "profile": {"level": "beginner", "goals": ["quran_reading", "tajweed"], "time_per_week_hours": 5},
+        "progress": [{"course_id": "arabic-101", "title": "Arabic Alphabet", "category": "arabic", "level": "beginner", "completion_pct": 100}],
+        "catalog": [
+          {"course_id": "quran-101", "title": "Quran Reading Basics", "category": "quran", "level": "beginner", "prerequisites": ["arabic-101"], "description": "Read from the mushaf."},
+          {"course_id": "tajweed-201", "title": "Introduction to Tajweed", "category": "quran", "level": "intermediate", "prerequisites": ["quran-101"], "description": "Rules of recitation."}
+        ]
+      }'
+```
+
+Offline demo (no API key, model mocked): `pytest -q tests/test_learning.py`.
 
 ## 🚀 Getting Started
 
