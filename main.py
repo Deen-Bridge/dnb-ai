@@ -69,6 +69,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from history import trim_history
+from learning import router as learning_router
 from memory import (
     ChatSummary,
     PersonalContext,
@@ -210,6 +211,8 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 app.include_router(stellar_router)
 app.include_router(faraid_router)
 app.include_router(study_router)
+# Personalized learning-path recommendations from a caller-supplied catalog
+app.include_router(learning_router)
 # Worship utilities: prayer times and Hijri/Gregorian date conversion
 app.include_router(worship_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
