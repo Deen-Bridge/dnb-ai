@@ -203,6 +203,7 @@ services:
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
 | `SEMANTIC_CACHE_MAX_ENTRIES` | Maximum cache entries (LRU eviction) | `1000` |
+| `RETRIEVAL_INDEX_PATH` | SQLite path for the persistent retrieval vector index; unset uses the in-memory fallback | — (in-memory) |
 | `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` | `true` |
 | `CONFIDENCE_LOW_THRESHOLD` | Below this score the service abstains | `0.40` |
 | `CONFIDENCE_HIGH_THRESHOLD` | At or above this score it answers with no caveat | `0.70` |
@@ -681,6 +682,44 @@ python scripts/export_eval_candidates.py --db feedback.db --output candidates.js
 
 Near-duplicate prompts are deduplicated; approved candidates feed the harness
 and, via #56, the semantic cache.
+
+### Retrieval infrastructure (chunking, embedding & vector index)
+
+The [`retrieval/`](retrieval/) package is the shared foundation the RAG epic
+builds on — a document **chunking** strategy, an **embedding** step, a
+**persistent vector store**, and an **incremental reindex + backfill** pipeline
+that keeps the index in sync as content changes. It ships the pipeline only; the
+product layers on top (personal-context #1, public-knowledge #2, access-scoped
+retrieval #3, hybrid + reranking #5) build against it.
+
+- **Chunking** ([`retrieval/chunking.py`](retrieval/chunking.py)) is
+  deterministic and content-type-aware: ayah and hadith records stay **atomic**,
+  while long prose is windowed by a token budget with overlap. Every chunk
+  carries stable `source` / `source_id` / `content_hash` metadata plus the
+  `scope` / `published` fields access-scoped retrieval (#3) filters on.
+- **Embedding** reuses the existing `text-embedding-004` seam
+  (`semantic_cache.embed_text`, offline-swappable via `set_fake_embedding`) and
+  **dedupes by `content_hash`**, so unchanged content is never re-embedded.
+- **Vector store** ([`retrieval/index.py`](retrieval/index.py)) is chosen by
+  `create_vector_store()` the way `create_session_store` picks its backend: a
+  durable **SQLite** store when `RETRIEVAL_INDEX_PATH` is set, or an in-memory
+  fallback that keeps local dev and CI offline and restart-free.
+- **Incremental sync** upserts changed chunks and deletes removed `source_id`s;
+  the **semantic cache now runs on this shared store** (its former linear scan is
+  retired).
+
+Rebuild the full index from the bundled corpora — idempotent, so re-running
+re-embeds nothing:
+
+```bash
+# Durable SQLite index (real embeddings via text-embedding-004):
+RETRIEVAL_INDEX_PATH=data/retrieval_index.db python scripts/build_index.py
+
+# Offline demo / CI — deterministic fake embeddings, no network or API key:
+python scripts/build_index.py --index-path /tmp/idx.db --fake-embeddings
+```
+
+The full schema and design notes live in [`docs/retrieval.md`](docs/retrieval.md).
 
 ### Content-safety testing
 

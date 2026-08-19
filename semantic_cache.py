@@ -9,11 +9,14 @@ request.context is None.
 
 Store choice
 ------------
-In-memory store with numpy for cosine similarity. Chosen over ChromaDB to
-keep dependencies minimal — numpy alone is sufficient for this use case,
-and avoids coupling to ChromaDB's full vector-store infrastructure. If the
-RAG infrastructure lands with ChromaDB, the cache can be migrated to share
-its collection.
+The cache is now backed by the shared retrieval vector store
+(:class:`retrieval.index.InMemoryVectorStore`) instead of a bespoke Python list
+and hand-rolled linear scan — the migration issue #88 called for. Cosine
+similarity search lives once, in ``retrieval.index``; this module keeps only the
+cache-specific concerns (TTL, LRU eviction, hit/miss stats) alongside its
+entries. Configuring ``RETRIEVAL_INDEX_PATH`` gives the corpus index a durable
+SQLite backend; the cache itself stays in-memory because a stale answer must
+never outlive a restart.
 """
 
 import logging
@@ -23,7 +26,26 @@ from typing import Any
 
 import numpy as np
 
+from retrieval.chunking import make_chunk
+from retrieval.index import InMemoryVectorStore, cosine_similarity
+
 logger = logging.getLogger(__name__)
+
+# ``cosine_similarity`` is re-exported (it now lives in ``retrieval.index``) so
+# existing importers — ``from semantic_cache import cosine_similarity`` in
+# memory.personal_context and the cache tests — keep working unchanged.
+__all__ = [
+    "CacheEntry",
+    "KeyedCache",
+    "SemanticCache",
+    "cosine_similarity",
+    "embed_text",
+    "get_cache",
+    "get_keyed_cache",
+    "keyed_cache_stats",
+    "normalize_text",
+    "set_fake_embedding",
+]
 
 # ---------------------------------------------------------------------------
 # Environment configuration
@@ -41,15 +63,6 @@ SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "1000")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    dot = float(np.dot(a, b))
-    norm_a = float(np.linalg.norm(a))
-    norm_b = float(np.linalg.norm(b))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 def normalize_text(text: str) -> str:
@@ -113,26 +126,55 @@ class CacheEntry:
 
 
 class SemanticCache:
+    """Embedding-similarity response cache backed by the shared vector store.
+
+    Entries live in a :class:`~retrieval.index.InMemoryVectorStore`, which owns
+    the cosine top-k search (the former hand-rolled linear scan is retired). The
+    cache-specific state — a :class:`CacheEntry` per stored vector plus its last
+    access time — is kept alongside, keyed by the store's ``chunk_id``, so TTL
+    expiry and LRU eviction still work while similarity matching is delegated to
+    the store.
+    """
+
     def __init__(self) -> None:
-        self._entries: list[CacheEntry] = []
-        self._access_times: list[float] = []
+        self._store = InMemoryVectorStore()
+        # chunk_id -> mutable cache state. Insertion-ordered, so ``_entries`` is
+        # stable. Kept in lockstep with the store: every key here has a vector
+        # in the store and vice versa.
+        self._entry_by_id: dict[str, CacheEntry] = {}
+        self._access_times: dict[str, float] = {}
+        self._counter = 0
 
         self.hits = 0
         self.misses = 0
         self.bypasses = 0
         self.evictions = 0
 
+    # -- test/introspection compatibility -----------------------------------
+
+    @property
+    def _entries(self) -> list[CacheEntry]:
+        """Live cache entries, insertion-ordered.
+
+        Returns the actual :class:`CacheEntry` objects (not copies), so mutating
+        an entry's ``expires_at`` in place is reflected on the next lookup — the
+        behavior the TTL tests exercise."""
+        return list(self._entry_by_id.values())
+
     # -- public API ---------------------------------------------------------
 
     def get(self, embedding: np.ndarray) -> CacheEntry | None:
         if not SEMANTIC_CACHE_ENABLED:
             return None
-        match = self._find_best_match(embedding)
-        if match is not None:
-            entry, idx = match
-            self._access_times[idx] = time.time()
-            self.hits += 1
-            return entry
+        self._sweep_expired()
+        matches = self._store.query(embedding, top_k=1, min_score=SEMANTIC_CACHE_THRESHOLD)
+        if matches:
+            chunk_id = matches[0].chunk.chunk_id
+            entry = self._entry_by_id.get(chunk_id)
+            if entry is not None and not entry.expired:
+                self._access_times[chunk_id] = time.time()
+                self.hits += 1
+                return entry
         self.misses += 1
         return None
 
@@ -146,6 +188,8 @@ class SemanticCache:
         if not SEMANTIC_CACHE_ENABLED:
             return
         self._evict_lru_if_full()
+        chunk_id = f"cache:{self._counter}"
+        self._counter += 1
         entry = CacheEntry(
             embedding=embedding,
             response=response,
@@ -153,8 +197,12 @@ class SemanticCache:
             history=history,
             expires_at=time.time() + SEMANTIC_CACHE_TTL_SECONDS,
         )
-        self._entries.append(entry)
-        self._access_times.append(time.time())
+        # The chunk text is a placeholder: matching uses the stored embedding
+        # vector, never a re-embedding of text, so no prompt text is needed here.
+        chunk = make_chunk(source="semantic_cache", source_id=chunk_id, text=f"semantic-cache-entry:{chunk_id}")
+        self._store.upsert(chunk, embedding)
+        self._entry_by_id[chunk_id] = entry
+        self._access_times[chunk_id] = time.time()
 
     def get_stats(self) -> dict[str, Any]:
         total = self.hits + self.misses + self.bypasses
@@ -164,7 +212,7 @@ class SemanticCache:
             "bypasses": self.bypasses,
             "evictions": self.evictions,
             "hit_rate": round(self.hits / total, 4) if total > 0 else 0.0,
-            "size": len(self._entries),
+            "size": self._store.count(),
             "max_entries": SEMANTIC_CACHE_MAX_ENTRIES,
             "threshold": SEMANTIC_CACHE_THRESHOLD,
             "ttl_seconds": SEMANTIC_CACHE_TTL_SECONDS,
@@ -172,44 +220,29 @@ class SemanticCache:
         }
 
     def clear(self) -> None:
-        self._entries.clear()
+        self._store.clear()
+        self._entry_by_id.clear()
         self._access_times.clear()
 
     # -- internals ----------------------------------------------------------
 
-    def _find_best_match(self, embedding: np.ndarray) -> tuple[CacheEntry, int] | None:
-        best_score = SEMANTIC_CACHE_THRESHOLD
-        best_idx: int | None = None
+    def _remove(self, chunk_id: str) -> None:
+        self._store.delete_chunk(chunk_id)
+        self._entry_by_id.pop(chunk_id, None)
+        self._access_times.pop(chunk_id, None)
 
-        surviving_entries: list[CacheEntry] = []
-        surviving_times: list[float] = []
-
-        for i, entry in enumerate(self._entries):
-            if entry.expired:
-                self.evictions += 1
-                continue
-            surviving_entries.append(entry)
-            surviving_times.append(self._access_times[i])
-
-        self._entries = surviving_entries
-        self._access_times = surviving_times
-
-        for i, entry in enumerate(self._entries):
-            score = cosine_similarity(embedding, entry.embedding)
-            if score >= best_score:
-                best_score = score
-                best_idx = i
-
-        if best_idx is not None:
-            return self._entries[best_idx], best_idx
-        return None
+    def _sweep_expired(self) -> None:
+        """Lazily drop expired entries before a lookup (matches old semantics)."""
+        expired = [chunk_id for chunk_id, entry in self._entry_by_id.items() if entry.expired]
+        for chunk_id in expired:
+            self._remove(chunk_id)
+            self.evictions += 1
 
     def _evict_lru_if_full(self) -> None:
-        if len(self._entries) < SEMANTIC_CACHE_MAX_ENTRIES:
+        if len(self._entry_by_id) < SEMANTIC_CACHE_MAX_ENTRIES:
             return
-        lru_idx = int(np.argmin(self._access_times))
-        self._entries.pop(lru_idx)
-        self._access_times.pop(lru_idx)
+        lru_id = min(self._access_times, key=lambda k: self._access_times[k])
+        self._remove(lru_id)
         self.evictions += 1
 
 

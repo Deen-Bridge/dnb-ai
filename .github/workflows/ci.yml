@@ -48,6 +48,15 @@ jobs:
       - name: Run semantic cache tests
         run: pytest -q tests/test_semantic_cache.py
 
+      - name: Run retrieval infrastructure tests
+        run: pytest -q tests/test_retrieval_chunking.py tests/test_retrieval_index.py tests/test_build_index.py
+
+      - name: Verify retrieval backfill is idempotent (offline demo)
+        run: |
+          python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings
+          python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings | tee /tmp/ci-backfill-2.log
+          grep -q "0 added, 0 updated" /tmp/ci-backfill-2.log
+
       - name: Run fiqh tests
         run: pytest -q tests/test_fiqh.py
 
