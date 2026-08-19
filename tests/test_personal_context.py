@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import re
 import time
+import uuid
 from unittest.mock import MagicMock
 
 import httpx
@@ -413,7 +414,7 @@ class TestChatIntegration:
             "/chat",
             json={
                 "prompt": "what is my progress",
-                "chat_id": "c-personal",
+                "chat_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "c-personal")),
                 "user_id": "alice",
                 "auth_token": "jwt-alice",
                 "remember": False,
@@ -439,7 +440,7 @@ class TestChatIntegration:
             "/chat",
             json={
                 "prompt": "what is my progress",
-                "chat_id": "c-bob",
+                "chat_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "c-bob")),
                 "user_id": "bob",
                 "auth_token": "jwt-bob",
                 "remember": False,
@@ -454,7 +455,7 @@ class TestChatIntegration:
             "/chat",
             json={
                 "prompt": "what is my progress",
-                "chat_id": "c-alice",
+                "chat_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "c-alice")),
                 "user_id": "alice",
                 "auth_token": "jwt-alice",
                 "remember": False,
@@ -471,7 +472,10 @@ class TestChatIntegration:
         sink: dict = {}
         monkeypatch.setattr(main, "get_model", lambda: mock_model_capturing(sink))
         # No user_id / auth_token → deny by default.
-        resp = client.post("/chat", json={"prompt": "what is my progress", "chat_id": "c-anon"})
+        resp = client.post(
+            "/chat",
+            json={"prompt": "what is my progress", "chat_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "c-anon"))},
+        )
         assert resp.status_code == 200, resp.text
         assert "YOUR DEEN BRIDGE ACTIVITY" not in sink["prompt"]
         assert "Alpha course" not in sink["prompt"]

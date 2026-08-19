@@ -130,6 +130,9 @@ settings = get_settings()
 
 GEMINI_API_KEY = settings.gemini_api_key
 
+CHAT_PROMPT_MAX_LENGTH = 4000
+CHAT_CONTEXT_MAX_LENGTH = 8000
+
 genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
@@ -236,9 +239,24 @@ class CitationVerificationResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, description="The user's nonempty question.")
-    chat_id: str | None = None
-    context: str | None = None  # Additional context for specific queries
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=CHAT_PROMPT_MAX_LENGTH,
+        description="User question after leading and trailing whitespace is removed.",
+        examples=["What are the five pillars of Islam?"],
+    )
+    chat_id: uuid.UUID | None = Field(
+        default=None,
+        description="Existing chat session UUID. Omit it to start a new session.",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    context: str | None = Field(
+        default=None,
+        max_length=CHAT_CONTEXT_MAX_LENGTH,
+        description="Optional supporting context appended to the model prompt.",
+        examples=["The user is asking about a general educational scenario."],
+    )
     madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
     language: str | None = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
     user_id: str | None = Field(default=None, max_length=128)  # Opaque user identifier for personalization
@@ -248,6 +266,11 @@ class ChatRequest(BaseModel):
     # pass the user's JWT so this service can fetch history from dnb-backend.
     transactions: list[PurchaseTransaction] | None = None
     auth_token: str | None = None
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def strip_prompt_whitespace(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
 
 
 class Message(BaseModel):
@@ -689,7 +712,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        chat_id = request.chat_id or str(uuid.uuid4())
+        chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
 
@@ -1154,7 +1177,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
     _handler_start = time.perf_counter()
 
     try:
-        chat_id = request.chat_id or str(uuid.uuid4())
+        chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
         logger.info("Received streaming chat request: %s...", prompt[:100])
@@ -1571,25 +1594,27 @@ async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str]:
+async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
+    chat_id_str = str(chat_id)
     try:
-        existed = chat_id in active_chats
-        active_chats.pop(chat_id, None)
+        existed = chat_id_str in active_chats
+        active_chats.pop(chat_id_str, None)
         # Drop this session's feedback bookkeeping too, so the message-id list
         # and answer snapshots do not outlive the conversation they describe.
-        for message_id in chat_message_ids.pop(chat_id, []):
-            answer_snapshots.pop((chat_id, message_id), None)
+        for message_id in chat_message_ids.pop(chat_id_str, []):
+            answer_snapshots.pop((chat_id_str, message_id), None)
         # Remove from persistent store
-        await session_store.delete_session(chat_id)
+        persisted = await session_store.delete_session(chat_id_str)
         if user_id:
-            await session_store.remove_user_chat(user_id, chat_id)
-        if existed:
-            logger.info(f"Deleted chat session: {chat_id}")
-            return {"message": "Chat session deleted successfully"}
-        return {"message": "Chat session not found"}
+            await session_store.remove_user_chat(user_id, chat_id_str)
     except Exception as e:
         logger.error("Error deleting chat", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+    if not (existed or persisted):
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    logger.info("Deleted chat session: %s", chat_id_str)
+    return {"message": "Chat session deleted successfully"}
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import asyncio
 import time
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -52,8 +53,8 @@ async def test_concurrent_chat_requests_do_not_block_event_loop(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         start_time = time.monotonic()
-        req1 = client.post("/chat", json={"prompt": "Hello 1", "chat_id": "c1"})
-        req2 = client.post("/chat", json={"prompt": "Hello 2", "chat_id": "c2"})
+        req1 = client.post("/chat", json={"prompt": "Hello 1", "chat_id": str(uuid.uuid4())})
+        req2 = client.post("/chat", json={"prompt": "Hello 2", "chat_id": str(uuid.uuid4())})
 
         res1, res2 = await asyncio.gather(req1, req2)
         elapsed = time.monotonic() - start_time
