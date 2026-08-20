@@ -86,6 +86,11 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from providers.gemini import GeminiProvider
+from providers.openai_compat import OpenAICompatProvider
+from providers.router import ProviderRouter
+from providers.types import GenerationConfig as ProviderGenerationConfig
+from providers.types import Message as ProviderMessage
 from prompts import (
     ExperimentAssignment,
     ExperimentConfig,
@@ -125,11 +130,6 @@ from tafsir import (
     tafsir_system_context,
 )
 from worship import router as worship_router
-from providers.gemini import GeminiProvider
-from providers.openai_compat import OpenAICompatProvider
-from providers.router import ProviderRouter
-from providers.types import GenerationConfig as ProviderGenerationConfig
-from providers.types import Message as ProviderMessage
 
 # Install JSON logging before any module-level code emits a record, and
 # independently of uvicorn's own loggers (uvicorn configures logging while

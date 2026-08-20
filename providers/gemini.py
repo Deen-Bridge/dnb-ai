@@ -1,5 +1,3 @@
-from typing import Any
-
 import google.generativeai as genai
 
 from .types import GenerationConfig, Message, ProviderReply
