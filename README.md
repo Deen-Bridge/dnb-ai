@@ -721,6 +721,45 @@ python scripts/build_index.py --index-path /tmp/idx.db --fake-embeddings
 
 The full schema and design notes live in [`docs/retrieval.md`](docs/retrieval.md).
 
+### Structured logging & request correlation
+
+Logs are **newline-delimited JSON on stdout** ([`logging_config.py`](logging_config.py)),
+so Render's log search — or any aggregator added later — can filter by field
+instead of grepping prose. Every record carries `timestamp`, `level`, `logger`,
+`message` and `request_id`, plus whatever fields the call site attached:
+
+```json
+{"timestamp":"2026-08-19T14:02:11.418+00:00","level":"INFO","logger":"main","message":"chat request received","request_id":"2d0f8912b04748c9bc0203d4756f9084","chat_id":"431b0bee-f63a-40c8-a963-1a38d719cdce","new_session":true,"prompt_chars":57,"context_chars":0}
+{"timestamp":"2026-08-19T14:02:11.421+00:00","level":"INFO","logger":"telemetry","message":"model call completed","request_id":"2d0f8912b04748c9bc0203d4756f9084","stage":"generation","model":"gemini-2.5-flash","total_tokens":812,"cost_usd":0.00019,"latency_ms":1843.2}
+{"timestamp":"2026-08-19T14:02:11.423+00:00","level":"INFO","logger":"request","message":"request completed","request_id":"2d0f8912b04748c9bc0203d4756f9084","http_method":"POST","path":"/chat","status_code":200,"duration_ms":1906.4}
+```
+
+**One id per request, everywhere.** A `contextvars`-backed filter stamps the id
+onto every record emitted while a request is served — including from modules
+that know nothing about HTTP — and the same value goes back on the
+**`X-Request-ID`** response header. An inbound `X-Request-ID` is honoured (after
+validation, since it is echoed into a header and into logs), so a trace started
+in `dnb-backend` continues here. It is also the telemetry trace id, so
+`X-Trace-Id` and `X-Request-ID` are the same value: one id links a log search, a
+response header and a `/metrics` trace.
+
+**Prompt content is never logged by default.** These are religious questions —
+sensitive personal content. Log records carry `prompt_chars` and `chat_id`, not
+the prompt. Raw text requires an explicit `LOG_PROMPTS=true` opt-in.
+
+**Failures carry their stack trace.** Exception handlers use `logger.exception`,
+so a production 500 lands as one JSON record with a nested `exception` object
+holding the type, message and full traceback.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `LOG_LEVEL` | `INFO` | Root log level |
+| `LOG_JSON` | `true` | `false` prints plain text, friendlier on a local console |
+| `LOG_PROMPTS` | `false` | `true` includes raw prompt text — sensitive, keep off |
+| `LOG_ACCESS` | `false` | `true` restores uvicorn's access log (otherwise the `request completed` record replaces it, avoiding double-logging) |
+
+Offline demo (no API key, model mocked): `pytest -q tests/test_structured_logging.py`.
+
 ### Content-safety testing
 
 The versioned policy lives in [`safety/policy.yaml`](safety/policy.yaml), with
