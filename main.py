@@ -70,6 +70,7 @@ from fiqh import (
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from history import trim_history
 from learning import router as learning_router
+from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
 from memory import (
     ChatSummary,
     PersonalContext,
@@ -124,6 +125,11 @@ from tafsir import (
     tafsir_system_context,
 )
 from worship import router as worship_router
+
+# Install JSON logging before any module-level code emits a record, and
+# independently of uvicorn's own loggers (uvicorn configures logging while
+# importing this module, so this call runs after and deliberately wins).
+configure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +234,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Added last, so it is the outermost layer: every response — including CORS
+# preflights and anything an exception handler produces — leaves with an
+# X-Request-ID, and every log record emitted while serving it carries the same
+# id. Must stay outside CORSMiddleware for that to hold.
+app.add_middleware(RequestContextMiddleware)
 
 
 # Response Models
@@ -725,7 +737,18 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         # detects that one was present and warns the user.
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
-        logger.info(f"Received chat request: {prompt[:100]}...")
+        logger.info(
+            "chat request received",
+            extra={
+                "chat_id": chat_id,
+                "new_session": is_new_chat,
+                "prompt_chars": len(prompt),
+                "context_chars": len(extra_context) if extra_context else 0,
+                "language": request.language,
+                "has_user_id": bool(request.user_id),
+                **prompt_debug_fields(prompt),
+            },
+        )
 
         # --- A/B experiment assignment (populated if any experiment is active) ---
         _current_experiment: ExperimentAssignment | None = None
@@ -806,7 +829,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     ]
                 )
                 active_chats[chat_id] = chat_session
-                logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
+                logger.info(
+                    "semantic cache hit",
+                    extra={"chat_id": chat_id, "prompt_chars": len(prompt), **prompt_debug_fields(prompt)},
+                )
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
                 _finalize()
                 _succeeded = True
@@ -827,7 +853,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         async def generate(safety_prompt: str) -> str:
             if chat_id not in active_chats:
-                logger.info(f"Creating new chat session: {chat_id}")
+                logger.info("chat session created", extra={"chat_id": chat_id})
                 model = get_model()
                 # Load persisted history if available
                 persisted = await session_store.load_history(chat_id)
@@ -857,7 +883,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += f"\n\n{memory_block}"
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
-            logger.info("Sending message to chat...")
+            logger.info("sending message to model", extra={"chat_id": chat_id})
             _t0 = time.perf_counter()
             response = await send_message_with_retry(
                 active_chats[chat_id],
@@ -890,8 +916,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _pp_start = time.perf_counter()
 
         logger.info(
-            "safety=%s",
-            {
+            "safety evaluated",
+            extra={
+                "chat_id": chat_id,
                 "policy_id": safety_result.category_id if safety_result else None,
                 "action": safety_result.action if safety_result else "disabled",
                 "stages_fired": safety_result.stages_fired if safety_result else [],
@@ -912,8 +939,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 if message.role == "user":
                     content = _strip_system_context(content)
                 history.append(Message(role="user" if message.role == "user" else "model", content=content))
-            except Exception as e:
-                logger.warning(f"Error processing message in history: {str(e)}")
+            except Exception:  # noqa: BLE001 - one malformed turn must not fail the answer
+                logger.warning("error processing message in history", exc_info=True)
                 continue
 
         response_text = safety_result.text if safety_result else generated_text
@@ -965,15 +992,16 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     chat_id=chat_id,
                 )
                 assessment.review_id = item.id
-            except Exception as exc:  # noqa: BLE001 - the answer still matters
-                logger.error("Could not queue answer for scholar review: %s", exc)
+            except Exception:  # noqa: BLE001 - the answer still matters
+                logger.exception("could not queue answer for scholar review", extra={"chat_id": chat_id})
                 assessment.queued = False
 
         response_text = apply_policy(response_text, assessment)
 
         logger.info(
-            "confidence=%s",
-            {
+            "confidence assessed",
+            extra={
+                "chat_id": chat_id,
                 "score": assessment.score,
                 "band": assessment.band.value,
                 "signals": assessment.signals_used,
@@ -991,7 +1019,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
             semantic_cache.put(embedding, response_text, chat_id, history)
-            logger.info("Semantic cache WRITE for prompt: %s", prompt[:80])
+            logger.info(
+                "semantic cache write",
+                extra={"chat_id": chat_id, "prompt_chars": len(prompt), **prompt_debug_fields(prompt)},
+            )
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
@@ -1002,7 +1033,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _tag_history_with_message_ids(chat_id, history)
 
         trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
-        logger.info("Chat response generated successfully")
+        logger.info(
+            "chat answer generated",
+            extra={"chat_id": chat_id, "message_id": message_id, "answer_chars": len(response_text)},
+        )
         # Build the response before finalizing, so a construction/validation
         # failure is handled only by the error path and the request is not
         # counted as both a success (here) and an error (except block).
@@ -1101,7 +1135,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         exc.headers = {**(exc.headers or {}), "X-Trace-Id": trace.trace_id}
         raise
     except Exception as exc:
-        logger.exception("Unexpected error in /chat handler for session %s: %s", chat_id, exc)
+        logger.exception("unexpected error in /chat handler", extra={"chat_id": chat_id})
         raise HTTPException(
             status_code=500,
             detail="AI service error",
@@ -1183,7 +1217,17 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
         chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
-        logger.info("Received streaming chat request: %s...", prompt[:100])
+        logger.info(
+            "streaming chat request received",
+            extra={
+                "chat_id": chat_id,
+                "prompt_chars": len(prompt),
+                "context_chars": len(extra_context) if extra_context else 0,
+                "language": request.language,
+                "has_user_id": bool(request.user_id),
+                **prompt_debug_fields(prompt),
+            },
+        )
 
         # --- A/B experiment assignment ---
         _current_experiment: ExperimentAssignment | None = None
@@ -1259,7 +1303,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
                 # --- Create or get chat session ---
                 if chat_id not in active_chats:
-                    logger.info("Creating new streaming chat session: %s", chat_id)
+                    logger.info("streaming chat session created", extra={"chat_id": chat_id})
                     # Resume from persisted history so a returning user (or a
                     # request that arrived after a restart) keeps the context.
                     persisted = await session_store.load_history(chat_id)
@@ -1297,7 +1341,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
                 # --- Async streaming generation ---
                 with trace.span("generation"):
-                    logger.info("Starting async streaming response...")
+                    logger.info("streaming response started", extra={"chat_id": chat_id})
                     _t0 = time.perf_counter()
 
                     stream_response = await active_chats[chat_id].send_message_async(
@@ -1385,15 +1429,16 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                             chat_id=chat_id,
                         )
                         assessment.review_id = item.id
-                    except Exception as exc:  # noqa: BLE001
-                        logger.error("Could not queue streaming answer for review: %s", exc)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("could not queue streaming answer for review", extra={"chat_id": chat_id})
                         assessment.queued = False
 
                 combined_text = apply_policy(combined_text, assessment)
 
                 logger.info(
-                    "confidence=%s",
-                    {
+                    "confidence assessed",
+                    extra={
+                        "chat_id": chat_id,
                         "score": assessment.score,
                         "band": assessment.band.value,
                         "signals": assessment.signals_used,
@@ -1453,7 +1498,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 )
                 yield f"data: {done}\n\n"
 
-                logger.info("Streaming chat response completed for %s", chat_id)
+                logger.info("streaming chat response completed", extra={"chat_id": chat_id})
 
                 # --- Persist chat history ---
                 # Awaited (not fire-and-forget) so a client that immediately
@@ -1465,7 +1510,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # Client disconnected mid-stream. Consume remaining chunks
                 # (if any) so the Gemini SDK finalises chat.history and a
                 # follow-up message in this session isn't left broken.
-                logger.info("Client disconnected from streaming chat %s", chat_id)
+                logger.info("client disconnected from streaming chat", extra={"chat_id": chat_id})
                 if stream_response is not None:
                     try:
                         await stream_response.resolve()
@@ -1473,8 +1518,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                         pass
                 raise
 
-            except Exception as exc:
-                logger.error("Streaming error for %s: %s", chat_id, exc)
+            except Exception:
+                logger.exception("streaming chat failed", extra={"chat_id": chat_id})
                 err = json.dumps(
                     {
                         "type": "error",
@@ -1499,9 +1544,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
     except Exception as exc:
         logger.exception(
-            "Unexpected error initialising streaming chat %s: %s",
-            getattr(request, "chat_id", None),
-            exc,
+            "unexpected error initialising streaming chat",
+            extra={"chat_id": str(getattr(request, "chat_id", None) or "")},
         )
         raise HTTPException(
             status_code=500,
@@ -1576,7 +1620,7 @@ async def get_user_chats(user_id: str) -> dict[str, Any]:
         chats.sort(key=lambda c: c["created_at"] or 0, reverse=True)
         return {"chats": chats}
     except Exception as e:
-        logger.error("Error listing user chats", exc_info=True)
+        logger.exception("failed to list user chats", extra={"user_id_prefix": user_id[:8]})
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -1592,7 +1636,7 @@ async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
                 msg["text"] = _strip_system_context(msg.get("text", ""))
         return history
     except Exception as e:
-        logger.error("Error loading chat history", exc_info=True)
+        logger.exception("failed to load chat history", extra={"chat_id": chat_id})
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -1611,12 +1655,12 @@ async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[st
         if user_id:
             await session_store.remove_user_chat(user_id, chat_id_str)
     except Exception as e:
-        logger.error("Error deleting chat", exc_info=True)
+        logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
     if not (existed or persisted):
         raise HTTPException(status_code=404, detail="Chat session not found")
-    logger.info("Deleted chat session: %s", chat_id_str)
+    logger.info("chat session deleted", extra={"chat_id": chat_id_str})
     return {"message": "Chat session deleted successfully"}
 
 
@@ -1691,14 +1735,12 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         # SQLite/Redis I/O is synchronous; keep it off the event loop.
         await run_in_threadpool(feedback_store.upsert, record)
     except Exception as exc:
-        logger.error("Failed to store feedback: %s", exc)
+        logger.exception("failed to store feedback", extra={"chat_id": body.chat_id, "message_id": body.message_id})
         raise HTTPException(status_code=500, detail="Failed to store feedback.") from exc
 
     logger.info(
-        "Feedback stored: chat_id=%s message_id=%s rating=%s",
-        body.chat_id,
-        body.message_id,
-        body.rating,
+        "feedback stored",
+        extra={"chat_id": body.chat_id, "message_id": body.message_id, "rating": body.rating},
     )
     return {"status": "ok", "feedback_id": record.feedback_id}
 
@@ -1712,7 +1754,7 @@ async def feedback_stats() -> dict[str, Any]:
     try:
         return await run_in_threadpool(feedback_store.stats)
     except Exception as exc:
-        logger.error("Failed to fetch feedback stats: %s", exc)
+        logger.exception("failed to fetch feedback stats")
         raise HTTPException(status_code=500, detail="Failed to fetch stats.") from exc
 
 
@@ -1739,7 +1781,7 @@ async def feedback_records(
         records = await run_in_threadpool(feedback_store.list_records, rating, category, limit)
         return {"records": [r.to_dict() for r in records]}
     except Exception as exc:
-        logger.error("Failed to fetch feedback records: %s", exc)
+        logger.exception("failed to fetch feedback records")
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
 
 
@@ -1936,5 +1978,5 @@ async def delete_experiment(experiment_id: str) -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting server...")
+    logger.info("starting server", extra={"port": settings.port})
     uvicorn.run(app, host="0.0.0.0", port=settings.port)

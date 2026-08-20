@@ -87,6 +87,9 @@ jobs:
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
 
+      - name: Run structured logging tests
+        run: pytest -q tests/test_structured_logging.py
+
       - name: Run multilingual support tests
         run: pytest -q tests/test_multilingual.py
 
