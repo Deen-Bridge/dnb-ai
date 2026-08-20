@@ -371,3 +371,38 @@ async def test_middleware_passes_non_http_scopes_through_untouched():
     await logging_config.RequestContextMiddleware(inner)({"type": "lifespan"}, None, None)
 
     assert seen == ["lifespan"]
+
+
+# ---------------------------------------------------------------------------
+# Thread boundaries
+# ---------------------------------------------------------------------------
+def test_request_id_survives_the_threadpool_hop(json_logs, fake_model, monkeypatch):
+    """Blocking store I/O runs via run_in_threadpool. Correlation would have a
+    hole in it if records emitted inside that worker thread lost the id, so
+    /feedback is driven end to end with the store logging from the worker."""
+    answered = client.post("/chat", json={"prompt": SECRET_PROMPT})
+    chat_id = answered.json()["chat_id"]
+    message_id = answered.json()["message_id"]
+
+    worker_logger = logging.getLogger("feedback.store")
+
+    def upsert_from_worker(record):
+        worker_logger.info("stored from worker thread", extra={"feedback_id": record.feedback_id})
+
+    monkeypatch.setattr(main.feedback_store, "upsert", upsert_from_worker)
+
+    response = client.post(
+        "/feedback",
+        json={"chat_id": chat_id, "message_id": message_id, "rating": "up"},
+    )
+
+    assert response.status_code == 200
+    request_id = response.headers[REQUEST_ID_HEADER]
+
+    from_worker = json_logs.find("stored from worker thread")
+    assert from_worker["request_id"] == request_id
+    assert from_worker["feedback_id"]
+
+    # And the whole /feedback request still correlates on one id.
+    feedback_records = [r for r in json_logs.records() if r["request_id"] == request_id]
+    assert {r["message"] for r in feedback_records} >= {"stored from worker thread", "feedback stored"}
