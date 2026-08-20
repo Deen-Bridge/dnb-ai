@@ -406,3 +406,75 @@ def test_request_id_survives_the_threadpool_hop(json_logs, fake_model, monkeypat
     # And the whole /feedback request still correlates on one id.
     feedback_records = [r for r in json_logs.records() if r["request_id"] == request_id]
     assert {r["message"] for r in feedback_records} >= {"stored from worker thread", "feedback stored"}
+
+
+# ---------------------------------------------------------------------------
+# JSON validity under hostile values
+# ---------------------------------------------------------------------------
+def _strict_loads(line: str) -> dict:
+    """Parse rejecting NaN/Infinity — json.loads accepts them by default, so a
+    lax parse would hide exactly the bug this guards against."""
+
+    def reject(token):
+        raise AssertionError(f"line contains the non-JSON token {token!r}: {line}")
+
+    return json.loads(line, parse_constant=reject)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_floats_do_not_produce_invalid_json(bad):
+    """LLM_PRICE_TABLE can be configured with non-finite prices, which reach
+    the telemetry record's cost_usd. json.dumps would write bare NaN/Infinity,
+    which is not JSON and breaks every downstream log parser."""
+    record = logging.LogRecord("telemetry", logging.INFO, __file__, 1, "model call completed", (), None)
+    record.cost_usd = bad
+    record.nested = {"prices": [{"input": bad}]}
+
+    line = logging_config.JsonFormatter().format(record)
+    parsed = _strict_loads(line)
+
+    assert parsed["cost_usd"] == str(bad)
+    assert parsed["nested"]["prices"][0]["input"] == str(bad)
+
+
+def test_finite_floats_are_still_emitted_as_numbers():
+    record = logging.LogRecord("telemetry", logging.INFO, __file__, 1, "model call completed", (), None)
+    record.cost_usd = 0.00019
+    record.latency_ms = 1843.2
+
+    parsed = _strict_loads(logging_config.JsonFormatter().format(record))
+
+    assert parsed["cost_usd"] == 0.00019
+    assert parsed["latency_ms"] == 1843.2
+
+
+def test_an_unserializable_extra_still_yields_one_valid_json_line():
+    """A formatter that raises drops the record and prints a traceback to
+    stderr. The envelope must survive whatever a call site attaches."""
+
+    class Hostile:
+        def __repr__(self):
+            raise RuntimeError("repr exploded")
+
+        def __str__(self):
+            raise RuntimeError("str exploded")
+
+    record = logging.LogRecord("main", logging.INFO, __file__, 1, "chat request received", (), None)
+    record.weird = Hostile()
+
+    parsed = _strict_loads(logging_config.JsonFormatter().format(record))
+
+    assert parsed["message"] == "chat request received"
+    assert parsed["logger"] == "main"
+    assert parsed["log_serialization_error"] is True
+
+
+def test_live_request_lines_survive_a_strict_json_parser(json_logs, fake_model):
+    """The end-to-end version: every line a real request emits parses under a
+    parser that rejects NaN/Infinity, not just under json.loads' defaults."""
+    client.post("/chat", json={"prompt": SECRET_PROMPT})
+
+    lines = json_logs.lines()
+    assert lines
+    for line in lines:
+        _strict_loads(line)

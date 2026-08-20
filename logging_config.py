@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -164,6 +165,25 @@ def prompt_debug_fields(prompt: str | None, key: str = "prompt") -> dict[str, st
 # ---------------------------------------------------------------------------
 # Formatter
 # ---------------------------------------------------------------------------
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats so the rendered line stays parseable JSON.
+
+    ``json.dumps`` writes ``NaN``/``Infinity`` for them, which are Python
+    literals rather than JSON, and a strict parser rejects the whole line. They
+    are reachable in practice: a deployment can set ``LLM_PRICE_TABLE`` to
+    non-finite prices, which flow into the ``cost_usd`` field of the telemetry
+    log record. Rendering them as their string form keeps the value visible
+    instead of silently dropping it.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 class JsonFormatter(logging.Formatter):
     """Render a LogRecord as a single line of JSON.
 
@@ -195,8 +215,27 @@ class JsonFormatter(logging.Formatter):
         if record.stack_info:
             payload["stack"] = self.formatStack(record.stack_info)
 
-        # default=str keeps one unserializable extra from killing the line.
-        return json.dumps(payload, default=str, ensure_ascii=False)
+        # default=str keeps one unserializable extra from killing the line, and
+        # allow_nan=False refuses to emit the NaN/Infinity tokens that would
+        # make it invalid JSON — _json_safe has already replaced those.
+        try:
+            return json.dumps(_json_safe(payload), default=str, ensure_ascii=False, allow_nan=False)
+        except Exception:  # noqa: BLE001 - nothing a call site attaches may kill logging
+            # A formatter that raises drops the record entirely, so this catches
+            # everything: json.dumps raises TypeError/ValueError itself, but
+            # default=str re-raises whatever a hostile __str__ does. One line
+            # that is valid JSON but thin beats no line at all, and beats a
+            # traceback on stderr.
+            return json.dumps(
+                {
+                    "timestamp": payload["timestamp"],
+                    "level": payload["level"],
+                    "logger": payload["logger"],
+                    "message": payload["message"],
+                    "request_id": payload["request_id"],
+                    "log_serialization_error": True,
+                }
+            )
 
 
 # ---------------------------------------------------------------------------
