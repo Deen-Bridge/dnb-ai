@@ -508,10 +508,12 @@ def _build_provider_router() -> ProviderRouter | None:
             continue
         if name in {"openai", "openai-compatible", "openrouter", "groq"}:
             api_key = os.getenv(f"{name.upper().replace('-', '_')}_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-            base_url = os.getenv(f"{name.upper().replace('-', '_')}_BASE_URL") or os.getenv(
-                "OPENAI_BASE_URL", "https://api.openai.com/v1"
+            base_url = (
+                os.getenv(f"{name.upper().replace('-', '_')}_BASE_URL")
+                or os.getenv("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1"
             )
-            model = os.getenv(f"{name.upper().replace('-', '_')}_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            model = os.getenv(f"{name.upper().replace('-', '_')}_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
             if api_key:
                 providers.append(OpenAICompatProvider(name, api_key, base_url, model))
     if not providers:
