@@ -86,11 +86,6 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
-from providers.gemini import GeminiProvider
-from providers.openai_compat import OpenAICompatProvider
-from providers.router import ProviderRouter
-from providers.types import GenerationConfig as ProviderGenerationConfig
-from providers.types import Message as ProviderMessage
 from prompts import (
     ExperimentAssignment,
     ExperimentConfig,
@@ -99,6 +94,10 @@ from prompts import (
     get_registry,
     register_defaults,
 )
+from providers.gemini import GeminiProvider
+from providers.openai_compat import OpenAICompatProvider
+from providers.router import ProviderRouter
+from providers.types import GenerationConfig as ProviderGenerationConfig, Message as ProviderMessage
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -509,7 +508,9 @@ def _build_provider_router() -> ProviderRouter | None:
             continue
         if name in {"openai", "openai-compatible", "openrouter", "groq"}:
             api_key = os.getenv(f"{name.upper().replace('-', '_')}_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-            base_url = os.getenv(f"{name.upper().replace('-', '_')}_BASE_URL") or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+            base_url = os.getenv(f"{name.upper().replace('-', '_')}_BASE_URL") or os.getenv(
+                "OPENAI_BASE_URL", "https://api.openai.com/v1"
+            )
             model = os.getenv(f"{name.upper().replace('-', '_')}_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
             if api_key:
                 providers.append(OpenAICompatProvider(name, api_key, base_url, model))

@@ -17,7 +17,7 @@ class OpenAICompatProvider:
         system: str | None,
         config: GenerationConfig,
     ) -> ProviderReply:
-        payload_messages = ([{"role": "system", "content": system}] if system else [])
+        payload_messages = [{"role": "system", "content": system}] if system else []
         payload_messages.extend(
             {"role": "assistant" if message.role == "model" else message.role, "content": message.content}
             for message in messages
