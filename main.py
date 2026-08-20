@@ -37,7 +37,7 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -193,8 +193,41 @@ settings = get_settings()
 
 GEMINI_API_KEY = settings.gemini_api_key
 
+# Advertised in the OpenAPI schema (and therefore on /docs). GET /health
+# echoes app.version, so this string is part of that payload: bumping it is a
+# visible response change, not just documentation. Pinned to the value the app
+# has always reported; bump it deliberately alongside a release.
+API_VERSION = "0.1.0"
+
 genai.configure(api_key=GEMINI_API_KEY)
 
+API_DESCRIPTION = """
+Conversational Islamic-knowledge API behind the DeenBridge apps.
+
+`POST /chat` is the single entry point for questions. Sessions are implicit:
+**omit `chat_id` to start a new conversation** — the response carries the
+`chat_id` the service minted — then **send that same `chat_id` back on every
+follow-up** so the model keeps the prior turns in context. `DELETE /chat/{chat_id}`
+ends a session and forgets its history.
+
+Answers are grounded: replies may carry verified Quran and hadith citations, a
+fiqh classification, a confidence assessment, and — when the question warrants
+it — tafsir, zakat, or Stellar purchase context.
+
+Protected routes expect the shared `X-API-Key` header; requests are rate limited
+per key (falling back to client IP).
+"""
+
+OPENAPI_TAGS = [
+    {
+        "name": "chat",
+        "description": "Ask questions and manage conversation sessions.",
+    },
+    {
+        "name": "health",
+        "description": "Liveness and readiness probes for container orchestration.",
+    },
+]
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
@@ -207,7 +240,13 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         await http_client_pool.aclose()
 
 
-app = FastAPI(title="DeenBridge AI API", lifespan=lifespan)
+app = FastAPI(
+    title="DeenBridge AI API",
+    description=API_DESCRIPTION,
+    version=API_VERSION,
+    openapi_tags=OPENAPI_TAGS,
+    lifespan=lifespan,
+)
 
 metrics.setup_metrics(app)
 
@@ -421,6 +460,8 @@ class CitationVerificationResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    """One question, plus everything needed to answer it in context."""
+
     prompt: str = Field(
         ...,
         min_length=1,
@@ -430,24 +471,96 @@ class ChatRequest(BaseModel):
     )
     chat_id: uuid.UUID | None = Field(
         default=None,
-        description="Existing chat session UUID. Omit it to start a new session.",
+        description=(
+            "Session identifier. Omit it to start a new conversation — the response "
+            "returns the `chat_id` the service minted. Send that value back on every "
+            "follow-up to continue the same conversation. Any well-formed UUID that "
+            "the service does not recognise (an expired session, or one the caller "
+            "generated itself) starts a new conversation under that id rather than "
+            "failing."
+        ),
         examples=["550e8400-e29b-41d4-a716-446655440000"],
     )
     context: str | None = Field(
         default=None,
         max_length=CHAT_CONTEXT_MAX_LENGTH,
-        description="Optional supporting context appended to the model prompt.",
+        description=(
+            "Extra background for this one question only — it is appended to the model "
+            "prompt and is not remembered across turns."
+        ),
         examples=["The user is asking about a general educational scenario."],
     )
-    madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
-    language: str | None = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
-    user_id: str | None = Field(default=None, max_length=128)  # Opaque user identifier for personalization
-    remember: bool = True  # When False, existing memory is read but no new data persisted
-    # Optional authenticated purchase context for Stellar payment questions.
-    # Prefer a short structured summary from the signed-in frontend; otherwise
-    # pass the user's JWT so this service can fetch history from dnb-backend.
-    transactions: list[PurchaseTransaction] | None = None
-    auth_token: str | None = None
+    madhhab: str | None = Field(
+        default=None,
+        description=(
+            "Preferred school of jurisprudence for fiqh answers: `hanafi`, `maliki`, "
+            "`shafii`, or `hanbali`. Omit for a comparative answer."
+        ),
+        examples=["shafii"],
+    )
+    language: str | None = Field(
+        default=None,
+        description=(
+            "BCP-47 code for the answer language (`en`, `ar`, `ur`, …). Omit to detect the language from the prompt."
+        ),
+        examples=["en"],
+    )
+    user_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Opaque, caller-owned user identifier. Enables personalization: long-term "
+            "memory, personal context retrieval, and the user's chat list."
+        ),
+        examples=["user_8f21c0"],
+    )
+    remember: bool = Field(
+        default=True,
+        description=(
+            "When false, existing memory is still read for context but nothing new from this turn is persisted."
+        ),
+        examples=[True],
+    )
+    transactions: list[PurchaseTransaction] | None = Field(
+        default=None,
+        description=(
+            "Optional purchase history for Stellar payment questions. Prefer this short "
+            "structured summary from the signed-in frontend over `auth_token`."
+        ),
+        examples=[
+            [
+                {
+                    "hash": "3389e9f0f1a04ca4b2d1cba4bd0cb1d4b4c1e9b9c1b0d6b8ea9f0a1b2c3d4e5f",
+                    "amount": "12.50",
+                    "asset": "USDC",
+                    "status": "completed",
+                    "created_at": "2026-03-01T10:15:00Z",
+                    "item_title": "Tajweed Foundations",
+                }
+            ]
+        ],
+    )
+    auth_token: str | None = Field(
+        default=None,
+        description=(
+            "The signed-in user's JWT. Used only when `transactions` is absent, to fetch "
+            "purchase history from dnb-backend."
+        ),
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "prompt": "How do I calculate zakat on my savings?",
+                "chat_id": "550e8400-e29b-41d4-a716-446655440000",
+                "madhhab": "shafii",
+                "language": "en",
+                "user_id": "user_8f21c0",
+                "remember": True,
+            }
+        }
+    )
 
     @field_validator("prompt", mode="before")
     @classmethod
@@ -456,33 +569,237 @@ class ChatRequest(BaseModel):
 
 
 class Message(BaseModel):
-    role: str
-    content: str
-    message_id: str | None = None  # present on model turns, for feedback
+    """One turn of the conversation, as replayed back to the caller."""
+
+    role: str = Field(
+        ...,
+        description="Who produced the turn: `user` for the question, `model` for the answer.",
+        examples=["model"],
+    )
+    content: str = Field(
+        ...,
+        description="The turn's text.",
+        examples=["Zakat is due on savings held for a full lunar year above the nisab."],
+    )
+    message_id: str | None = Field(
+        default=None,
+        description=(
+            "Stable id of a model turn, present only on answers. Pass it to `POST /feedback` "
+            "to rate that specific answer."
+        ),
+        examples=["3f6a1c2e9b7d4a58"],
+    )
 
 
 class Moderation(BaseModel):
-    category_id: str | None = None
-    action: str
+    """Set when the safety pipeline acted on the question or the answer."""
+
+    category_id: str | None = Field(
+        default=None,
+        description="Identifier of the safety policy category that matched.",
+        examples=["self_harm"],
+    )
+    action: str = Field(
+        ...,
+        description="What the pipeline did: for example `block`, `redirect`, or `allow`.",
+        examples=["redirect"],
+    )
 
 
 class ChatResponse(BaseModel):
-    response: str | None = None
-    text: str | None = None
-    chat_id: str
-    message_id: str | None = None  # stable id of the answer just returned
-    history: list[Message] = []
-    moderation: Moderation | None = None
-    fiqh: FiqhInfo | None = None
-    hadith_references: list[HadithReference] | None = None
-    tafsir: TafsirInfo | None = None
-    confidence: ConfidenceAssessment | None = None
-    zakat: ZakatInfo | None = None
-    purchases: PurchaseInfo | None = None
-    language: str | None = None
-    # Structured references parsed out of the answer (#15). Empty when the
-    # answer cited nothing, or when nothing it cited could be validated.
-    citations: list[Citation] = []
+    """The answer, the session it belongs to, and everything grounding it."""
+
+    response: str | None = Field(
+        default=None,
+        description="The assistant's answer.",
+        examples=["Zakat is due at 2.5% on savings you have held for a full lunar year..."],
+    )
+    text: str | None = Field(
+        default=None,
+        description="Alias of `response`, kept for older DeenBridge clients. Same content.",
+        examples=["Zakat is due at 2.5% on savings you have held for a full lunar year..."],
+    )
+    chat_id: str = Field(
+        ...,
+        description="Session id for this conversation. Send it back as `chat_id` to continue.",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    message_id: str | None = Field(
+        default=None,
+        description="Stable id of the answer just returned. Use it when submitting feedback.",
+        examples=["3f6a1c2e9b7d4a58"],
+    )
+    history: list[Message] = Field(
+        default=[],
+        description="Full conversation so far, oldest turn first.",
+        examples=[
+            [
+                {"role": "user", "content": "How do I calculate zakat on my savings?"},
+                {
+                    "role": "model",
+                    "content": "Zakat is due at 2.5% on savings held for a full lunar year...",
+                    "message_id": "3f6a1c2e9b7d4a58",
+                },
+            ]
+        ],
+    )
+    moderation: Moderation | None = Field(
+        default=None,
+        description="Present only when the safety pipeline acted on this exchange.",
+        examples=[{"category_id": "self_harm", "action": "redirect"}],
+    )
+    fiqh: FiqhInfo | None = Field(
+        default=None,
+        description="Whether the question was classified as fiqh, and which madhhab was applied.",
+        examples=[{"is_fiqh_question": True, "madhhab_requested": "shafii"}],
+    )
+    hadith_references: list[HadithReference] | None = Field(
+        default=None,
+        description="Hadith mentioned in the answer, annotated with their authenticity grading.",
+        examples=[
+            [
+                {
+                    "raw": "Sahih al-Bukhari 1",
+                    "collection": "Sahih al-Bukhari",
+                    "hadith_number": 1,
+                    "grade": "sahih",
+                    "verified": True,
+                    "flagged": False,
+                }
+            ]
+        ],
+    )
+    tafsir: TafsirInfo | None = Field(
+        default=None,
+        description="Which classical tafsir works actually backed a verse-explanation answer.",
+        examples=[
+            {
+                "references": ["2:255"],
+                "works_cited": ["Tafsir Ibn Kathir"],
+                "unavailable": [],
+                "grounded": True,
+            }
+        ],
+    )
+    confidence: ConfidenceAssessment | None = Field(
+        default=None,
+        description=(
+            "Answer confidence, the band it falls in, and whether the service abstained or "
+            "queued the answer for scholar review."
+        ),
+        examples=[{"score": 0.82, "band": "confident", "abstained": False, "queued": False}],
+    )
+    zakat: ZakatInfo | None = Field(
+        default=None,
+        description="What the on-chain zakat calculation contributed, when the question warranted it.",
+        examples=[
+            {
+                "calculated": True,
+                "public_key": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+                "usdc_balance": "1500.00",
+                "nisab_usd": "612.35",
+                "zakat_due": "37.50",
+                "nisab_source": "live",
+            }
+        ],
+    )
+    purchases: PurchaseInfo | None = Field(
+        default=None,
+        description="What the signed-in user's purchase history contributed, when it was consulted.",
+        examples=[{"loaded": True, "count": 3, "source": "inline", "secret_key_detected": False}],
+    )
+    language: str | None = Field(
+        default=None,
+        description="BCP-47 code of the language the answer was written in.",
+        examples=["en"],
+    )
+    citations: list[Citation] = Field(
+        default=[],
+        description=(
+            "Structured references parsed out of the answer. Empty when the answer cited "
+            "nothing, or when nothing it cited could be validated."
+        ),
+        examples=[
+            [
+                {"type": "quran", "surah": 2, "ayah_start": 255, "surah_name": "Al-Baqarah"},
+                {"type": "hadith", "collection": "Sahih al-Bukhari", "number": "1", "grading": "sahih"},
+            ]
+        ],
+    )
+
+
+class DeleteChatResponse(BaseModel):
+    """Confirmation returned when a chat session is discarded."""
+
+    message: str = Field(
+        ...,
+        description="Human-readable confirmation that the session was deleted.",
+        examples=["Chat session deleted successfully"],
+    )
+
+
+class PingResponse(BaseModel):
+    """Liveness probe payload."""
+
+    status: str = Field(
+        ...,
+        description="Always `ok` — the process answered, so it is alive.",
+        examples=["ok"],
+    )
+
+
+class ErrorResponse(BaseModel):
+    """The body FastAPI returns for a raised `HTTPException`."""
+
+    detail: str = Field(
+        ...,
+        description="Human-readable reason the request failed.",
+        examples=["AI service error"],
+    )
+
+
+# Errors /chat can actually return, documented so the interactive docs show
+# more than the happy path. The 422 shape is pydantic's validation envelope;
+# the rest are the HTTPExceptions raised in the handler below.
+CHAT_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    422: {
+        "description": "Request body failed validation (missing/empty prompt, over-long prompt, malformed chat_id).",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": [
+                        {
+                            "type": "string_too_short",
+                            "loc": ["body", "prompt"],
+                            "msg": "String should have at least 1 character",
+                            "input": "",
+                        }
+                    ]
+                }
+            }
+        },
+    },
+    429: {
+        "model": ErrorResponse,
+        "description": "Rate limited — either this caller's quota or the upstream model's.",
+        "content": {"application/json": {"example": {"detail": "Rate limit exceeded. Please try again later."}}},
+    },
+    500: {
+        "model": ErrorResponse,
+        "description": "The model call failed or returned nothing usable.",
+        "content": {"application/json": {"example": {"detail": "AI service error"}}},
+    },
+    503: {
+        "model": ErrorResponse,
+        "description": "The upstream model is temporarily unavailable.",
+        "content": {"application/json": {"example": {"detail": "AI service temporarily unavailable."}}},
+    },
+    504: {
+        "model": ErrorResponse,
+        "description": "The upstream model did not answer in time.",
+        "content": {"application/json": {"example": {"detail": "AI service timed out."}}},
+    },
+}
 
 
 class FeedbackRequest(BaseModel):
@@ -964,10 +1281,36 @@ async def run_strict_corrective_loop(
     return safe_text or original_text
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    tags=["chat"],
+    summary="Ask a question (start or continue a conversation)",
+    responses=CHAT_ERROR_RESPONSES,
+)
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
-    """Serialize one conversation while unrelated chats remain fully concurrent."""
+    """Answer one question, in the context of a conversation.
+
+    **Session semantics.** Omit `chat_id` to start a new conversation; the
+    response carries the `chat_id` that was minted for it. Send that same
+    `chat_id` on every follow-up and the previous turns stay in context. A
+    UUID the service does not recognise starts a fresh conversation under
+    that id rather than failing, so an expired session degrades instead of
+    breaking. `DELETE /chat/{chat_id}` ends a session.
+
+    **What comes back.** Always the answer (`response`, mirrored as `text`),
+    the `chat_id`, a `message_id` for feedback, and the conversation
+    `history`. Depending on the question, the answer may also carry verified
+    `citations`, `hadith_references`, a `fiqh` classification, a `confidence`
+    assessment, and `tafsir`, `zakat` or `purchases` context.
+
+    Requests for one conversation are serialized while unrelated chats stay
+    fully concurrent.
+
+    Correlation and cost headers ride on the response: `X-Trace-Id`,
+    `X-LLM-Total-Tokens`, `X-LLM-Cost-USD`, and `X-Handler-Latency-Ms`.
+    """
     chat_id = str(body.chat_id) if body.chat_id else str(uuid.uuid4())
     async with chat_locks.hold(chat_id):
         return await _chat(body, request, fastapi_response, chat_id)
@@ -1541,7 +1884,7 @@ async def _summarize_history(
         logger.warning("History summarization failed for %s", chat_id[:8], exc_info=True)
 
 
-@app.post("/chat/stream")
+@app.post("/chat/stream", tags=["chat"], summary="Ask a question and stream the answer (SSE)")
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     """Streaming chat endpoint using Server-Sent Events (SSE).
@@ -1945,7 +2288,7 @@ async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session:
         logger.warning("Failed to persist chat history for %s: %s", chat_id, exc)
 
 
-@app.get("/user/{user_id}/chats")
+@app.get("/user/{user_id}/chats", tags=["chat"], summary="List a user's chat sessions")
 async def get_user_chats(user_id: str) -> dict[str, Any]:
     """List all chat IDs for a user."""
     try:
@@ -1986,7 +2329,7 @@ async def get_user_chats(user_id: str) -> dict[str, Any]:
         ) from e
 
 
-@app.get("/chat/{chat_id}/history")
+@app.get("/chat/{chat_id}/history", tags=["chat"], summary="Replay a session's stored turns")
 async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
     """Get the message history for a specific chat."""
     try:
@@ -2006,8 +2349,33 @@ async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
         ) from e
 
 
-@app.delete("/chat/{chat_id}")
+@app.delete(
+    "/chat/{chat_id}",
+    response_model=DeleteChatResponse,
+    tags=["chat"],
+    summary="End a conversation and forget its history",
+    responses={
+        404: {
+            "model": ErrorResponse,
+            "description": "No such session, in memory or in the persistent store.",
+            "content": {"application/json": {"example": {"detail": "Chat session not found"}}},
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "The session store could not be reached.",
+            "content": {"application/json": {"example": {"detail": "Internal server error"}}},
+        },
+    },
+)
 async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
+    """Discard a chat session: its in-memory turns, its persisted history, and
+    the feedback bookkeeping tied to it.
+
+    Pass the `chat_id` that `POST /chat` returned. Once deleted, reusing that
+    id on `POST /chat` starts a brand-new conversation rather than continuing
+    the old one. Supply `user_id` to also unlink the session from that user's
+    chat list. Returns 404 when the session is unknown.
+    """
     chat_id_str = str(chat_id)
     async with chat_locks.hold(chat_id_str):
         try:
@@ -2178,9 +2546,14 @@ async def feedback_records(
         ) from exc
 
 
-@app.get("/ping")
+@app.get("/ping", response_model=PingResponse, tags=["health"], summary="Liveness probe")
 async def ping() -> dict[str, str]:
-    """Lightweight liveness probe for container healthchecks and keep-alive pings."""
+    """Answer `{"status": "ok"}` as long as the process is up.
+
+    Deliberately does no I/O — no model call, no session store, no network — so
+    it stays cheap enough for container healthchecks and keep-alive pings. Use
+    `GET /health?deep=true` when you need dependency readiness instead.
+    """
     return {"status": "ok"}
 
 
@@ -2231,7 +2604,7 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
     }, 503
 
 
-@app.get("/health")
+@app.get("/health", tags=["health"], summary="Readiness check, optionally including dependencies")
 async def health(deep: bool = False) -> JSONResponse:
     body, code = get_health_status(deep=deep)
     return JSONResponse(content=body, status_code=code)
