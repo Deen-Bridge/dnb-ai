@@ -20,7 +20,9 @@ class ChatLoadUser(HttpUser):
     @task(2)
     def chat_multi_turn(self):
         self.client.post("/chat", json={"prompt": "Explain zakat.", "chat_id": self.chat_id}, name="chat-multi-1")
-        self.client.post("/chat", json={"prompt": "Give me a short example.", "chat_id": self.chat_id}, name="chat-multi-2")
+        self.client.post(
+            "/chat", json={"prompt": "Give me a short example.", "chat_id": self.chat_id}, name="chat-multi-2"
+        )
 
     @task(1)
     def zakat_success(self):

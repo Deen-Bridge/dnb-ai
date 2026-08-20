@@ -185,7 +185,9 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
             import time
 
             time.sleep(latency_ms / 1000)
-        if public_key == os.getenv("MOCK_UNKNOWN_ACCOUNT_KEY", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"):
+        if public_key == os.getenv(
+            "MOCK_UNKNOWN_ACCOUNT_KEY", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+        ):
             raise HTTPException(status_code=404, detail="Account not found on the Stellar testnet network.")
         return Decimal(os.getenv("MOCK_USDC_BALANCE", "100"))
 

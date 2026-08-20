@@ -15,7 +15,7 @@ def main() -> int:
             continue
         p95 = float(row["95%"])
         rps = float(row["Requests/s"])
-        errors = int(row["# Fails"])
+        errors = int(row["Failure Count"])
         requests = int(row["Request Count"])
         error_rate = errors / requests if requests else 1.0
         if p95 > limits["max_p95_ms"]:
