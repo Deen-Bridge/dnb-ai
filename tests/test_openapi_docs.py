@@ -11,6 +11,7 @@ Two things are checked, and the second matters as much as the first:
    fail here.
 """
 
+import inspect
 from uuid import uuid4
 
 import pytest
@@ -95,10 +96,42 @@ def test_chat_documents_success_and_error_responses(spec):
     assert set(responses) >= {"200", "422", "500"}
     assert responses["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/ChatResponse")
 
-    for code in ("422", "429", "500", "503", "504"):
+    # Every status the handler can raise, so /docs is not a partial list.
+    for code in ("400", "422", "429", "500", "503", "504"):
         example = responses[code]["content"]["application/json"]["example"]
         assert example["detail"], f"{code} needs an example body"
         assert responses[code]["description"]
+
+
+@pytest.mark.parametrize(
+    ("code", "detail"),
+    [
+        ("400", "Invalid request parameters."),
+        ("429", "Rate limit exceeded. Please try again later."),
+        ("500", "AI service error"),
+        ("503", "AI service temporarily unavailable."),
+        ("504", "AI service timed out."),
+    ],
+)
+def test_documented_chat_error_bodies_match_the_handler(spec, code, detail):
+    """Each documented example is the exact `detail` main.chat raises, so /docs
+    cannot drift into describing errors the service never returns."""
+    documented = spec["paths"]["/chat"]["post"]["responses"][code]["content"]["application/json"]["example"]
+
+    assert documented == {"detail": detail}
+    assert f'detail="{detail}"' in inspect.getsource(main.chat)
+
+
+def test_auth_token_documents_every_use_of_the_credential(spec):
+    """A bearer credential's documented data use must match the code path."""
+    description = spec["components"]["schemas"]["ChatRequest"]["properties"]["auth_token"]["description"]
+    source = inspect.getsource(main.chat)
+
+    assert "purchase history" in description
+    # The handler also hands the token to personal-context retrieval, and it does
+    # so unconditionally — not only when `transactions` is absent.
+    assert "personal_context_retriever(request.prompt, request.user_id, request.auth_token)" in source
+    assert "personal-context" in description
 
 
 def test_delete_and_ping_declare_typed_response_schemas(spec):

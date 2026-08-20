@@ -543,8 +543,10 @@ class ChatRequest(BaseModel):
     auth_token: str | None = Field(
         default=None,
         description=(
-            "The signed-in user's JWT. Used only when `transactions` is absent, to fetch "
-            "purchase history from dnb-backend."
+            "The signed-in user's JWT. Used for two things: fetching purchase history from "
+            "dnb-backend when `transactions` is absent, and authorizing per-user personal-context "
+            "retrieval (which is denied by default without a `user_id` or this token). It is "
+            "sent to dnb-backend on the user's behalf and is never logged or stored."
         ),
         examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
     )
@@ -778,6 +780,11 @@ CHAT_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
                 }
             }
         },
+    },
+    400: {
+        "model": ErrorResponse,
+        "description": "The upstream model rejected the request as malformed.",
+        "content": {"application/json": {"example": {"detail": "Invalid request parameters."}}},
     },
     429: {
         "model": ErrorResponse,
@@ -2368,13 +2375,18 @@ async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
     },
 )
 async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
-    """Discard a chat session: its in-memory turns, its persisted history, and
-    the feedback bookkeeping tied to it.
+    """Discard a chat session: its in-memory turns, its stored history, and the
+    feedback bookkeeping tied to it.
 
     Pass the `chat_id` that `POST /chat` returned. Once deleted, reusing that
     id on `POST /chat` starts a brand-new conversation rather than continuing
     the old one. Supply `user_id` to also unlink the session from that user's
     chat list. Returns 404 when the session is unknown.
+
+    `POST /chat` writes history in a background task after it has answered, and
+    this route does not coordinate with that task. A delete issued in the same
+    instant as a just-completed answer can therefore be overtaken by that
+    request's pending write; re-issue the delete if it must be certain.
     """
     chat_id_str = str(chat_id)
     async with chat_locks.hold(chat_id_str):

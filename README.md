@@ -122,13 +122,18 @@ curl -s -X POST "http://localhost:8000/chat" \
       }'
 ```
 
-**3. End the session** when you are done, discarding its stored history:
+**3. End the session** when you are done, discarding its turns and stored history:
 
 ```bash
 curl -s -X DELETE "http://localhost:8000/chat/550e8400-e29b-41d4-a716-446655440000" \
   -H "X-API-Key: $SERVICE_API_KEY"
 # {"message":"Chat session deleted successfully"}
 ```
+
+`POST /chat` persists history in a background task after it has answered, and the
+delete route does not coordinate with that task — a delete issued in the same
+instant as a just-completed answer can be overtaken by that pending write.
+Re-issue the delete if it must be certain.
 
 A `chat_id` the service does not recognise (an expired session, or one you generated
 yourself) starts a new conversation under that id rather than failing.
