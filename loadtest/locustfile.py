@@ -3,7 +3,6 @@ import uuid
 
 from locust import HttpUser, between, task
 
-
 VALID_KEY = os.getenv("LOADTEST_VALID_STELLAR_KEY", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5")
 UNKNOWN_KEY = os.getenv("LOADTEST_UNKNOWN_STELLAR_KEY", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")
 
@@ -29,8 +28,26 @@ class ChatLoadUser(HttpUser):
 
     @task(1)
     def zakat_invalid_key(self):
-        self.client.post("/zakat", json={"public_key": "not-a-key"}, name="zakat-400")
+        with self.client.post(
+            "/zakat",
+            json={"public_key": "not-a-key"},
+            name="zakat-400",
+            catch_response=True,
+        ) as response:
+            if response.status_code == 400:
+                response.success()
+            else:
+                response.failure(f"expected 400, got {response.status_code}")
 
     @task(1)
     def zakat_unknown_account(self):
-        self.client.post("/zakat", json={"public_key": UNKNOWN_KEY}, name="zakat-404")
+        with self.client.post(
+            "/zakat",
+            json={"public_key": UNKNOWN_KEY},
+            name="zakat-404",
+            catch_response=True,
+        ) as response:
+            if response.status_code == 404:
+                response.success()
+            else:
+                response.failure(f"expected 404, got {response.status_code}")
