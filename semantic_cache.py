@@ -284,7 +284,7 @@ class SemanticCache:
         surviving_times: list[float] = []
         invalidated = 0
 
-        for entry, access_time in zip(self._entries, self._access_times):
+        for entry, access_time in zip(self._entries, self._access_times, strict=True):
             if entry.scope == scope:
                 invalidated += 1
             else:

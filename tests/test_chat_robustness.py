@@ -1,6 +1,6 @@
 import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from google.api_core.exceptions import (
@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 import main
 from main import app
-from semantic_cache import get_chat_exact_cache, get_cache, get_token_quota_tracker
+from semantic_cache import get_cache, get_chat_exact_cache, get_token_quota_tracker
 
 
 @pytest.fixture(autouse=True)
@@ -314,7 +314,7 @@ async def test_quota_exceeded_returns_429_with_retry_after(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # First request should use up the quota
-        res1 = await client.post("/chat", json={"prompt": "test"})
+        await client.post("/chat", json={"prompt": "test"})
 
         # Second request should be rate limited
         res2 = await client.post("/chat", json={"prompt": "test"})

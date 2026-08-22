@@ -1,7 +1,8 @@
-import os
+# ruff: noqa: E402
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 import uuid
@@ -15,11 +16,9 @@ from dotenv import load_dotenv
 # Must run before any module that reads os.getenv at import time (store,
 # config, …) so local development reads .env the same way production reads
 # real environment variables.
-load_dotenv()  # noqa: E402
+load_dotenv()
 
-import google.generativeai as genai  # noqa: E402
-
-from config import get_settings  # noqa: E402
+import google.generativeai as genai
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,10 +30,10 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from pydantic import BaseModel, Field, field_validator
 
 import telemetry
 from citations import (
@@ -44,7 +43,6 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
-from store import create_session_store, history_to_dicts, dicts_to_contents
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -53,6 +51,7 @@ from confidence import (
     build_signals,
     thresholds as confidence_thresholds,
 )
+from config import get_settings
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -103,6 +102,7 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
     TafsirContext,
@@ -803,7 +803,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
             raise HTTPException(
                 status_code=429,
-                detail=f"Token quota exceeded. Please try again later.",
+                detail="Token quota exceeded. Please try again later.",
                 headers={"Retry-After": str(retry_after)},
             )
 

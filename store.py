@@ -50,8 +50,7 @@ except ImportError:
 
 try:
     import firebase_admin
-    from firebase_admin import credentials as fb_credentials
-    from firebase_admin import firestore as fb_firestore
+    from firebase_admin import credentials as fb_credentials, firestore as fb_firestore
     from google.cloud.firestore import FieldFilter
 
     _firebase_available = True
