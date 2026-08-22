@@ -1502,7 +1502,7 @@ def _strip_system_context(text: str) -> str:
     return text
 
 
-async def _persist_chat_history(chat_id: str, user_id: Optional[str], chat_session) -> None:
+async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session) -> None:
     """Persist chat history and user-chat mapping."""
     try:
         if chat_session and hasattr(chat_session, "history") and chat_session.history:
@@ -1574,7 +1574,7 @@ async def get_chat_history(chat_id: str):
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str, user_id: Optional[str] = None) -> dict[str, str]:
+async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str]:
     try:
         existed = chat_id in active_chats
         active_chats.pop(chat_id, None)
