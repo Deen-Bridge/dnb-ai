@@ -136,3 +136,35 @@ jobs:
           sleep 5
           curl -sf http://localhost:8000/ping
           docker stop test-ai
+
+  perf:
+    name: Performance Budget
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install locust==2.42.2
+      - name: Start mock service
+        env:
+          MOCK_UPSTREAMS: '1'
+          MOCK_LLM_LATENCY_MS: '50'
+          MOCK_HORIZON_LATENCY_MS: '25'
+          SAFETY_PIPELINE_ENABLED: 'false'
+          AUTH_DISABLED: 'true'
+          GEMINI_API_KEY: ''
+        run: |
+          uvicorn main:app --host 127.0.0.1 --port 8000 > /tmp/deenbridge-ai.log 2>&1 &
+          for attempt in $(seq 1 30); do curl -sf http://127.0.0.1:8000/ping && break || sleep 1; done
+      - name: Run load test
+        run: |
+          locust -f loadtest/locustfile.py --headless -H http://127.0.0.1:8000 -u 10 -r 2 -t 45s --csv=/tmp/locust --only-summary
+      - name: Check budget
+        run: python loadtest/check_budget.py loadtest/budget.yaml /tmp/locust_stats.csv

@@ -70,5 +70,7 @@ module = [
     "yaml.*",
     "firebase_admin",
     "firebase_admin.*",
+    "locust",
+    "locust.*",
 ]
 ignore_missing_imports = true

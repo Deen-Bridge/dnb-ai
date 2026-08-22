@@ -586,6 +586,8 @@ def normalize_language(lang: str | None) -> str | None:
 
 
 def get_model() -> genai.GenerativeModel:
+    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
+        return _MockModel()  # type: ignore[return-value]
     return genai.GenerativeModel(
         model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
@@ -594,6 +596,37 @@ def get_model() -> genai.GenerativeModel:
 
 
 GEMINI_TIMEOUT = settings.gemini_timeout
+
+
+class _MockResponse:
+    text = "Mock upstream response"
+
+
+class _MockPart:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _MockContent:
+    def __init__(self, role: str, text: str) -> None:
+        self.role = role
+        self.parts = [_MockPart(text)]
+
+
+class _MockChatSession:
+    def __init__(self, history: list[Any] | None = None) -> None:
+        self.history = list(history or [])
+
+    async def send_message_async(self, message: str, **_kwargs: Any) -> _MockResponse:
+        latency_ms = int(os.getenv("MOCK_LLM_LATENCY_MS", "50"))
+        await asyncio.sleep(max(0, latency_ms) / 1000)
+        self.history.extend([_MockContent("user", message), _MockContent("model", _MockResponse.text)])
+        return _MockResponse()
+
+
+class _MockModel:
+    def start_chat(self, history: list[Any] | None = None) -> _MockChatSession:
+        return _MockChatSession(history)
 
 
 def extract_text_safely(response: Any) -> str | None:
