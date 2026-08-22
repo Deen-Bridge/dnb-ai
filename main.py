@@ -8,17 +8,18 @@ import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 # Must run before any module that reads os.getenv at import time (store,
 # config, …) so local development reads .env the same way production reads
 # real environment variables.
-load_dotenv()
+load_dotenv()  # noqa: E402
 
-from config import get_settings
+import google.generativeai as genai  # noqa: E402
+
+from config import get_settings  # noqa: E402
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,7 +85,6 @@ from semantic_cache import (
     CHAT_PROMPT_MAX_LENGTH,
     CHAT_RATE_LIMIT_MAX,
     CHAT_RATE_LIMIT_WINDOW_SECONDS,
-    CHAT_TOKEN_QUOTA_PER_HOUR,
     SEMANTIC_CACHE_ENABLED,
     embed_text,
     get_cache,
@@ -144,7 +144,7 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(
     request: Request,
-    api_key: Optional[str] = Security(api_key_header),
+    api_key: str | None = Security(api_key_header),
 ) -> str:
     """Dependency that enforces X-API-Key on protected routes.
 
@@ -707,7 +707,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
 
         # Determine cache scope: public for anonymous, user:{user_id} for authenticated
         cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
-        
+
         # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
         # through the semantic response cache: the first is built from retrieved
         # passages (already cached by ayah key), and the others contain one
@@ -725,8 +725,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         exact_cache = get_chat_exact_cache()
         embedding: Any = None
         normalized: str | None = None
-        cache_hit = False
-        
+
         if is_cacheable and not is_bypass:
             # Exact-match cache lookup (tier 1)
             exact_key = f"{cache_scope}:{normalize_text(prompt)}"
@@ -758,7 +757,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                     hadith_references=annotate_hadith(exact_cached["response"]),
                     language=effective_language,
                 )
-            
+
             # Semantic cache lookup (tier 2)
             normalized = normalize_text(prompt)
             embedding = embed_text(normalized)
