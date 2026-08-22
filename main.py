@@ -1654,7 +1654,7 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         answer=answer_text,
         model_name=telemetry.GEMINI_MODEL,
         generation_config=GENERATION_CONFIG,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),  # noqa: UP017
     )
 
     try:

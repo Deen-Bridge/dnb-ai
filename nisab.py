@@ -227,7 +227,7 @@ async def get_nisab(
         source=result["source"],
         gold_price_usd_per_ounce=str(price_per_ounce),
         gold_price_usd_per_gram=str((price_per_ounce / GRAMS_PER_TROY_OUNCE).quantize(Decimal("0.01"))),
-        as_of=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        as_of=datetime.now(timezone.utc).isoformat(timespec="seconds"),  # noqa: UP017
     )
     if use_cache:
         cache.put(CACHE_KEY, quote.model_dump(), ttl_seconds=NISAB_CACHE_TTL_SECONDS)
