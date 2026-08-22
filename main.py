@@ -94,6 +94,10 @@ from prompts import (
     get_registry,
     register_defaults,
 )
+from providers.gemini import GeminiProvider
+from providers.openai_compat import OpenAICompatProvider
+from providers.router import ProviderRouter
+from providers.types import GenerationConfig as ProviderGenerationConfig, Message as ProviderMessage
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -140,7 +144,8 @@ GEMINI_API_KEY = settings.gemini_api_key
 CHAT_PROMPT_MAX_LENGTH = 4000
 CHAT_CONTEXT_MAX_LENGTH = 8000
 
-genai.configure(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
 
@@ -473,6 +478,54 @@ def get_safety_settings() -> list[dict[str, str]]:
 # In-memory session store for demo purposes
 sessions: dict[str, Any] = {}
 active_chats: dict[str, Any] = {}
+provider_router: ProviderRouter | None = None
+
+
+class _ProviderMessage:
+    def __init__(self, role: str, content: str) -> None:
+        self.role = role
+        self.parts = [type("Part", (), {"text": content})()]
+
+
+class _ProviderChatSession:
+    def __init__(self, history: list[ProviderMessage]) -> None:
+        self.history = [_ProviderMessage(message.role, message.content) for message in history]
+
+    def append(self, role: str, content: str) -> None:
+        self.history.append(_ProviderMessage(role, content))
+
+
+def _build_provider_router() -> ProviderRouter | None:
+    primary_name = os.getenv("LLM_PRIMARY", "gemini").strip().lower()
+    fallback_names = [name.strip().lower() for name in os.getenv("LLM_FALLBACKS", "").split(",") if name.strip()]
+    if not fallback_names:
+        return None
+    provider_names = [primary_name, *fallback_names]
+    providers: list[Any] = []
+    for name in provider_names:
+        if name == "gemini" and GEMINI_API_KEY:
+            providers.append(GeminiProvider(GEMINI_API_KEY, settings.model_name))
+            continue
+        if name in {"openai", "openai-compatible", "openrouter", "groq"}:
+            api_key = os.getenv(f"{name.upper().replace('-', '_')}_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+            base_url = (
+                os.getenv(f"{name.upper().replace('-', '_')}_BASE_URL")
+                or os.getenv("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1"
+            )
+            model = os.getenv(f"{name.upper().replace('-', '_')}_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+            if api_key:
+                providers.append(OpenAICompatProvider(name, api_key, base_url, model))
+    if not providers:
+        return None
+    return ProviderRouter(
+        providers,
+        failure_threshold=int(os.getenv("LLM_CIRCUIT_FAILURE_THRESHOLD", "3")),
+        cooldown_seconds=float(os.getenv("LLM_CIRCUIT_COOLDOWN_SECONDS", "60")),
+    )
+
+
+provider_router = _build_provider_router()
 
 # --- Feedback support ------------------------------------------------------
 # The generation config captured into a feedback record so a flagged answer is
@@ -885,6 +938,27 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         truncated = False
 
         async def generate(safety_prompt: str) -> str:
+            if provider_router is not None:
+                persisted = await session_store.load_history(chat_id)
+                provider_history = [
+                    ProviderMessage(item.get("role", "user"), item.get("text", ""))
+                    for item in persisted
+                    if item.get("text")
+                ]
+                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
+                if is_fiqh:
+                    system_context += FIQH_IKHTILAF_CONTEXT
+                context = f"Additional context: {extra_context}\n\n" if extra_context else ""
+                full_prompt = f"{context}User question: {safety_prompt}"
+                reply = await provider_router.generate(
+                    provider_history + [ProviderMessage("user", full_prompt)],
+                    system=system_context,
+                    config=ProviderGenerationConfig(**GENERATION_CONFIG),
+                )
+                chat_session = active_chats.setdefault(chat_id, _ProviderChatSession(provider_history))
+                chat_session.append("user", full_prompt)
+                chat_session.append("model", reply.text)
+                return reply.text
             if chat_id not in active_chats:
                 logger.info("chat session created", extra={"chat_id": chat_id})
                 model = get_model()
@@ -1822,6 +1896,11 @@ async def feedback_records(
 async def ping() -> dict[str, str]:
     """Lightweight liveness probe for container healthchecks and keep-alive pings."""
     return {"status": "ok"}
+
+
+@app.get("/providers/status")
+async def providers_status() -> dict[str, Any]:
+    return {"providers": provider_router.status() if provider_router else []}
 
 
 @app.get("/memory/{user_id}")

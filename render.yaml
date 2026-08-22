@@ -10,3 +10,7 @@ services:
         sync: false
       - key: SERVICE_API_KEY
         sync: false
+      - key: LLM_PRIMARY
+        value: gemini
+      - key: LLM_FALLBACKS
+        value: ""
