@@ -7,7 +7,7 @@ import time
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import google.generativeai as genai
@@ -80,9 +80,16 @@ from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 from semantic_cache import (
+    CHAT_CONTEXT_MAX_LENGTH,
+    CHAT_PROMPT_MAX_LENGTH,
+    CHAT_RATE_LIMIT_MAX,
+    CHAT_RATE_LIMIT_WINDOW_SECONDS,
+    CHAT_TOKEN_QUOTA_PER_HOUR,
     SEMANTIC_CACHE_ENABLED,
     embed_text,
     get_cache,
+    get_chat_exact_cache,
+    get_token_quota_tracker,
     normalize_text,
 )
 from stellar import (
@@ -212,9 +219,9 @@ class CitationVerificationResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(..., max_length=CHAT_PROMPT_MAX_LENGTH)
     chat_id: str | None = None
-    context: str | None = None  # Additional context for specific queries
+    context: str | None = Field(None, max_length=CHAT_CONTEXT_MAX_LENGTH)  # Additional context for specific queries
     madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
     language: str | None = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
     user_id: str | None = Field(default=None, max_length=128)  # Opaque user identifier for personalization
@@ -323,6 +330,7 @@ safety_pipeline = SafetyPipeline(InputGate(safety_policy, classify_for_safety), 
 
 # Semantic response cache
 semantic_cache = get_cache()
+token_quota_tracker = get_token_quota_tracker()
 
 # Durable queue for low-confidence religious answers awaiting a scholar
 review_store = get_review_store()
@@ -636,7 +644,8 @@ async def run_strict_corrective_loop(
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response) -> ChatResponse:
+@limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
+async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
     trace = telemetry.Trace()
     _ctx_token = telemetry.current_trace.set(trace)
     _handler_start = time.perf_counter()
@@ -653,71 +662,109 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        chat_id = request.chat_id or str(uuid.uuid4())
+        chat_id = body.chat_id or str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
-        is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
+        is_bypass = request.headers.get("X-Cache-Bypass") == "1"
 
         # A user who pastes a Stellar secret key must not have it forwarded to
         # the model provider or written into stored history. Everything
         # downstream works from the redacted text; the zakat layer separately
         # detects that one was present and warns the user.
-        prompt = redact_secret_keys(request.prompt)
-        extra_context = redact_secret_keys(request.context)
+        prompt = redact_secret_keys(body.prompt)
+        extra_context = redact_secret_keys(body.context)
         logger.info(f"Received chat request: {prompt[:100]}...")
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
-            madhhab = normalize_madhhab(request.madhhab)
+            madhhab = normalize_madhhab(body.madhhab)
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
-            effective_language = normalize_language(request.language)
+            effective_language = normalize_language(body.language)
 
         # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
             # Tafsir detection is offline (regex + the bundled surah index),
             # so a non-tafsir prompt costs nothing.
-            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context = await tafsir_retriever(prompt, body.language or DEFAULT_TAFSIR_LANGUAGE)
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
 
             # Zakat detection is offline (keywords plus a key-shaped match), so
             # an ordinary prompt never touches Horizon or the gold-price API.
-            zakat_context = await zakat_retriever(request.prompt, request.context)
+            zakat_context = await zakat_retriever(body.prompt, body.context)
             zakat_info = zakat_context.info if zakat_context else None
 
             # Purchase detection is offline (keywords). History comes from an
             # inline summary or a best-effort JWT fetch — never other users'.
-            purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
+            purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
         summary: ChatSummary | None = None
-        if request.user_id:
-            profile = await memory_store.get_profile(request.user_id)
-            summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
+        if body.user_id:
+            profile = await memory_store.get_profile(body.user_id)
+            summary = await memory_store.get_chat_summary(f"{body.user_id}:{chat_id}")
 
+        # Determine cache scope: public for anonymous, user:{user_id} for authenticated
+        cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
+        
         # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
         # through the semantic response cache: the first is built from retrieved
         # passages (already cached by ayah key), and the others contain one
         # user's real financial data, which must never be replayed to anyone else.
         is_cacheable = (
             is_new_chat
-            and request.context is None
+            and body.context is None
             and tafsir_context is None
             and zakat_context is None
             and purchase_context is None
-            and request.user_id is None
             and SEMANTIC_CACHE_ENABLED
         )
 
-        # --- Semantic cache lookup ---
+        # --- Two-tier cache lookup: exact-match first, then semantic ---
+        exact_cache = get_chat_exact_cache()
         embedding: Any = None
         normalized: str | None = None
+        cache_hit = False
+        
         if is_cacheable and not is_bypass:
+            # Exact-match cache lookup (tier 1)
+            exact_key = f"{cache_scope}:{normalize_text(prompt)}"
+            exact_cached = exact_cache.get(exact_key)
+            if exact_cached is not None:
+                fastapi_response.headers["X-Cache-Tier"] = "exact"
+                fastapi_response.headers["X-Semantic-Cache"] = "hit"
+                model = genai.GenerativeModel(
+                    telemetry.GEMINI_MODEL,
+                    safety_settings=get_safety_settings(),
+                )
+                chat_session = model.start_chat(
+                    history=[
+                        {"role": "user", "parts": [{"text": prompt}]},
+                        {"role": "model", "parts": [{"text": exact_cached["response"]}]},
+                    ]
+                )
+                active_chats[chat_id] = chat_session
+                logger.info("Exact cache HIT for prompt: %s", prompt[:80])
+                cached_message_id = _record_answer(chat_id, prompt, exact_cached["response"])
+                _finalize()
+                _succeeded = True
+                return ChatResponse(
+                    response=exact_cached["response"],
+                    chat_id=chat_id,
+                    message_id=cached_message_id,
+                    history=exact_cached["history"],
+                    fiqh=fiqh_info,
+                    hadith_references=annotate_hadith(exact_cached["response"]),
+                    language=effective_language,
+                )
+            
+            # Semantic cache lookup (tier 2)
             normalized = normalize_text(prompt)
             embedding = embed_text(normalized)
-            cached = semantic_cache.get(embedding)
+            cached = semantic_cache.get(embedding, scope=cache_scope)
             if cached is not None:
+                fastapi_response.headers["X-Cache-Tier"] = "semantic"
                 fastapi_response.headers["X-Semantic-Cache"] = "hit"
                 model = genai.GenerativeModel(
                     telemetry.GEMINI_MODEL,
@@ -745,6 +792,23 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
+
+        # --- Token quota enforcement ---
+        # Check quota before making any LLM call (cache miss path)
+        quota_key = body.user_id if body.user_id else _rate_limit_key(request)
+        # Estimate token count for quota check (conservative estimate)
+        estimated_tokens = len(prompt.split()) + len(body.context.split()) if body.context else len(prompt.split())
+        # Use a conservative multiplier for system context and response
+        estimated_tokens = int(estimated_tokens * 3)  # Account for system prompt and response
+        
+        quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
+        if not quota_allowed:
+            logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Token quota exceeded. Please try again later.",
+                headers={"Retry-After": str(retry_after)},
+            )
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
         async def generate(safety_prompt: str) -> str:
@@ -899,18 +963,40 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             },
         )
 
-        # --- Semantic cache write ---
+        # --- Two-tier cache write ---
         # Only confident answers are cached. Replaying an abstention, or a
         # hedged answer whose warning would outlive the doubt that caused it,
         # would spread one turn's uncertainty to every later asker.
         is_cacheable = is_cacheable and assessment.band is ConfidenceBand.CONFIDENT
         if is_cacheable and (safety_result is None or safety_result.generator_called):
+            # Get token count from telemetry for savings tracking
+            totals = trace.request_totals()
+            token_count = totals.get("total_tokens", 0)
+            
             if embedding is None:
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
-            semantic_cache.put(embedding, response_text, chat_id, history)
-            logger.info("Semantic cache WRITE for prompt: %s", prompt[:80])
+            
+            # Write to exact-match cache (tier 1)
+            exact_key = f"{cache_scope}:{normalized}"
+            exact_cache.put(
+                exact_key,
+                {"response": response_text, "history": history},
+                token_count=token_count,
+            )
+            
+            # Write to semantic cache (tier 2)
+            semantic_cache.put(
+                embedding,
+                response_text,
+                chat_id,
+                history,
+                scope=cache_scope,
+                token_count=token_count,
+            )
+            logger.info("Two-tier cache WRITE for prompt: %s (scope: %s)", prompt[:80], cache_scope)
 
+        fastapi_response.headers["X-Cache-Tier"] = "miss"
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
         # Assign this answer a stable id and snapshot the displayed text, so a
@@ -949,15 +1035,15 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
         # --- Persist chat history ---
         asyncio.create_task(
-            _persist_chat_history(chat_id, request.user_id, chat_session)
+            _persist_chat_history(chat_id, body.user_id, chat_session)
         )
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
-        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+        if body.user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
             asyncio.create_task(
                 _extract_and_update_memory(
-                    request.user_id,
+                    body.user_id,
                     prompt,
                     response_text,
                     chat_id,
@@ -965,23 +1051,23 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     memory_store,
                 )
             )
-            logger.info("Memory extraction scheduled for user %s", request.user_id[:8])
+            logger.info("Memory extraction scheduled for user %s", body.user_id[:8])
 
         # --- Summary eviction ---
         # After enough turns accumulate, summarize old history and persist.
-        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+        if body.user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
             chat_session = active_chats.get(chat_id)
             if chat_session and hasattr(chat_session, "history") and chat_session.history:
                 if len(chat_session.history) >= MAX_CHAT_HISTORY_TURNS:
                     asyncio.create_task(
                         _summarize_history(
-                            f"{request.user_id}:{chat_id}",
+                            f"{body.user_id}:{chat_id}",
                             chat_session.history,
                             summary,
                             memory_store,
                         )
                     )
-                    logger.info("History summarization triggered for %s", request.user_id[:8])
+                    logger.info("History summarization triggered for %s", body.user_id[:8])
 
         return response_obj
 
@@ -1077,7 +1163,8 @@ async def _summarize_history(
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
+@limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
+async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     """Streaming chat endpoint using Server-Sent Events (SSE).
 
     Returns incremental ``data:`` events carrying text deltas as JSON
@@ -1098,23 +1185,23 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
     _handler_start = time.perf_counter()
 
     try:
-        chat_id = request.chat_id or str(uuid.uuid4())
-        prompt = redact_secret_keys(request.prompt)
-        extra_context = redact_secret_keys(request.context)
+        chat_id = body.chat_id or str(uuid.uuid4())
+        prompt = redact_secret_keys(body.prompt)
+        extra_context = redact_secret_keys(body.context)
         logger.info("Received streaming chat request: %s...", prompt[:100])
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
-            madhhab = normalize_madhhab(request.madhhab)
+            madhhab = normalize_madhhab(body.madhhab)
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
-            effective_language = normalize_language(request.language)
+            effective_language = normalize_language(body.language)
 
         # --- Tafsir and zakat retrieval ---
         with trace.span("retrieval"):
-            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context = await tafsir_retriever(prompt, body.language or DEFAULT_TAFSIR_LANGUAGE)
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
-            zakat_context = await zakat_retriever(request.prompt, request.context)
+            zakat_context = await zakat_retriever(body.prompt, body.context)
             zakat_info = zakat_context.info if zakat_context else None
 
         combined_text: str = ""  # accumulated full response for post-processing
@@ -1123,7 +1210,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
         safety_enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
 
         # --- Purchase history ---
-        purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
+        purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
 
         async def event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
@@ -1352,7 +1439,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # Awaited (not fire-and-forget) so a client that immediately
                 # reloads the chat list sees this turn. Failures are caught
                 # inside the helper; the stream is already complete.
-                await _persist_chat_history(chat_id, request.user_id, chat_session)
+                await _persist_chat_history(chat_id, body.user_id, chat_session)
 
             except asyncio.CancelledError:
                 # Client disconnected mid-stream. Consume remaining chunks
@@ -1573,7 +1660,7 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         answer=answer_text,
         model_name=telemetry.GEMINI_MODEL,
         generation_config=GENERATION_CONFIG,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
 
     try:
@@ -1688,7 +1775,16 @@ async def health(deep: bool = False) -> JSONResponse:
 
 @app.get("/cache/stats")
 async def cache_stats() -> dict[str, Any]:
-    return semantic_cache.get_stats()
+    exact_cache = get_chat_exact_cache()
+    return {
+        "semantic": semantic_cache.get_stats(),
+        "exact": exact_cache.get_stats(),
+        "combined": {
+            "total_hits": semantic_cache.hits + exact_cache.hits,
+            "total_misses": semantic_cache.misses + exact_cache.misses,
+            "total_tokens_saved": semantic_cache.tokens_saved + exact_cache.tokens_saved,
+        },
+    }
 
 
 @app.get("/metrics")
@@ -1702,8 +1798,15 @@ async def metrics() -> dict[str, Any]:
     /cache/stats. #9 (auth/rate limiting) can consume the cost/token totals
     below without this endpoint enforcing anything itself.
     """
+    exact_cache = get_chat_exact_cache()
     snapshot = telemetry.registry.snapshot()
     snapshot["semantic_cache"] = semantic_cache.get_stats()
+    snapshot["exact_cache"] = exact_cache.get_stats()
+    snapshot["combined_cache"] = {
+        "total_hits": semantic_cache.hits + exact_cache.hits,
+        "total_misses": semantic_cache.misses + exact_cache.misses,
+        "total_tokens_saved": semantic_cache.tokens_saved + exact_cache.tokens_saved,
+    }
     return snapshot
 
 
