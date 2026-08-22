@@ -132,12 +132,9 @@ AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "ye
 if not AUTH_DISABLED and not SERVICE_API_KEY:
     if os.getenv("ENVIRONMENT", "").lower() == "production":
         raise RuntimeError(
-            "SERVICE_API_KEY must be set in production. "
-            "Set AUTH_DISABLED=true to run without authentication locally."
+            "SERVICE_API_KEY must be set in production. Set AUTH_DISABLED=true to run without authentication locally."
         )
-    logger.warning(
-        "SERVICE_API_KEY is not set; authenticated endpoints will reject all requests."
-    )
+    logger.warning("SERVICE_API_KEY is not set; authenticated endpoints will reject all requests.")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -187,6 +184,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
         content={"detail": f"Rate limit exceeded: {exc.detail}"},
         headers={"Retry-After": str(retry_after)},
     )
+
 
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
@@ -799,7 +797,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         estimated_tokens = len(prompt.split()) + len(body.context.split()) if body.context else len(prompt.split())
         # Use a conservative multiplier for system context and response
         estimated_tokens = int(estimated_tokens * 3)  # Account for system prompt and response
-        
+
         quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
         if not quota_allowed:
             logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
@@ -889,10 +887,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
 
                 if message.role == "user":
                     content = _strip_system_context(content)
-                history.append(Message(
-                    role="user" if message.role == "user" else "model",
-                    content=content
-                ))
+                history.append(Message(role="user" if message.role == "user" else "model", content=content))
             except Exception as e:
                 logger.warning(f"Error processing message in history: {str(e)}")
                 continue
@@ -971,11 +966,11 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             # Get token count from telemetry for savings tracking
             totals = trace.request_totals()
             token_count = totals.get("total_tokens", 0)
-            
+
             if embedding is None:
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
-            
+
             # Write to exact-match cache (tier 1)
             exact_key = f"{cache_scope}:{normalized}"
             exact_cache.put(
@@ -983,7 +978,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 {"response": response_text, "history": history},
                 token_count=token_count,
             )
-            
+
             # Write to semantic cache (tier 2)
             semantic_cache.put(
                 embedding,
@@ -1033,9 +1028,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         _succeeded = True
 
         # --- Persist chat history ---
-        asyncio.create_task(
-            _persist_chat_history(chat_id, body.user_id, chat_session)
-        )
+        asyncio.create_task(_persist_chat_history(chat_id, body.user_id, chat_session))
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
@@ -1542,13 +1535,15 @@ async def get_user_chats(user_id: str):
                     title = msg.get("text", "")[:80]
                 snippet = msg.get("text", "")[:120]
             created_at = await session_store.get_chat_created_at(cid)
-            chats.append({
-                "chat_id": cid,
-                "title": title or f"Chat {cid[:8]}",
-                "snippet": snippet,
-                "message_count": len(history),
-                "created_at": created_at,
-            })
+            chats.append(
+                {
+                    "chat_id": cid,
+                    "title": title or f"Chat {cid[:8]}",
+                    "snippet": snippet,
+                    "message_count": len(history),
+                    "created_at": created_at,
+                }
+            )
         # Most recent first
         chats.sort(key=lambda c: c["created_at"] or 0, reverse=True)
         return {"chats": chats}

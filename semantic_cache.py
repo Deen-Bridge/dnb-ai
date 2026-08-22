@@ -66,21 +66,21 @@ class TokenQuotaTracker:
 
     def is_allowed(self, key: str, token_count: int) -> tuple[bool, int | None]:
         """Check if a request is allowed under the quota.
-        
+
         Returns (is_allowed, retry_after_seconds).
         retry_after_seconds is None if allowed, otherwise the seconds until
         the oldest usage falls out of the window.
         """
         now = time.monotonic()
         cutoff = now - self._window_seconds
-        
+
         with self._lock:
             self._sweep(cutoff)
             bucket = self._usage.get(key, [])
-            
+
             # Calculate current usage
             current_usage = sum(tokens for _, tokens in bucket)
-            
+
             if current_usage + token_count > self._quota:
                 # Over quota: calculate retry-after based on oldest entry
                 if bucket:
@@ -88,7 +88,7 @@ class TokenQuotaTracker:
                     retry_after = int(oldest_ts + self._window_seconds - now) + 1
                     return False, retry_after
                 return False, 60  # Default retry if bucket is empty
-            
+
             # Under quota: record usage
             bucket.append((now, token_count))
             self._usage[key] = bucket
@@ -111,7 +111,7 @@ class TokenQuotaTracker:
         """Get current token usage for a key."""
         now = time.monotonic()
         cutoff = now - self._window_seconds
-        
+
         with self._lock:
             bucket = self._usage.get(key, [])
             bucket = [(ts, tokens) for ts, tokens in bucket if ts >= cutoff]
@@ -123,6 +123,7 @@ _token_quota_tracker = TokenQuotaTracker()
 
 def get_token_quota_tracker() -> TokenQuotaTracker:
     return _token_quota_tracker
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -282,21 +283,21 @@ class SemanticCache:
         surviving_entries: list[CacheEntry] = []
         surviving_times: list[float] = []
         invalidated = 0
-        
+
         for entry, access_time in zip(self._entries, self._access_times):
             if entry.scope == scope:
                 invalidated += 1
             else:
                 surviving_entries.append(entry)
                 surviving_times.append(access_time)
-        
+
         self._entries = surviving_entries
         self._access_times = surviving_times
         return invalidated
 
     def invalidate_by_content_source(self, content_source: str) -> int:
         """Invalidate entries tagged with a specific content source.
-        
+
         This is a placeholder for future content-source tagging.
         Currently returns 0 as entries are not yet tagged with content sources.
         """
@@ -375,7 +376,7 @@ class KeyedCache:
     wrong matching rule there — 2:255 and 2:256 are near-identical strings and
     must never match each other. Cached values are keyed and looked up by an
     exact string, never by distance.
-    
+
     Scope isolation: entries are namespaced by scope (public or user:{user_id})
     to prevent cross-user replay of personalized answers.
     """
@@ -443,7 +444,7 @@ class KeyedCache:
 
     def invalidate_by_prefix(self, prefix: str) -> int:
         """Invalidate all entries with keys starting with the given prefix.
-        
+
         Used for scope-based invalidation (e.g., 'user:' prefix for user-scoped entries).
         Returns count of invalidated entries.
         """
@@ -480,7 +481,7 @@ def keyed_cache_stats() -> dict[str, dict[str, Any]]:
 
 def get_chat_exact_cache() -> KeyedCache:
     """Return the exact-match cache for chat responses.
-    
+
     This cache is checked before the semantic cache and provides exact-match
     lookups for identical prompts within the same scope.
     """
@@ -489,29 +490,29 @@ def get_chat_exact_cache() -> KeyedCache:
 
 def invalidate_user_cache(user_id: str) -> int:
     """Invalidate all cache entries for a specific user.
-    
+
     Invalidates entries in both the semantic cache and the exact-match cache.
     Returns total count of invalidated entries.
     """
     scope = f"user:{user_id}"
     semantic_cache = get_cache()
     exact_cache = get_chat_exact_cache()
-    
+
     semantic_invalidated = semantic_cache.invalidate_by_scope(scope)
     exact_invalidated = exact_cache.invalidate_by_prefix(f"{scope}:")
-    
+
     return semantic_invalidated + exact_invalidated
 
 
 def invalidate_public_cache() -> int:
     """Invalidate all public (non-personalized) cache entries.
-    
+
     Returns total count of invalidated entries.
     """
     semantic_cache = get_cache()
     exact_cache = get_chat_exact_cache()
-    
+
     semantic_invalidated = semantic_cache.invalidate_by_scope("public")
     exact_invalidated = exact_cache.invalidate_by_prefix("public:")
-    
+
     return semantic_invalidated + exact_invalidated

@@ -374,10 +374,7 @@ class FirestoreSessionStore:
 
     def _load_history_sync(self, chat_id: str) -> list[dict[str, str]]:
         docs = self._messages_ref(chat_id).order_by("seq").stream()
-        return [
-            {"role": d.to_dict().get("role", ""), "text": d.to_dict().get("text", "")}
-            for d in docs
-        ]
+        return [{"role": d.to_dict().get("role", ""), "text": d.to_dict().get("text", "")} for d in docs]
 
     def _save_history_sync(self, chat_id: str, history: list[dict[str, str]]) -> None:
         chat_ref = self._chat_ref(chat_id)
@@ -447,9 +444,7 @@ class FirestoreSessionStore:
 
     def _get_user_chats_sync(self, user_id: str) -> list[str]:
         chats = []
-        docs = self._db.collection(self._collection).where(
-            filter=FieldFilter("user_id", "==", user_id)
-        ).stream()
+        docs = self._db.collection(self._collection).where(filter=FieldFilter("user_id", "==", user_id)).stream()
         for doc in docs:
             chats.append(doc.id)
         return chats
@@ -511,8 +506,7 @@ def create_session_store() -> SessionStore | FirestoreSessionStore:
             return store
         except Exception as exc:  # noqa: BLE001 - degrade gracefully
             logger.warning(
-                "Could not initialise Firestore chat storage (%s); "
-                "falling back to Redis/in-memory",
+                "Could not initialise Firestore chat storage (%s); falling back to Redis/in-memory",
                 exc,
             )
     return SessionStore()
