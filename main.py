@@ -904,10 +904,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             cached = semantic_cache.get(embedding)
             if cached is not None:
                 fastapi_response.headers["X-Semantic-Cache"] = "hit"
-                model = genai.GenerativeModel(
-                    telemetry.GEMINI_MODEL,
-                    safety_settings=get_safety_settings(),
-                )
+                model = get_model()
                 chat_session = model.start_chat(
                     history=[
                         {"role": "user", "parts": [{"text": prompt}]},
@@ -945,10 +942,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     for item in persisted
                     if item.get("text")
                 ]
-                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
+                system_context = HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
                 if is_fiqh:
                     system_context += FIQH_IKHTILAF_CONTEXT
-                context = f"Additional context: {extra_context}\n\n" if extra_context else ""
+                context = f"[CALLER_CONTEXT_START]\n{extra_context}\n[CALLER_CONTEXT_END]\n\n" if extra_context else ""
                 full_prompt = f"{context}User question: {safety_prompt}"
                 reply = await provider_router.generate(
                     provider_history + [ProviderMessage("user", full_prompt)],
@@ -972,7 +969,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             nonlocal truncated
             truncated = trim_history(active_chats[chat_id])
 
-            system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
+            system_context = HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
             if is_fiqh:
                 system_context += FIQH_IKHTILAF_CONTEXT
                 if madhhab:
@@ -988,7 +985,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
-            context = f"Additional context: {extra_context}\n\n" if extra_context else ""
+            if effective_language:
+                system_context += LANGUAGE_INSTRUCTIONS
+            context = f"[CALLER_CONTEXT_START]\n{extra_context}\n[CALLER_CONTEXT_END]\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("sending message to model", extra={"chat_id": chat_id})
             _t0 = time.perf_counter()
@@ -1421,7 +1420,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 chat_session = active_chats[chat_id]
 
                 # --- Build system context + prompt ---
-                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
+                system_context = HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
                 if effective_language:
                     _lang_tpl = prompt_registry.get("language_instructions")
                     assert _lang_tpl is not None
@@ -1443,7 +1442,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 if personal_context is not None:
                     system_context += personal_context.prompt_block
 
-                ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
+                ctx = f"[CALLER_CONTEXT_START]\n{extra_context}\n[CALLER_CONTEXT_END]\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
 
                 # --- Async streaming generation ---
