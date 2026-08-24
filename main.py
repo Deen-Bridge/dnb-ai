@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -41,6 +41,12 @@ from citations import (
     CitationExtraction,
     CitationStreamFilter,
     extract_citations,
+)
+from calligraphy_ocr import (
+    CalligraphyAnalysis,
+    GeminiCalligraphyEngine,
+    StubCalligraphyEngine,
+    sniff_image_mime,
 )
 from confidence import (
     ConfidenceAssessment,
@@ -90,6 +96,14 @@ from memory.extraction import (
     extract_updates,
     merge_summaries,
     summarize_conversation_turns,
+)
+from manuscript_ocr import (
+    ManuscriptAnalysis,
+    PoorQualityError,
+    UnsupportedFormatError,
+    UploadTooLargeError,
+    analyze_manuscript_bytes,
+    manuscript_rate_limiter,
 )
 from prompts import (
     ExperimentAssignment,
@@ -1857,6 +1871,31 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
     return {"status": "ok", "feedback_id": record.feedback_id}
 
 
+@app.post("/manuscripts/analyze", response_model=ManuscriptAnalysis)
+async def analyze_manuscript(request: Request, file: UploadFile = File(...)) -> ManuscriptAnalysis:
+    """Analyze an uploaded Islamic manuscript page (#233): OCR the Arabic text
+    and classify the work.
+
+    Multipart field 'file'; JPEG/PNG/PDF. Rate-limited per client like /feedback.
+    Errors: 413 over the upload cap, 415 unsupported/mismatched format,
+    422 nothing readable extracted, 429 throttled.
+    """
+    if not manuscript_rate_limiter.is_allowed(_client_ip(request)):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many manuscript analyses. Please wait and try again.",
+        )
+    data = await file.read()
+    try:
+        return await analyze_manuscript_bytes(file.filename or "", data)
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except UnsupportedFormatError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except PoorQualityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/feedback/stats", dependencies=[Depends(require_admin)])
 async def feedback_stats() -> dict[str, Any]:
     """Aggregate quality metrics: rating ratios, per-category, per-model, by day.
@@ -1901,6 +1940,61 @@ async def feedback_records(
 async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
     """Arabic–English cross-lingual retrieval over the bundled corpus (#232)."""
     return await crosslingual_search(body.query, body.k, body.lang_pref)
+# --- Calligraphy OCR (#234) ---------------------------------------------------
+
+
+@app.post("/calligraphy/analyze", response_model=CalligraphyAnalysis)
+@limiter.limit("10/minute")
+async def analyze_calligraphy(request: Request, file: UploadFile = File(...)) -> CalligraphyAnalysis:
+    """Recognize text in an Arabic calligraphy image and classify its style.
+
+    Accepts a single multipart JPEG or PNG (validated by magic bytes, capped at
+    ``calligraphy_max_image_bytes``). Heavy lifting lives in calligraphy_ocr;
+    this handler only enforces transport rules and picks the provider.
+
+    Errors: 413 oversize, 415 unsupported format, 422 no legible calligraphy,
+    502 engine failure, 503 provider unavailable. Rate-limited per API key/IP.
+    """
+    max_bytes = settings.calligraphy_max_image_bytes
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {max_bytes // (1024 * 1024)}MB size limit.",
+        )
+
+    mime = sniff_image_mime(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported.")
+
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    if settings.calligraphy_provider == "stub":
+        # The stub fabricates results from marker bytes — a dev/test aid only.
+        if environment == "production":
+            raise HTTPException(status_code=503, detail="The stub calligraphy provider is disabled in production.")
+        engine: GeminiCalligraphyEngine | StubCalligraphyEngine = StubCalligraphyEngine(
+            min_confidence=settings.calligraphy_min_confidence
+        )
+    elif settings.calligraphy_provider == "gemini":
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+        engine = GeminiCalligraphyEngine(timeout=GEMINI_TIMEOUT, min_confidence=settings.calligraphy_min_confidence)
+    else:
+        raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+
+    try:
+        # The vision call is synchronous; keep it off the event loop.
+        analysis = await run_in_threadpool(engine.analyze, data, mime)
+    except Exception as exc:
+        logger.error("Calligraphy analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Calligraphy analysis failed upstream.") from exc
+
+    if not analysis.extracted_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No legible Arabic calligraphy was detected in the image.",
+        )
+    return analysis
 
 
 @app.get("/ping")
