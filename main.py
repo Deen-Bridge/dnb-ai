@@ -57,6 +57,11 @@ from confidence import (
     thresholds as confidence_thresholds,
 )
 from config import get_settings
+from crosslingual import (
+    CrosslingualSearchRequest,
+    CrosslingualSearchResponse,
+    crosslingual_search,
+)
 from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
@@ -1931,6 +1936,10 @@ async def feedback_records(
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
 
 
+@app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
+async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
+    """Arabic–English cross-lingual retrieval over the bundled corpus (#232)."""
+    return await crosslingual_search(body.query, body.k, body.lang_pref)
 # --- Calligraphy OCR (#234) ---------------------------------------------------
 
 
