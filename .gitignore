@@ -57,5 +57,10 @@ data/store.json
 feedback.db
 feedback.db-*
 
+# Retrieval vector index (build artifact — large, binary; rebuilt from data/)
+data/retrieval_index.db
+data/retrieval_index.db-*
+*.retrieval.db
+
 # Committed virtual environments are machine-specific — never commit them
 venv_linux/

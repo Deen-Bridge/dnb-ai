@@ -1,5 +1,4 @@
 from functools import lru_cache
-from typing import List
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,9 +14,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    gemini_api_key: str
+    gemini_api_key: str = ""
 
-    model_name: str = "gemini-1.5-flash"
+    model_name: str = "gemini-2.5-flash"
 
     temperature: float = Field(default=0.7, ge=0, le=2)
     top_p: float = Field(default=0.8, ge=0, le=1)
@@ -26,7 +25,7 @@ class Settings(BaseSettings):
 
     gemini_timeout: int = Field(default=30, ge=1)
 
-    cors_origins: List[str] = Field(
+    cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
             "https://deenbridge.vercel.app",
