@@ -12,3 +12,5 @@ slowapi==0.1.9
 firebase-admin>=6.6.0,<8.0.0
 hijridate>=2.6.0
 tzdata
+Pillow==11.2.1
+python-multipart==0.0.20

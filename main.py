@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -85,6 +85,14 @@ from memory.extraction import (
     extract_updates,
     merge_summaries,
     summarize_conversation_turns,
+)
+from manuscript_ocr import (
+    ManuscriptAnalysis,
+    PoorQualityError,
+    UnsupportedFormatError,
+    UploadTooLargeError,
+    analyze_manuscript_bytes,
+    manuscript_rate_limiter,
 )
 from prompts import (
     ExperimentAssignment,
@@ -1850,6 +1858,31 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         extra={"chat_id": body.chat_id, "message_id": body.message_id, "rating": body.rating},
     )
     return {"status": "ok", "feedback_id": record.feedback_id}
+
+
+@app.post("/manuscripts/analyze", response_model=ManuscriptAnalysis)
+async def analyze_manuscript(request: Request, file: UploadFile = File(...)) -> ManuscriptAnalysis:
+    """Analyze an uploaded Islamic manuscript page (#233): OCR the Arabic text
+    and classify the work.
+
+    Multipart field 'file'; JPEG/PNG/PDF. Rate-limited per client like /feedback.
+    Errors: 413 over the upload cap, 415 unsupported/mismatched format,
+    422 nothing readable extracted, 429 throttled.
+    """
+    if not manuscript_rate_limiter.is_allowed(_client_ip(request)):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many manuscript analyses. Please wait and try again.",
+        )
+    data = await file.read()
+    try:
+        return await analyze_manuscript_bytes(file.filename or "", data)
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except UnsupportedFormatError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except PoorQualityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/feedback/stats", dependencies=[Depends(require_admin)])
