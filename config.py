@@ -25,6 +25,10 @@ class Settings(BaseSettings):
 
     gemini_timeout: int = Field(default=30, ge=1)
 
+    # Calligraphy OCR (#234)
+    calligraphy_provider: str = "gemini"  # "gemini" or "stub" (stub is dev-only)
+    calligraphy_max_image_bytes: int = Field(default=10 * 1024 * 1024, ge=1)  # 10MB
+    calligraphy_min_confidence: float = Field(default=0.35, ge=0, le=1)
     # Manuscript analysis (#233): provider, upload size cap, quality gate.
     manuscripts_provider: str = Field(default="gemini")
     manuscripts_max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1)

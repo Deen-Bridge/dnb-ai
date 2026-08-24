@@ -42,6 +42,12 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
+from calligraphy_ocr import (
+    CalligraphyAnalysis,
+    GeminiCalligraphyEngine,
+    StubCalligraphyEngine,
+    sniff_image_mime,
+)
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -1923,6 +1929,63 @@ async def feedback_records(
     except Exception as exc:
         logger.exception("failed to fetch feedback records")
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
+
+
+# --- Calligraphy OCR (#234) ---------------------------------------------------
+
+
+@app.post("/calligraphy/analyze", response_model=CalligraphyAnalysis)
+@limiter.limit("10/minute")
+async def analyze_calligraphy(request: Request, file: UploadFile = File(...)) -> CalligraphyAnalysis:
+    """Recognize text in an Arabic calligraphy image and classify its style.
+
+    Accepts a single multipart JPEG or PNG (validated by magic bytes, capped at
+    ``calligraphy_max_image_bytes``). Heavy lifting lives in calligraphy_ocr;
+    this handler only enforces transport rules and picks the provider.
+
+    Errors: 413 oversize, 415 unsupported format, 422 no legible calligraphy,
+    502 engine failure, 503 provider unavailable. Rate-limited per API key/IP.
+    """
+    max_bytes = settings.calligraphy_max_image_bytes
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {max_bytes // (1024 * 1024)}MB size limit.",
+        )
+
+    mime = sniff_image_mime(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported.")
+
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    if settings.calligraphy_provider == "stub":
+        # The stub fabricates results from marker bytes — a dev/test aid only.
+        if environment == "production":
+            raise HTTPException(status_code=503, detail="The stub calligraphy provider is disabled in production.")
+        engine: GeminiCalligraphyEngine | StubCalligraphyEngine = StubCalligraphyEngine(
+            min_confidence=settings.calligraphy_min_confidence
+        )
+    elif settings.calligraphy_provider == "gemini":
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+        engine = GeminiCalligraphyEngine(timeout=GEMINI_TIMEOUT, min_confidence=settings.calligraphy_min_confidence)
+    else:
+        raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+
+    try:
+        # The vision call is synchronous; keep it off the event loop.
+        analysis = await run_in_threadpool(engine.analyze, data, mime)
+    except Exception as exc:
+        logger.error("Calligraphy analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Calligraphy analysis failed upstream.") from exc
+
+    if not analysis.extracted_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No legible Arabic calligraphy was detected in the image.",
+        )
+    return analysis
 
 
 @app.get("/ping")
