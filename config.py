@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     gemini_timeout: int = Field(default=30, ge=1)
 
+    # Calligraphy OCR (#234)
+    calligraphy_provider: str = "gemini"  # "gemini" or "stub" (stub is dev-only)
+    calligraphy_max_image_bytes: int = Field(default=10 * 1024 * 1024, ge=1)  # 10MB
+    calligraphy_min_confidence: float = Field(default=0.35, ge=0, le=1)
+
     cors_origins: List[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
