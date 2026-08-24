@@ -68,6 +68,7 @@ from fiqh import (
     normalize_madhhab,
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -1630,6 +1631,24 @@ async def feedback_records(
     except Exception as exc:
         logger.error("Failed to fetch feedback records: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
+
+
+# ---------------------------------------------------------------------------
+# Hybrid search: vector + keyword fusion retrieval (#226)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/search/hybrid", response_model=HybridSearchResponse)
+async def search_hybrid(body: HybridSearchRequest) -> HybridSearchResponse:
+    """Fuse semantic and keyword retrieval channels with RRF over the corpus.
+
+    All channels run offline in-process; production backends (pgvector,
+    Pinecone, ...) plug into hybrid_search's Protocols without touching this
+    handler.
+    """
+    if not settings.hybrid_enabled:
+        raise HTTPException(status_code=503, detail="Hybrid search is disabled.")
+    return await run_in_threadpool(handle_hybrid_search, body)
 
 
 @app.get("/ping")
