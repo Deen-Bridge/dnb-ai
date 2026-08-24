@@ -52,6 +52,11 @@ from confidence import (
     build_signals,
     thresholds as confidence_thresholds,
 )
+from crosslingual import (
+    CrosslingualSearchRequest,
+    CrosslingualSearchResponse,
+    crosslingual_search,
+)
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -1630,6 +1635,12 @@ async def feedback_records(
     except Exception as exc:
         logger.error("Failed to fetch feedback records: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
+
+
+@app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
+async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
+    """Arabic–English cross-lingual retrieval over the bundled corpus (#232)."""
+    return await crosslingual_search(body.query, body.k, body.lang_pref)
 
 
 @app.get("/ping")
