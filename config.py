@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     calligraphy_provider: str = "gemini"  # "gemini" or "stub" (stub is dev-only)
     calligraphy_max_image_bytes: int = Field(default=10 * 1024 * 1024, ge=1)  # 10MB
     calligraphy_min_confidence: float = Field(default=0.35, ge=0, le=1)
+    # Manuscript analysis (#233): provider, upload size cap, quality gate.
+    manuscripts_provider: str = Field(default="gemini")
+    manuscripts_max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    manuscripts_min_confidence: float = Field(default=0.35, ge=0.0, le=1.0)
 
     cors_origins: list[str] = Field(
         default_factory=lambda: [
@@ -47,6 +51,11 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @field_validator("manuscripts_provider", mode="before")
+    @classmethod
+    def normalize_manuscripts_provider(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 @lru_cache
