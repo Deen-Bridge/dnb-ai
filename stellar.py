@@ -179,6 +179,18 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
 
     Raises HTTPException(404) if the account does not exist on this network.
     """
+    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
+        latency_ms = int(os.getenv("MOCK_HORIZON_LATENCY_MS", "25"))
+        if latency_ms:
+            import time
+
+            time.sleep(latency_ms / 1000)
+        if public_key == os.getenv(
+            "MOCK_UNKNOWN_ACCOUNT_KEY", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+        ):
+            raise HTTPException(status_code=404, detail="Account not found on the Stellar testnet network.")
+        return Decimal(os.getenv("MOCK_USDC_BALANCE", "100"))
+
     server = Server(horizon_url())
     try:
         account = server.accounts().account_id(public_key).call()
@@ -722,6 +734,8 @@ async def resolve_nisab(nisab_usd_override: float | None) -> NisabQuote:
     """Caller's override if given, otherwise the live gold-derived nisab."""
     if nisab_usd_override:
         return override_quote(Decimal(str(nisab_usd_override)))
+    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
+        return override_quote(Decimal(os.getenv("MOCK_NISAB_USD", "50")))
     return await get_nisab()
 
 
