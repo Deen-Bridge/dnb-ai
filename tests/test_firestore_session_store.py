@@ -13,8 +13,7 @@ def _match(value, op, expected):
     if op == "==":
         return value == expected
     if op in ("<", "<=", ">", ">="):
-        return {"<": value < expected, "<=": value <= expected,
-                ">": value > expected, ">=": value >= expected}[op]
+        return {"<": value < expected, "<=": value <= expected, ">": value > expected, ">=": value >= expected}[op]
     return True
 
 
@@ -81,10 +80,7 @@ class _FakeRef:
 
     def stream(self):
         coll = self._db._data.get("/".join(self.path), {}) or {}
-        return [
-            _FakeSnapshot(_FakeRef(self._db, self.path + (k,), True), v)
-            for k, v in sorted(coll.items())
-        ]
+        return [_FakeSnapshot(_FakeRef(self._db, self.path + (k,), True), v) for k, v in sorted(coll.items())]
 
     def order_by(self, field, direction="ASCENDING"):
         return _FakeQuery(self._db, self.path, field, direction)
@@ -119,10 +115,7 @@ class _FakeQuery:
 
     def stream(self):
         coll = self._db._data.get("/".join(self._coll_path), {}) or {}
-        docs = [
-            _FakeSnapshot(_FakeRef(self._db, self._coll_path + (k,), True), v)
-            for k, v in coll.items()
-        ]
+        docs = [_FakeSnapshot(_FakeRef(self._db, self._coll_path + (k,), True), v) for k, v in coll.items()]
         if self._order_field:
             docs.sort(
                 key=lambda d: d.get(self._order_field) or 0,
