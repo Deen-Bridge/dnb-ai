@@ -57,6 +57,9 @@ jobs:
           python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings | tee /tmp/ci-backfill-2.log
           grep -q "0 added, 0 updated" /tmp/ci-backfill-2.log
 
+      - name: Run hybrid search tests
+        run: pytest -q tests/test_hybrid_search.py
+
       - name: Run fiqh tests
         run: pytest -q tests/test_fiqh.py
 

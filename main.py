@@ -80,6 +80,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from history import trim_history
+from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from learning import router as learning_router
 from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
 from memory import (
@@ -1936,6 +1937,22 @@ async def feedback_records(
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
 
 
+# ---------------------------------------------------------------------------
+# Hybrid search: vector + keyword fusion retrieval (#226)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/search/hybrid", response_model=HybridSearchResponse)
+async def search_hybrid(body: HybridSearchRequest) -> HybridSearchResponse:
+    """Fuse semantic and keyword retrieval channels with RRF over the corpus.
+
+    All channels run offline in-process; production backends (pgvector,
+    Pinecone, ...) plug into hybrid_search's Protocols without touching this
+    handler.
+    """
+    if not settings.hybrid_enabled:
+        raise HTTPException(status_code=503, detail="Hybrid search is disabled.")
+    return await run_in_threadpool(handle_hybrid_search, body)
 @app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
 async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
     """Arabic–English cross-lingual retrieval over the bundled corpus (#232)."""

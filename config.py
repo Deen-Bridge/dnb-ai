@@ -45,6 +45,17 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
+    # --- Hybrid retrieval (#226): vector+keyword fusion ----------------------
+    # Master switch; weights seed the balanced-mode mix, and the toggles let a
+    # deployment run a single channel while a backend (e.g. pgvector) is rolled out.
+    hybrid_enabled: bool = True
+    hybrid_rrf_k: int = Field(default=60, ge=1)
+    hybrid_semantic_weight: float = Field(default=0.5, ge=0, le=1)
+    hybrid_keyword_weight: float = Field(default=0.5, ge=0, le=1)
+    hybrid_top_k: int = Field(default=5, ge=1, le=50)
+    hybrid_enable_semantic_channel: bool = True
+    hybrid_enable_keyword_channel: bool = True
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):
