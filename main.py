@@ -1,14 +1,14 @@
-import os
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
-from config import get_settings
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,10 +29,10 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from pydantic import BaseModel, Field, field_validator
 
 import telemetry
 from citations import (
@@ -43,7 +42,6 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
-from store import create_session_store, history_to_dicts, dicts_to_contents
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -52,6 +50,8 @@ from confidence import (
     build_signals,
     thresholds as confidence_thresholds,
 )
+from config import get_settings
+from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -68,7 +68,17 @@ from fiqh import (
     normalize_madhhab,
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
-from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
+from history import trim_history
+from learning import router as learning_router
+from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
+from memory import (
+    ChatSummary,
+    PersonalContext,
+    UserProfile,
+    build_personal_context,
+    create_memory_store,
+    render_user_context,
+)
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
     apply_updates,
@@ -84,6 +94,18 @@ from manuscript_ocr import (
     analyze_manuscript_bytes,
     manuscript_rate_limiter,
 )
+from prompts import (
+    ExperimentAssignment,
+    ExperimentConfig,
+    ExperimentHarness,
+    Variant,
+    get_registry,
+    register_defaults,
+)
+from providers.gemini import GeminiProvider
+from providers.openai_compat import OpenAICompatProvider
+from providers.router import ProviderRouter
+from providers.types import GenerationConfig as ProviderGenerationConfig, Message as ProviderMessage
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -104,6 +126,7 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
     TafsirContext,
@@ -113,6 +136,12 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from worship import router as worship_router
+
+# Install JSON logging before any module-level code emits a record, and
+# independently of uvicorn's own loggers (uvicorn configures logging while
+# importing this module, so this call runs after and deliberately wins).
+configure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +149,18 @@ settings = get_settings()
 
 GEMINI_API_KEY = settings.gemini_api_key
 
-genai.configure(api_key=GEMINI_API_KEY)
+CHAT_PROMPT_MAX_LENGTH = 4000
+CHAT_CONTEXT_MAX_LENGTH = 8000
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
+
+# --- Prompt template registry and A/B experimentation ---
+register_defaults()
+prompt_registry = get_registry()
+experiment_harness = ExperimentHarness(prompt_registry)
 
 # --- Service API-key authentication ---
 # A shared secret between the DeenBridge backend/frontend and this service.
@@ -133,19 +171,16 @@ AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "ye
 if not AUTH_DISABLED and not SERVICE_API_KEY:
     if os.getenv("ENVIRONMENT", "").lower() == "production":
         raise RuntimeError(
-            "SERVICE_API_KEY must be set in production. "
-            "Set AUTH_DISABLED=true to run without authentication locally."
+            "SERVICE_API_KEY must be set in production. Set AUTH_DISABLED=true to run without authentication locally."
         )
-    logger.warning(
-        "SERVICE_API_KEY is not set; authenticated endpoints will reject all requests."
-    )
+    logger.warning("SERVICE_API_KEY is not set; authenticated endpoints will reject all requests.")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_api_key(
     request: Request,
-    api_key: Optional[str] = Security(api_key_header),
+    api_key: str | None = Security(api_key_header),
 ) -> str:
     """Dependency that enforces X-API-Key on protected routes.
 
@@ -189,10 +224,16 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
         headers={"Retry-After": str(retry_after)},
     )
 
+
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(faraid_router)
 app.include_router(study_router)
+# Personalized learning-path recommendations from a caller-supplied catalog
+app.include_router(learning_router)
+# Worship utilities: prayer times and Hijri/Gregorian date conversion
+app.include_router(worship_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
 app.include_router(tafsir_router)
 # Scholar review: the human end of the abstention loop
@@ -207,6 +248,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Added last, so it is the outermost layer: every response — including CORS
+# preflights and anything an exception handler produces — leaves with an
+# X-Request-ID, and every log record emitted while serving it carries the same
+# id. Must stay outside CORSMiddleware for that to hold.
+app.add_middleware(RequestContextMiddleware)
+
 
 # Response Models
 class CitationVerificationResult(BaseModel):
@@ -220,9 +267,24 @@ class CitationVerificationResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    prompt: str
-    chat_id: str | None = None
-    context: str | None = None  # Additional context for specific queries
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=CHAT_PROMPT_MAX_LENGTH,
+        description="User question after leading and trailing whitespace is removed.",
+        examples=["What are the five pillars of Islam?"],
+    )
+    chat_id: uuid.UUID | None = Field(
+        default=None,
+        description="Existing chat session UUID. Omit it to start a new session.",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    context: str | None = Field(
+        default=None,
+        max_length=CHAT_CONTEXT_MAX_LENGTH,
+        description="Optional supporting context appended to the model prompt.",
+        examples=["The user is asking about a general educational scenario."],
+    )
     madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
     language: str | None = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
     user_id: str | None = Field(default=None, max_length=128)  # Opaque user identifier for personalization
@@ -232,6 +294,11 @@ class ChatRequest(BaseModel):
     # pass the user's JWT so this service can fetch history from dnb-backend.
     transactions: list[PurchaseTransaction] | None = None
     auth_token: str | None = None
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def strip_prompt_whitespace(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
 
 
 class Message(BaseModel):
@@ -251,6 +318,7 @@ class ChatResponse(BaseModel):
     chat_id: str
     message_id: str | None = None  # stable id of the answer just returned
     history: list[Message] = []
+    truncated: bool = False  # True when oldest turn-pairs were dropped for the token budget
     moderation: Moderation | None = None
     fiqh: FiqhInfo | None = None
     hadith_references: list[HadithReference] | None = None
@@ -262,6 +330,8 @@ class ChatResponse(BaseModel):
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
+    # A/B experiment assignment (None when no experiment is active).
+    experiment: ExperimentAssignment | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -381,6 +451,29 @@ async def purchase_retriever(
         return None
 
 
+async def personal_context_retriever(
+    prompt: str,
+    user_id: str | None,
+    auth_token: str | None,
+) -> PersonalContext | None:
+    """Retrieve this user's most-relevant platform records; never fail the turn.
+
+    Deny-by-default lives in ``build_personal_context``: an unauthenticated turn
+    (no ``user_id``/``auth_token``) returns None and touches no network. Any
+    retrieval error degrades to None so the answer is produced without it.
+    """
+    try:
+        return await build_personal_context(
+            prompt,
+            user_id=user_id,
+            auth_token=auth_token,
+            store=memory_store,
+        )
+    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
+        logger.warning("Personal context retrieval failed; answering without it: %s", exc)
+        return None
+
+
 def get_safety_settings() -> list[dict[str, str]]:
     return [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -393,6 +486,54 @@ def get_safety_settings() -> list[dict[str, str]]:
 # In-memory session store for demo purposes
 sessions: dict[str, Any] = {}
 active_chats: dict[str, Any] = {}
+provider_router: ProviderRouter | None = None
+
+
+class _ProviderMessage:
+    def __init__(self, role: str, content: str) -> None:
+        self.role = role
+        self.parts = [type("Part", (), {"text": content})()]
+
+
+class _ProviderChatSession:
+    def __init__(self, history: list[ProviderMessage]) -> None:
+        self.history = [_ProviderMessage(message.role, message.content) for message in history]
+
+    def append(self, role: str, content: str) -> None:
+        self.history.append(_ProviderMessage(role, content))
+
+
+def _build_provider_router() -> ProviderRouter | None:
+    primary_name = os.getenv("LLM_PRIMARY", "gemini").strip().lower()
+    fallback_names = [name.strip().lower() for name in os.getenv("LLM_FALLBACKS", "").split(",") if name.strip()]
+    if not fallback_names:
+        return None
+    provider_names = [primary_name, *fallback_names]
+    providers: list[Any] = []
+    for name in provider_names:
+        if name == "gemini" and GEMINI_API_KEY:
+            providers.append(GeminiProvider(GEMINI_API_KEY, settings.model_name))
+            continue
+        if name in {"openai", "openai-compatible", "openrouter", "groq"}:
+            api_key = os.getenv(f"{name.upper().replace('-', '_')}_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+            base_url = (
+                os.getenv(f"{name.upper().replace('-', '_')}_BASE_URL")
+                or os.getenv("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1"
+            )
+            model = os.getenv(f"{name.upper().replace('-', '_')}_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+            if api_key:
+                providers.append(OpenAICompatProvider(name, api_key, base_url, model))
+    if not providers:
+        return None
+    return ProviderRouter(
+        providers,
+        failure_threshold=int(os.getenv("LLM_CIRCUIT_FAILURE_THRESHOLD", "3")),
+        cooldown_seconds=float(os.getenv("LLM_CIRCUIT_COOLDOWN_SECONDS", "60")),
+    )
+
+
+provider_router = _build_provider_router()
 
 # --- Feedback support ------------------------------------------------------
 # The generation config captured into a feedback record so a flagged answer is
@@ -462,15 +603,9 @@ async def require_admin(token: str | None = Depends(_admin_header)) -> None:
         raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
 
 
-ISLAMIC_CONTEXT = (
-    "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
-    "Provide respectful, accurate, and context-aware responses grounded in authentic Islamic knowledge.\n\n"
-    "POLICY ON CITATIONS:\n"
-    "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
-    "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
-    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
-    "general knowledge—do NOT fabricate references.\n"
-)
+_islamic_ctx_tpl = prompt_registry.get("islamic_context")
+assert _islamic_ctx_tpl is not None, "islamic_context template not registered"
+ISLAMIC_CONTEXT = _islamic_ctx_tpl.render()
 
 SUPPORTED_LANGUAGES = {
     "ar": "Arabic",
@@ -487,18 +622,9 @@ SUPPORTED_LANGUAGES = {
     "tl": "Tagalog",
 }
 
-LANGUAGE_INSTRUCTIONS = (
-    "\n\nLANGUAGE POLICY:\n"
-    "- When a response_language code is provided, respond entirely in that language.\n"
-    "- When no response_language is provided (auto mode), respond in the same language as the user's question.\n"
-    "- ALWAYS quote Quran in the original Arabic script (e.g. بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ) "
-    "followed by a translation in the response language, with the surah:ayah reference.\n"
-    "- Use standard transliteration for core Islamic terms (e.g. salat, zakat, hajj, shahada) "
-    "when writing in Latin-script languages.\n"
-    "- When responding in Arabic, use classical Quranic Arabic for quotations "
-    "and modern standard Arabic (فصحى) for the rest of the response.\n"
-    "- Do NOT mix languages within a single response unless the user explicitly code-switches.\n"
-)
+_lang_instr_tpl = prompt_registry.get("language_instructions")
+assert _lang_instr_tpl is not None, "language_instructions template not registered"
+LANGUAGE_INSTRUCTIONS = _lang_instr_tpl.render(response_language="auto")
 
 
 def normalize_language(lang: str | None) -> str | None:
@@ -521,13 +647,47 @@ def normalize_language(lang: str | None) -> str | None:
 
 
 def get_model() -> genai.GenerativeModel:
+    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
+        return _MockModel()  # type: ignore[return-value]
     return genai.GenerativeModel(
         model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
+        safety_settings=get_safety_settings(),
     )
 
 
 GEMINI_TIMEOUT = settings.gemini_timeout
+
+
+class _MockResponse:
+    text = "Mock upstream response"
+
+
+class _MockPart:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _MockContent:
+    def __init__(self, role: str, text: str) -> None:
+        self.role = role
+        self.parts = [_MockPart(text)]
+
+
+class _MockChatSession:
+    def __init__(self, history: list[Any] | None = None) -> None:
+        self.history = list(history or [])
+
+    async def send_message_async(self, message: str, **_kwargs: Any) -> _MockResponse:
+        latency_ms = int(os.getenv("MOCK_LLM_LATENCY_MS", "50"))
+        await asyncio.sleep(max(0, latency_ms) / 1000)
+        self.history.extend([_MockContent("user", message), _MockContent("model", _MockResponse.text)])
+        return _MockResponse()
+
+
+class _MockModel:
+    def start_chat(self, history: list[Any] | None = None) -> _MockChatSession:
+        return _MockChatSession(history)
 
 
 def extract_text_safely(response: Any) -> str | None:
@@ -661,7 +821,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        chat_id = request.chat_id or str(uuid.uuid4())
+        chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
 
@@ -671,7 +831,27 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         # detects that one was present and warns the user.
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
-        logger.info(f"Received chat request: {prompt[:100]}...")
+        logger.info(
+            "chat request received",
+            extra={
+                "chat_id": chat_id,
+                "new_session": is_new_chat,
+                "prompt_chars": len(prompt),
+                "context_chars": len(extra_context) if extra_context else 0,
+                "language": request.language,
+                "has_user_id": bool(request.user_id),
+                **prompt_debug_fields(prompt),
+            },
+        )
+
+        # --- A/B experiment assignment (populated if any experiment is active) ---
+        _current_experiment: ExperimentAssignment | None = None
+        for exp_id in experiment_harness.active_experiments():
+            try:
+                _current_experiment = experiment_harness.assign(exp_id, chat_id)
+                break
+            except Exception:  # noqa: BLE001 — experiments are best-effort
+                pass
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
@@ -697,6 +877,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
 
+            # Per-user retrieval: only this user's most-relevant records (deny by
+            # default without user_id/auth_token; ownership re-checked post-fetch).
+            personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
+
         # --- Memory lookup ---
         profile: UserProfile | None = None
         summary: ChatSummary | None = None
@@ -714,6 +898,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             and tafsir_context is None
             and zakat_context is None
             and purchase_context is None
+            and personal_context is None
             and request.user_id is None
             and SEMANTIC_CACHE_ENABLED
         )
@@ -738,7 +923,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     ]
                 )
                 active_chats[chat_id] = chat_session
-                logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
+                logger.info(
+                    "semantic cache hit",
+                    extra={"chat_id": chat_id, "prompt_chars": len(prompt), **prompt_debug_fields(prompt)},
+                )
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
                 _finalize()
                 _succeeded = True
@@ -755,14 +943,42 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             semantic_cache.bypasses += 1
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
+        truncated = False
+
         async def generate(safety_prompt: str) -> str:
+            if provider_router is not None:
+                persisted = await session_store.load_history(chat_id)
+                provider_history = [
+                    ProviderMessage(item.get("role", "user"), item.get("text", ""))
+                    for item in persisted
+                    if item.get("text")
+                ]
+                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
+                if is_fiqh:
+                    system_context += FIQH_IKHTILAF_CONTEXT
+                context = f"Additional context: {extra_context}\n\n" if extra_context else ""
+                full_prompt = f"{context}User question: {safety_prompt}"
+                reply = await provider_router.generate(
+                    provider_history + [ProviderMessage("user", full_prompt)],
+                    system=system_context,
+                    config=ProviderGenerationConfig(**GENERATION_CONFIG),
+                )
+                chat_session = active_chats.setdefault(chat_id, _ProviderChatSession(provider_history))
+                chat_session.append("user", full_prompt)
+                chat_session.append("model", reply.text)
+                return reply.text
             if chat_id not in active_chats:
-                logger.info(f"Creating new chat session: {chat_id}")
+                logger.info("chat session created", extra={"chat_id": chat_id})
                 model = get_model()
                 # Load persisted history if available
                 persisted = await session_store.load_history(chat_id)
                 history = dicts_to_contents(persisted) if persisted else []
                 active_chats[chat_id] = model.start_chat(history=history)
+
+            # Enforce the conversation-history token/turn budget before sending,
+            # dropping oldest turn-pairs so the prompt can't grow unbounded (#13).
+            nonlocal truncated
+            truncated = trim_history(active_chats[chat_id])
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
             if is_fiqh:
@@ -775,12 +991,14 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
+            if personal_context is not None:
+                system_context += personal_context.prompt_block
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
-            logger.info("Sending message to chat...")
+            logger.info("sending message to model", extra={"chat_id": chat_id})
             _t0 = time.perf_counter()
             response = await send_message_with_retry(
                 active_chats[chat_id],
@@ -813,8 +1031,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _pp_start = time.perf_counter()
 
         logger.info(
-            "safety=%s",
-            {
+            "safety evaluated",
+            extra={
+                "chat_id": chat_id,
                 "policy_id": safety_result.category_id if safety_result else None,
                 "action": safety_result.action if safety_result else "disabled",
                 "stages_fired": safety_result.stages_fired if safety_result else [],
@@ -834,12 +1053,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
                 if message.role == "user":
                     content = _strip_system_context(content)
-                history.append(Message(
-                    role="user" if message.role == "user" else "model",
-                    content=content
-                ))
-            except Exception as e:
-                logger.warning(f"Error processing message in history: {str(e)}")
+                history.append(Message(role="user" if message.role == "user" else "model", content=content))
+            except Exception:  # noqa: BLE001 - one malformed turn must not fail the answer
+                logger.warning("error processing message in history", exc_info=True)
                 continue
 
         response_text = safety_result.text if safety_result else generated_text
@@ -891,15 +1107,16 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     chat_id=chat_id,
                 )
                 assessment.review_id = item.id
-            except Exception as exc:  # noqa: BLE001 - the answer still matters
-                logger.error("Could not queue answer for scholar review: %s", exc)
+            except Exception:  # noqa: BLE001 - the answer still matters
+                logger.exception("could not queue answer for scholar review", extra={"chat_id": chat_id})
                 assessment.queued = False
 
         response_text = apply_policy(response_text, assessment)
 
         logger.info(
-            "confidence=%s",
-            {
+            "confidence assessed",
+            extra={
+                "chat_id": chat_id,
                 "score": assessment.score,
                 "band": assessment.band.value,
                 "signals": assessment.signals_used,
@@ -917,7 +1134,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
             semantic_cache.put(embedding, response_text, chat_id, history)
-            logger.info("Semantic cache WRITE for prompt: %s", prompt[:80])
+            logger.info(
+                "semantic cache write",
+                extra={"chat_id": chat_id, "prompt_chars": len(prompt), **prompt_debug_fields(prompt)},
+            )
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
 
@@ -928,7 +1148,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _tag_history_with_message_ids(chat_id, history)
 
         trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
-        logger.info("Chat response generated successfully")
+        logger.info(
+            "chat answer generated",
+            extra={"chat_id": chat_id, "message_id": message_id, "answer_chars": len(response_text)},
+        )
         # Build the response before finalizing, so a construction/validation
         # failure is handled only by the error path and the request is not
         # counted as both a success (here) and an error (except block).
@@ -937,6 +1160,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             chat_id=chat_id,
             message_id=message_id,
             history=history,
+            truncated=truncated,
             moderation=Moderation(
                 category_id=safety_result.category_id,
                 action=safety_result.action,
@@ -951,14 +1175,13 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             purchases=purchase_info,
             language=effective_language,
             citations=citation_extraction.citations,
+            experiment=_current_experiment,
         )
         _finalize()
         _succeeded = True
 
         # --- Persist chat history ---
-        asyncio.create_task(
-            _persist_chat_history(chat_id, request.user_id, chat_session)
-        )
+        asyncio.create_task(_persist_chat_history(chat_id, request.user_id, chat_session))
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
@@ -1027,7 +1250,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         exc.headers = {**(exc.headers or {}), "X-Trace-Id": trace.trace_id}
         raise
     except Exception as exc:
-        logger.exception("Unexpected error in /chat handler for session %s: %s", chat_id, exc)
+        logger.exception("unexpected error in /chat handler", extra={"chat_id": chat_id})
         raise HTTPException(
             status_code=500,
             detail="AI service error",
@@ -1106,10 +1329,29 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
     _handler_start = time.perf_counter()
 
     try:
-        chat_id = request.chat_id or str(uuid.uuid4())
+        chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
         prompt = redact_secret_keys(request.prompt)
         extra_context = redact_secret_keys(request.context)
-        logger.info("Received streaming chat request: %s...", prompt[:100])
+        logger.info(
+            "streaming chat request received",
+            extra={
+                "chat_id": chat_id,
+                "prompt_chars": len(prompt),
+                "context_chars": len(extra_context) if extra_context else 0,
+                "language": request.language,
+                "has_user_id": bool(request.user_id),
+                **prompt_debug_fields(prompt),
+            },
+        )
+
+        # --- A/B experiment assignment ---
+        _current_experiment: ExperimentAssignment | None = None
+        for exp_id in experiment_harness.active_experiments():
+            try:
+                _current_experiment = experiment_harness.assign(exp_id, chat_id)
+                break
+            except Exception:  # noqa: BLE001 — experiments are best-effort
+                pass
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
@@ -1132,6 +1374,9 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
         # --- Purchase history ---
         purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
+
+        # --- Per-user personal context (deny by default without user_id/token) ---
+        personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
 
         async def event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
@@ -1173,7 +1418,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
                 # --- Create or get chat session ---
                 if chat_id not in active_chats:
-                    logger.info("Creating new streaming chat session: %s", chat_id)
+                    logger.info("streaming chat session created", extra={"chat_id": chat_id})
                     # Resume from persisted history so a returning user (or a
                     # request that arrived after a restart) keeps the context.
                     persisted = await session_store.load_history(chat_id)
@@ -1186,11 +1431,13 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # --- Build system context + prompt ---
                 system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
                 if effective_language:
-                    system_context += LANGUAGE_INSTRUCTIONS
-                    system_context += f"\nresponse_language: {effective_language}"
+                    _lang_tpl = prompt_registry.get("language_instructions")
+                    assert _lang_tpl is not None
+                    system_context += _lang_tpl.render(
+                        response_language=effective_language,
+                    )
                 else:
                     system_context += LANGUAGE_INSTRUCTIONS
-                    system_context += "\nresponse_language: auto (respond in the user's language)"
                 if is_fiqh:
                     system_context += FIQH_IKHTILAF_CONTEXT
                     if madhhab:
@@ -1201,13 +1448,15 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                     system_context += zakat_context.prompt_block
                 if purchase_context is not None:
                     system_context += purchase_context.prompt_block
+                if personal_context is not None:
+                    system_context += personal_context.prompt_block
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
 
                 # --- Async streaming generation ---
                 with trace.span("generation"):
-                    logger.info("Starting async streaming response...")
+                    logger.info("streaming response started", extra={"chat_id": chat_id})
                     _t0 = time.perf_counter()
 
                     stream_response = await active_chats[chat_id].send_message_async(
@@ -1295,15 +1544,16 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                             chat_id=chat_id,
                         )
                         assessment.review_id = item.id
-                    except Exception as exc:  # noqa: BLE001
-                        logger.error("Could not queue streaming answer for review: %s", exc)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("could not queue streaming answer for review", extra={"chat_id": chat_id})
                         assessment.queued = False
 
                 combined_text = apply_policy(combined_text, assessment)
 
                 logger.info(
-                    "confidence=%s",
-                    {
+                    "confidence assessed",
+                    extra={
+                        "chat_id": chat_id,
                         "score": assessment.score,
                         "band": assessment.band.value,
                         "signals": assessment.signals_used,
@@ -1349,12 +1599,21 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
+                        "experiment": (
+                            {
+                                "experiment_id": _current_experiment.experiment_id,
+                                "variant_name": _current_experiment.variant_name,
+                                "kill_switch_active": _current_experiment.kill_switch_active,
+                            }
+                            if _current_experiment
+                            else None
+                        ),
                     },
                     ensure_ascii=False,
                 )
                 yield f"data: {done}\n\n"
 
-                logger.info("Streaming chat response completed for %s", chat_id)
+                logger.info("streaming chat response completed", extra={"chat_id": chat_id})
 
                 # --- Persist chat history ---
                 # Awaited (not fire-and-forget) so a client that immediately
@@ -1366,7 +1625,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # Client disconnected mid-stream. Consume remaining chunks
                 # (if any) so the Gemini SDK finalises chat.history and a
                 # follow-up message in this session isn't left broken.
-                logger.info("Client disconnected from streaming chat %s", chat_id)
+                logger.info("client disconnected from streaming chat", extra={"chat_id": chat_id})
                 if stream_response is not None:
                     try:
                         await stream_response.resolve()
@@ -1374,8 +1633,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                         pass
                 raise
 
-            except Exception as exc:
-                logger.error("Streaming error for %s: %s", chat_id, exc)
+            except Exception:
+                logger.exception("streaming chat failed", extra={"chat_id": chat_id})
                 err = json.dumps(
                     {
                         "type": "error",
@@ -1400,9 +1659,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
     except Exception as exc:
         logger.exception(
-            "Unexpected error initialising streaming chat %s: %s",
-            getattr(request, "chat_id", None),
-            exc,
+            "unexpected error initialising streaming chat",
+            extra={"chat_id": str(getattr(request, "chat_id", None) or "")},
         )
         raise HTTPException(
             status_code=500,
@@ -1424,7 +1682,7 @@ def _strip_system_context(text: str) -> str:
     return text
 
 
-async def _persist_chat_history(chat_id: str, user_id: Optional[str], chat_session) -> None:
+async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session: Any) -> None:
     """Persist chat history and user-chat mapping."""
     try:
         if chat_session and hasattr(chat_session, "history") and chat_session.history:
@@ -1445,11 +1703,11 @@ async def _persist_chat_history(chat_id: str, user_id: Optional[str], chat_sessi
 
 
 @app.get("/user/{user_id}/chats")
-async def get_user_chats(user_id: str):
+async def get_user_chats(user_id: str) -> dict[str, Any]:
     """List all chat IDs for a user."""
     try:
         chat_ids = await session_store.get_user_chats(user_id)
-        chats = []
+        chats: list[dict[str, Any]] = []
         for cid in chat_ids:
             history = await session_store.load_history(cid)
             # Strip system context from stored user messages
@@ -1464,23 +1722,25 @@ async def get_user_chats(user_id: str):
                     title = msg.get("text", "")[:80]
                 snippet = msg.get("text", "")[:120]
             created_at = await session_store.get_chat_created_at(cid)
-            chats.append({
-                "chat_id": cid,
-                "title": title or f"Chat {cid[:8]}",
-                "snippet": snippet,
-                "message_count": len(history),
-                "created_at": created_at,
-            })
+            chats.append(
+                {
+                    "chat_id": cid,
+                    "title": title or f"Chat {cid[:8]}",
+                    "snippet": snippet,
+                    "message_count": len(history),
+                    "created_at": created_at,
+                }
+            )
         # Most recent first
         chats.sort(key=lambda c: c["created_at"] or 0, reverse=True)
         return {"chats": chats}
     except Exception as e:
-        logger.error("Error listing user chats", exc_info=True)
+        logger.exception("failed to list user chats", extra={"user_id_prefix": user_id[:8]})
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/chat/{chat_id}/history")
-async def get_chat_history(chat_id: str):
+async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
     """Get the message history for a specific chat."""
     try:
         history = await session_store.load_history(chat_id)
@@ -1491,30 +1751,32 @@ async def get_chat_history(chat_id: str):
                 msg["text"] = _strip_system_context(msg.get("text", ""))
         return history
     except Exception as e:
-        logger.error("Error loading chat history", exc_info=True)
+        logger.exception("failed to load chat history", extra={"chat_id": chat_id})
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str, user_id: Optional[str] = None) -> dict[str, str]:
+async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
+    chat_id_str = str(chat_id)
     try:
-        existed = chat_id in active_chats
-        active_chats.pop(chat_id, None)
+        existed = chat_id_str in active_chats
+        active_chats.pop(chat_id_str, None)
         # Drop this session's feedback bookkeeping too, so the message-id list
         # and answer snapshots do not outlive the conversation they describe.
-        for message_id in chat_message_ids.pop(chat_id, []):
-            answer_snapshots.pop((chat_id, message_id), None)
+        for message_id in chat_message_ids.pop(chat_id_str, []):
+            answer_snapshots.pop((chat_id_str, message_id), None)
         # Remove from persistent store
-        await session_store.delete_session(chat_id)
+        persisted = await session_store.delete_session(chat_id_str)
         if user_id:
-            await session_store.remove_user_chat(user_id, chat_id)
-        if existed:
-            logger.info(f"Deleted chat session: {chat_id}")
-            return {"message": "Chat session deleted successfully"}
-        return {"message": "Chat session not found"}
+            await session_store.remove_user_chat(user_id, chat_id_str)
     except Exception as e:
-        logger.error("Error deleting chat", exc_info=True)
+        logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+    if not (existed or persisted):
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    logger.info("chat session deleted", extra={"chat_id": chat_id_str})
+    return {"message": "Chat session deleted successfully"}
 
 
 # ---------------------------------------------------------------------------
@@ -1588,14 +1850,12 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         # SQLite/Redis I/O is synchronous; keep it off the event loop.
         await run_in_threadpool(feedback_store.upsert, record)
     except Exception as exc:
-        logger.error("Failed to store feedback: %s", exc)
+        logger.exception("failed to store feedback", extra={"chat_id": body.chat_id, "message_id": body.message_id})
         raise HTTPException(status_code=500, detail="Failed to store feedback.") from exc
 
     logger.info(
-        "Feedback stored: chat_id=%s message_id=%s rating=%s",
-        body.chat_id,
-        body.message_id,
-        body.rating,
+        "feedback stored",
+        extra={"chat_id": body.chat_id, "message_id": body.message_id, "rating": body.rating},
     )
     return {"status": "ok", "feedback_id": record.feedback_id}
 
@@ -1634,7 +1894,7 @@ async def feedback_stats() -> dict[str, Any]:
     try:
         return await run_in_threadpool(feedback_store.stats)
     except Exception as exc:
-        logger.error("Failed to fetch feedback stats: %s", exc)
+        logger.exception("failed to fetch feedback stats")
         raise HTTPException(status_code=500, detail="Failed to fetch stats.") from exc
 
 
@@ -1661,7 +1921,7 @@ async def feedback_records(
         records = await run_in_threadpool(feedback_store.list_records, rating, category, limit)
         return {"records": [r.to_dict() for r in records]}
     except Exception as exc:
-        logger.error("Failed to fetch feedback records: %s", exc)
+        logger.exception("failed to fetch feedback records")
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
 
 
@@ -1669,6 +1929,11 @@ async def feedback_records(
 async def ping() -> dict[str, str]:
     """Lightweight liveness probe for container healthchecks and keep-alive pings."""
     return {"status": "ok"}
+
+
+@app.get("/providers/status")
+async def providers_status() -> dict[str, Any]:
+    return {"providers": provider_router.status() if provider_router else []}
 
 
 @app.get("/memory/{user_id}")
@@ -1749,8 +2014,114 @@ async def confidence_policy() -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Prompt registry & experiment management
+# ---------------------------------------------------------------------------
+
+
+@app.get("/prompts")
+async def list_prompt_templates() -> dict[str, str]:
+    """List all registered prompt templates and their latest versions."""
+    return prompt_registry.list_templates()
+
+
+@app.get("/prompts/{name}")
+async def get_prompt_template(name: str, version: str | None = None) -> dict[str, Any]:
+    """Retrieve a prompt template by name (and optional version)."""
+    template = prompt_registry.get(name, version)
+    if template is None:
+        raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
+    return {
+        "name": template.name,
+        "version": template.version,
+        "variables": list(template.variables),
+        "changelog": template.changelog,
+        "body": template.body,
+    }
+
+
+@app.get("/experiments")
+async def list_experiments() -> dict[str, Any]:
+    """List registered experiments and their status."""
+    experiments = {}
+    for eid, cfg in experiment_harness._experiments.items():
+        all_variants = [cfg.control] + cfg.variants
+        experiments[eid] = {
+            "experiment_id": cfg.experiment_id,
+            "kill_switch": cfg.kill_switch,
+            "variants": [{"name": v.name, "template_name": v.template_name, "weight": v.weight} for v in all_variants],
+        }
+    return {"experiments": experiments}
+
+
+class ExperimentCreateRequest(BaseModel):
+    experiment_id: str = Field(..., max_length=128)
+    control_template: str = Field(..., max_length=128)
+    control_version: str | None = None
+    variants: list[dict[str, Any]] = Field(default_factory=list)
+    kill_switch: bool = False
+
+
+@app.post("/experiments", dependencies=[Depends(require_admin)])
+async def create_experiment(body: ExperimentCreateRequest) -> dict[str, Any]:
+    """Create or update an A/B experiment (admin only).
+
+    Variants are a list of ``{"name": ..., "template_name": ..., "weight": ...}``.
+    """
+    control = Variant(
+        name="control",
+        template_name=body.control_template,
+        template_version=body.control_version,
+        weight=1.0,
+    )
+    variant_list = [
+        Variant(
+            name=v["name"],
+            template_name=v["template_name"],
+            template_version=v.get("template_version"),
+            weight=v.get("weight", 1.0),
+        )
+        for v in body.variants
+    ]
+    config = ExperimentConfig(
+        experiment_id=body.experiment_id,
+        control=control,
+        variants=variant_list,
+        kill_switch=body.kill_switch,
+    )
+    experiment_harness.register_experiment(config)
+    return {"status": "ok", "experiment_id": body.experiment_id}
+
+
+@app.post("/experiments/{experiment_id}/kill", dependencies=[Depends(require_admin)])
+async def kill_experiment(experiment_id: str) -> dict[str, Any]:
+    """Activate the kill switch for an experiment (admin only)."""
+    cfg = experiment_harness._experiments.get(experiment_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    cfg.kill_switch = True
+    return {"status": "ok", "experiment_id": experiment_id, "kill_switch": True}
+
+
+@app.post("/experiments/{experiment_id}/resume", dependencies=[Depends(require_admin)])
+async def resume_experiment(experiment_id: str) -> dict[str, Any]:
+    """Deactivate the kill switch for an experiment (admin only)."""
+    cfg = experiment_harness._experiments.get(experiment_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    cfg.kill_switch = False
+    return {"status": "ok", "experiment_id": experiment_id, "kill_switch": False}
+
+
+@app.delete("/experiments/{experiment_id}", dependencies=[Depends(require_admin)])
+async def delete_experiment(experiment_id: str) -> dict[str, str]:
+    """Remove an experiment (admin only)."""
+    experiment_harness.unregister_experiment(experiment_id)
+    return {"status": "ok", "experiment_id": experiment_id}
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting server...")
+    logger.info("starting server", extra={"port": settings.port})
     uvicorn.run(app, host="0.0.0.0", port=settings.port)
