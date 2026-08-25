@@ -21,6 +21,8 @@ load_dotenv()
 import google.generativeai as genai
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
@@ -52,6 +54,7 @@ from confidence import (
     thresholds as confidence_thresholds,
 )
 from config import get_settings
+from errors import APIException
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -150,7 +153,14 @@ async def verify_api_key(
     if AUTH_DISABLED:
         return ""
     if not api_key or not secrets.compare_digest(api_key, SERVICE_API_KEY):
-        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+        raise APIException(
+            status_code=401,
+            detail="Missing or invalid X-API-Key",
+            hint=(
+                "Provide a valid service API key in the 'X-API-Key' header (e.g., 'X-API-Key: <your-key>'). "
+                "For local testing without authentication, set environment variable AUTH_DISABLED=true."
+            ),
+        )
     return api_key
 
 
@@ -181,8 +191,50 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     retry_after = getattr(exc, "retry_after", 60)
     return JSONResponse(
         status_code=429,
-        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+        content={
+            "detail": f"Rate limit exceeded: {exc.detail}",
+            "hint": f"Too many requests sent. Please wait {retry_after} seconds before retrying.",
+        },
         headers={"Retry-After": str(retry_after)},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    headers = getattr(exc, "headers", None) or {}
+    hint = getattr(exc, "hint", None)
+
+    if isinstance(exc.detail, dict):
+        content = dict(exc.detail)
+        if hint and "hint" not in content:
+            content["hint"] = hint
+    else:
+        content = {"detail": exc.detail}
+        if hint:
+            content["hint"] = hint
+
+    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(content), headers=headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    errors = exc.errors()
+    hints = []
+    for err in errors:
+        loc = " -> ".join(str(part) for part in err.get("loc", []) if part != "body")
+        msg = err.get("msg", "Invalid value")
+        if loc:
+            hints.append(f"Field '{loc}': {msg}")
+        else:
+            hints.append(msg)
+    hint_str = "; ".join(hints) if hints else "Please check request parameters and schema."
+    content = {
+        "detail": errors,
+        "hint": f"Validation failed ({hint_str}). Please provide valid input according to the API schema.",
+    }
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder(content),
     )
 
 
@@ -450,14 +502,19 @@ _admin_header = APIKeyHeader(name="X-Admin-Token", auto_error=False)
 async def require_admin(token: str | None = Depends(_admin_header)) -> None:
     """Gate admin endpoints on ADMIN_TOKEN; closed by default when unset."""
     if not ADMIN_TOKEN:
-        raise HTTPException(
+        raise APIException(
             status_code=503,
             detail="ADMIN_TOKEN is not configured on this server.",
+            hint="Set the ADMIN_TOKEN environment variable in server configuration to enable admin management routes.",
         )
     # Compare as bytes: secrets.compare_digest raises on non-ASCII str, which
     # would turn a crafted header into a 500 instead of a clean 403.
     if not token or not secrets.compare_digest(token.encode("utf-8"), ADMIN_TOKEN.encode("utf-8")):
-        raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
+        raise APIException(
+            status_code=403,
+            detail="Invalid or missing admin token.",
+            hint="Include the configured admin secret in the 'X-Admin-Token' request header (e.g., 'X-Admin-Token: <admin_token>').",
+        )
 
 
 ISLAMIC_CONTEXT = (
@@ -801,9 +858,10 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
         if not quota_allowed:
             logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
-            raise HTTPException(
+            raise APIException(
                 status_code=429,
                 detail="Token quota exceeded. Please try again later.",
+                hint=f"Hourly token quota limit reached. Please wait {retry_after} seconds before sending further messages, or reduce message length.",
                 headers={"Retry-After": str(retry_after)},
             )
 
@@ -849,7 +907,11 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             )
             text = extract_text_safely(response)
             if not text:
-                raise HTTPException(status_code=500, detail="Empty response from AI model")
+                raise APIException(
+                    status_code=500,
+                    detail="Empty response from AI model",
+                    hint="The upstream AI model returned an empty response. Try rephrasing your prompt or asking again in a few moments.",
+                )
             return text
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
@@ -1065,30 +1127,34 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
 
     except ResourceExhausted as exc:
         logger.warning("Gemini rate limit exceeded for chat %s: %s", chat_id, exc)
-        raise HTTPException(
+        raise APIException(
             status_code=429,
             detail="Rate limit exceeded. Please try again later.",
+            hint="Upstream Gemini API rate limit reached. Please wait 10-30 seconds before retrying.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except InvalidArgument as exc:
         logger.warning("Invalid argument for Gemini call in chat %s: %s", chat_id, exc)
-        raise HTTPException(
+        raise APIException(
             status_code=400,
             detail="Invalid request parameters.",
+            hint="Verify request fields (e.g., prompt length must be 1-10000 characters, context must be <= 5000 characters).",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except (TimeoutError, DeadlineExceeded) as exc:
         logger.warning("Gemini API call timed out for chat %s: %s", chat_id, exc)
-        raise HTTPException(
+        raise APIException(
             status_code=504,
             detail="AI service timed out.",
+            hint="The AI provider did not respond within the deadline. Retry in a few seconds or try a shorter prompt.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except ServiceUnavailable as exc:
         logger.warning("Gemini service unavailable for chat %s: %s", chat_id, exc)
-        raise HTTPException(
+        raise APIException(
             status_code=503,
             detail="AI service temporarily unavailable.",
+            hint="The AI service is temporarily experiencing high load or provider downtime. Please retry in 30-60 seconds.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except HTTPException as exc:
@@ -1098,9 +1164,10 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         raise
     except Exception as exc:
         logger.exception("Unexpected error in /chat handler for session %s: %s", chat_id, exc)
-        raise HTTPException(
+        raise APIException(
             status_code=500,
             detail="AI service error",
+            hint="An unexpected server error occurred while generating the answer. Please retry your request or contact support if the issue persists.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     finally:
@@ -1475,9 +1542,10 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             getattr(request, "chat_id", None),
             exc,
         )
-        raise HTTPException(
+        raise APIException(
             status_code=500,
             detail="AI service error",
+            hint="An unexpected server error occurred while initialising streaming chat. Please verify your connection and retry.",
         ) from exc
     finally:
         telemetry.registry.record_request(
@@ -1549,7 +1617,11 @@ async def get_user_chats(user_id: str) -> dict[str, Any]:
         return {"chats": chats}
     except Exception as e:
         logger.error("Error listing user chats", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        raise APIException(
+            status_code=500,
+            detail="Internal server error",
+            hint="Failed to load user chat sessions. Verify user_id format and retry.",
+        ) from e
 
 
 @app.get("/chat/{chat_id}/history")
@@ -1565,7 +1637,11 @@ async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
         return history
     except Exception as e:
         logger.error("Error loading chat history", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        raise APIException(
+            status_code=500,
+            detail="Internal server error",
+            hint="Failed to retrieve chat history. Verify chat_id and retry.",
+        ) from e
 
 
 @app.delete("/chat/{chat_id}")
@@ -1587,7 +1663,11 @@ async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str
         return {"message": "Chat session not found"}
     except Exception as e:
         logger.error("Error deleting chat", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        raise APIException(
+            status_code=500,
+            detail="Internal server error",
+            hint="Failed to delete chat session. Please retry.",
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -1625,9 +1705,10 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
     for the same (chat_id, message_id) overwrites the earlier record.
     """
     if not rate_limiter.is_allowed(_client_ip(request)):
-        raise HTTPException(
+        raise APIException(
             status_code=429,
             detail="Too many feedback submissions. Please wait before trying again.",
+            hint="Feedback submissions are rate-limited to 20 per minute per IP. Please wait up to 60 seconds before submitting again.",
         )
 
     snapshot = answer_snapshots.get((body.chat_id, body.message_id))
@@ -1635,11 +1716,15 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
     answer_text = snapshot["answer"] if snapshot else body.answer
 
     if snapshot is None and (not prompt_text or not answer_text):
-        raise HTTPException(
+        raise APIException(
             status_code=422,
             detail=(
                 "This answer is no longer in memory. Please supply 'prompt' and "
                 "'answer' in the request body so the feedback has context."
+            ),
+            hint=(
+                "Supply both 'prompt' and 'answer' string fields in the JSON body "
+                "(e.g. {'chat_id': '...', 'message_id': '...', 'rating': 'up', 'prompt': '...', 'answer': '...'})."
             ),
         )
 
@@ -1662,7 +1747,11 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         await run_in_threadpool(feedback_store.upsert, record)
     except Exception as exc:
         logger.error("Failed to store feedback: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to store feedback.") from exc
+        raise APIException(
+            status_code=500,
+            detail="Failed to store feedback.",
+            hint="Database error storing feedback record. Please retry in a few moments.",
+        ) from exc
 
     logger.info(
         "Feedback stored: chat_id=%s message_id=%s rating=%s",
@@ -1683,7 +1772,11 @@ async def feedback_stats() -> dict[str, Any]:
         return await run_in_threadpool(feedback_store.stats)
     except Exception as exc:
         logger.error("Failed to fetch feedback stats: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to fetch stats.") from exc
+        raise APIException(
+            status_code=500,
+            detail="Failed to fetch stats.",
+            hint="Database error aggregating feedback metrics. Please retry.",
+        ) from exc
 
 
 @app.get("/feedback/records", dependencies=[Depends(require_admin)])
@@ -1697,20 +1790,33 @@ async def feedback_records(
     Requires the X-Admin-Token header.
     """
     if rating and rating not in ("up", "down"):
-        raise HTTPException(status_code=422, detail="rating must be 'up' or 'down'")
+        raise APIException(
+            status_code=422,
+            detail="rating must be 'up' or 'down'",
+            hint="Set the 'rating' query parameter to either 'up' or 'down' (e.g., ?rating=down).",
+        )
     if category and category not in FEEDBACK_TAXONOMY:
-        raise HTTPException(
+        raise APIException(
             status_code=422,
             detail=f"Unknown category. Valid: {sorted(FEEDBACK_TAXONOMY)}",
+            hint=f"Use one of the allowed taxonomy categories: {', '.join(sorted(FEEDBACK_TAXONOMY))} (e.g., ?category=incorrect_information).",
         )
     if not (1 <= limit <= 500):
-        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        raise APIException(
+            status_code=422,
+            detail="limit must be between 1 and 500",
+            hint="Specify an integer limit between 1 and 500 (e.g., ?limit=50). Default is 50.",
+        )
     try:
         records = await run_in_threadpool(feedback_store.list_records, rating, category, limit)
         return {"records": [r.to_dict() for r in records]}
     except Exception as exc:
         logger.error("Failed to fetch feedback records: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
+        raise APIException(
+            status_code=500,
+            detail="Failed to fetch records.",
+            hint="Database error retrieving feedback records. Please retry.",
+        ) from exc
 
 
 @app.get("/ping")
@@ -1728,7 +1834,11 @@ async def get_memory(user_id: str) -> dict[str, Any]:
     """
     profile = await memory_store.get_profile(user_id)
     if profile is None:
-        raise HTTPException(status_code=404, detail="Memory not found")
+        raise APIException(
+            status_code=404,
+            detail="Memory not found",
+            hint="No user profile found for the provided user_id. Memory is created automatically when chatting with user_id provided.",
+        )
     return profile.model_dump()
 
 
@@ -1758,6 +1868,7 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
         "version": app.version,
         "checks": checks,
         "failing_check": "gemini_api_key_configured",
+        "hint": "Configure the GEMINI_API_KEY environment variable with a valid Google Gemini API key.",
     }, 503
 
 

@@ -48,9 +48,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from errors import APIException
 from semantic_cache import get_keyed_cache
 
 logger = logging.getLogger(__name__)
@@ -1165,7 +1166,14 @@ async def get_tafsir(request: TafsirRequest) -> TafsirResponse:
     try:
         response = await build_tafsir_response(request)
     except InvalidReference as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint=(
+                "Use format 'surah:ayah' (e.g., '2:255'), 'surah:start-end' (e.g., '103:1-3'), "
+                "or named surah format (e.g., 'Al-Asr 1-3'). Surah numbers run from 1 to 114."
+            ),
+        ) from exc
 
     logger.info(
         "Tafsir lookup %s (%s) -> %d ayat",
