@@ -36,6 +36,11 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
+    # Recitation quality analysis
+    ENABLE_RECITATION_QUALITY: bool = Field(default=True)
+    QUALITY_PASSING_SCORE: float = Field(default=0.7, ge=0, le=1)
+    QUALITY_RHYTHM_WINDOW_MS: int = Field(default=200, ge=0)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):

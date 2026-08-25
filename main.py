@@ -82,6 +82,7 @@ from memory.extraction import (
     summarize_conversation_turns,
 )
 from arabic_ocr import router as arabic_ocr_router
+from recitation_quality import router as recitation_router
 from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
@@ -278,6 +279,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
+app.include_router(recitation_router)
 
 # Configure CORS
 app.add_middleware(
