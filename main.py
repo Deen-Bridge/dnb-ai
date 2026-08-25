@@ -102,6 +102,7 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
@@ -194,6 +195,8 @@ app.include_router(study_router)
 app.include_router(tafsir_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
+# Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
+app.include_router(history_router)
 
 # Configure CORS
 app.add_middleware(
