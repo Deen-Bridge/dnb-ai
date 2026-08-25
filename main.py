@@ -81,6 +81,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from model_router import router as model_routing_router
@@ -255,6 +256,8 @@ app.include_router(sentiment_router)
 app.include_router(tafsir_router)
 # Page analysis: layout understanding of scanned Islamic book pages
 app.include_router(page_analysis_router)
+# Calligraphy: deterministic style estimation for Arabic calligraphic hands
+app.include_router(calligraphy_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
