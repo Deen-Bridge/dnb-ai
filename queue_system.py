@@ -28,6 +28,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -204,6 +205,7 @@ class JobHandler(ABC):
         self,
         job: Job,
         progress_callback: Callable[[float, str], Any] | None = None,
+        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
     ) -> JobResult:
         """Execute the job and return result."""
         pass
@@ -614,6 +616,7 @@ class EmbeddingGenerationHandler(JobHandler):
         self,
         job: Job,
         progress_callback: Callable[[float, str], Any] | None = None,
+        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
     ) -> JobResult:
         texts = job.payload.get("texts", [])
         total = len(texts)
@@ -652,6 +655,7 @@ class IndexBuildHandler(JobHandler):
         self,
         job: Job,
         progress_callback: Callable[[float, str], Any] | None = None,
+        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
     ) -> JobResult:
         index_name = job.payload.get("index_name", "default")
 

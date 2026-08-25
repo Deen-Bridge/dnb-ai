@@ -412,6 +412,7 @@ class ThemeVerseStore:
         self._by_verse: dict[tuple[int, int], list[VerseThemeMapping]] = {}
         self._by_theme: dict[str, list[VerseThemeMapping]] = {}
         self._data_file: str = data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json"
+        self._data_file: str = str(data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json")
         self._load_data()
 
     def _load_data(self) -> None:

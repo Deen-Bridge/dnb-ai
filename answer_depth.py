@@ -381,6 +381,7 @@ class DepthAdapter:
         target_config = self._configs[target_level]
 
         required_sections: list[dict[str, str]] = []
+
         if target_config.include_scholarly_disagreements:
             required_sections.append(
                 {
@@ -420,6 +421,7 @@ class UserPreferencesStore:
 
     def __init__(self, data_file: str | None = None) -> None:
         self._data_file: str = data_file or os.getenv("DEPTH_PREFS_FILE") or "./data/depth_preferences.json"
+        self._data_file: str = str(data_file or os.getenv("DEPTH_PREFS_FILE") or "./data/depth_preferences.json")
         self._preferences: dict[str, UserDepthPreferences] = {}
         self._load_data()
 
@@ -522,4 +524,5 @@ def get_answer_config(
 
     # Get config with user preferences applied
     user_prefs = prefs_store.get(user_id) if user_id else None
+    user_prefs: UserDepthPreferences | None = prefs_store.get(user_id) if user_id else None
     return adapter.get_effective_config(level, user_prefs)

@@ -123,6 +123,8 @@ jobs:
 
       - name: Run factual consistency tests
         run: pytest -q tests/test_factual_consistency.py
+      - name: Run Swahili language processing tests
+        run: pytest -q tests/test_swahili.py
 
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
@@ -140,6 +142,6 @@ jobs:
       - name: Verify container starts and /ping returns 200
         run: |
           docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
-          sleep 5
-          curl -sf http://localhost:8000/ping
+          timeout 30s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
+          docker logs test-ai
           docker stop test-ai
