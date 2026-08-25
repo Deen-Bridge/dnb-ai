@@ -63,6 +63,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/learning-path` | Personalized, catalog-grounded study path from a learner profile + progress (see [Learning-path contract](#learning-path-contract-for-dnb-backend)) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
+| `POST` | `/tafsir/compare` | Compare 10–12 retrieved tafsir works with consensus, divergence, methodology, and chronology |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
@@ -564,6 +565,36 @@ In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
 passages, with the model instructed to attribute each claim to a named mufassir
 and to surface — not flatten — points where the mufassirun differ. The response
 carries a `tafsir` block naming the works whose text actually backed the answer.
+
+#### Comparative tafsir
+
+`POST /tafsir/compare` compares one ayah across the configured Quran.com tafsir
+catalog. The default request retrieves all 12 registered works, while a custom
+request must name 10–12 distinct works. The response includes:
+
+- source text with author, language, historical era, death year where known,
+  methodology labels, and the broad perspective label recorded for that work;
+- deterministic token-similarity clusters with support ratios for high-support
+  groupings;
+- separate attributed positions for divergences and source-specific insights;
+- chronological coverage and methodology notes;
+- an optional low-temperature model synthesis whose consensus, divergence,
+  insight, and citation fields are validated against the retrieved source keys.
+
+Unavailable works remain visible under `unavailable` and never count as
+evidence. Language fallback is labelled with the language actually retrieved.
+The endpoint accepts one ayah rather than a range so that each comparison has a
+single subject and its consensus and divergence claims cannot mix unrelated
+verses. The configured catalog currently represents classical, modern, and
+contemporary works, primarily within the perspectives exposed by Quran.com; the
+response reports that coverage instead of implying unsupported sectarian
+balance.
+
+```bash
+curl -X POST http://localhost:8000/tafsir/compare \
+  -H 'Content-Type: application/json' \
+  -d '{"reference": "103:2", "language": "en"}'
+```
 
 ### Zakat (on-chain, with a live nisab)
 

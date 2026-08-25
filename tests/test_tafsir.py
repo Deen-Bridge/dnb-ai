@@ -12,17 +12,22 @@ import pytest
 
 from semantic_cache import get_keyed_cache
 from tafsir import (
+    DEFAULT_COMPARISON_TAFSIR_KEYS,
     DEFAULT_TAFSIR_KEYS,
     MAX_AYAT_PER_REQUEST,
+    MIN_COMPARISON_TAFSIRS,
     TAFSIR_REGISTRY,
     AyahRef,
+    FakeComparisonGenerator,
     FakeTafsirSource,
     InvalidReference,
+    TafsirComparisonRequest,
     TafsirRequest,
     TafsirWork,
     VerseText,
     _normalize_surah_name,
     build_chat_tafsir_context,
+    build_tafsir_comparison,
     build_tafsir_prompt_block,
     build_tafsir_response,
     detect_ayah_references,
@@ -119,6 +124,39 @@ def make_source(**overrides) -> FakeTafsirSource:
     }
     verses.update(overrides.pop("verses", {}))
     return FakeTafsirSource(tafsirs=tafsirs, verses=verses)
+
+
+def make_comparison_source() -> FakeTafsirSource:
+    """Serve one comparison passage for every registered work."""
+    tafsirs: dict[tuple[str, str], dict] = {}
+    for index, work in enumerate(TAFSIR_REGISTRY.values()):
+        if index < 10:
+            text = (
+                "<p>Human beings are in loss unless they believe, perform righteous deeds, "
+                "and encourage one another to truth and patience.</p>"
+            )
+        elif index == 10:
+            text = "<p>The passage emphasizes the limited nature of worldly time and accountability.</p>"
+        else:
+            text = "<p>The final quality is patient perseverance in obedience and communal counsel.</p>"
+        for language, slug in work.slugs.items():
+            tafsirs[(slug, "103:2")] = {
+                "verses": {"103:2": {"id": 6178}},
+                "resource_name": work.name,
+                "translated_name": {"name": work.name, "language_name": language},
+                "text": text,
+            }
+    source = FakeTafsirSource(
+        verses={
+            "103:2": VerseText(
+                arabic="إن الإنسان لفي خسر",
+                translation="Indeed, mankind is in loss,",
+                translation_language="en",
+            )
+        },
+    )
+    source.tafsirs.update(tafsirs)
+    return source
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +580,113 @@ class TestBuildResponse:
     def test_invalid_reference_raises(self):
         with pytest.raises(InvalidReference):
             run(build_tafsir_response(TafsirRequest(reference="2:300"), make_source()))
+
+
+# ---------------------------------------------------------------------------
+# Comparative analysis
+# ---------------------------------------------------------------------------
+
+
+class TestTafsirComparison:
+    def test_defaults_to_all_registered_works_and_groups_consensus(self):
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+            )
+        )
+        assert len(DEFAULT_COMPARISON_TAFSIR_KEYS) >= MIN_COMPARISON_TAFSIRS
+        assert len(response.sources) == len(DEFAULT_COMPARISON_TAFSIR_KEYS)
+        assert len(response.clusters) == 3
+        assert set(response.consensus[0].source_keys) == set(DEFAULT_COMPARISON_TAFSIR_KEYS[:10])
+        assert response.consensus[0].support_ratio == pytest.approx(10 / 12, abs=0.0001)
+        assert response.divergences[0].positions
+        assert {item.key for item in response.sources} == set(DEFAULT_COMPARISON_TAFSIR_KEYS)
+
+        death_years = [item.death_year_ah for item in response.sources if item.death_year_ah is not None]
+        assert death_years == sorted(death_years)
+
+    def test_source_metadata_contains_era_method_and_perspective(self):
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+            )
+        )
+        tabari = next(item for item in response.sources if item.key == "tabari")
+        assert tabari.era == "classical"
+        assert tabari.death_year_ah == 310
+        assert "narration" in tabari.methodologies
+        assert tabari.perspective == "Sunni"
+
+    def test_missing_sources_are_excluded_from_evidence_and_reported(self):
+        source = make_comparison_source()
+        missing_key = DEFAULT_COMPARISON_TAFSIR_KEYS[-1]
+        missing_work = TAFSIR_REGISTRY[missing_key]
+        source.tafsirs.pop((missing_work.slugs[missing_work.languages[0]], "103:2"))
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=source,
+            )
+        )
+        assert missing_key not in {item.key for item in response.sources}
+        assert any(item.key == missing_key for item in response.unavailable)
+        assert missing_key not in response.synthesis.cited_source_keys
+
+    def test_custom_generator_is_schema_validated_and_source_attributed(self):
+        response_json = (
+            '{"consensus":[{"statement":"Humanity is described as being in loss.",'
+            '"source_keys":["ibn-kathir","tabari"],"support_ratio":0.1}],'
+            '"divergences":[{"topic":"Emphasis","description":"The works emphasize different details.",'
+            '"positions":[{"statement":"Faith and action are central.","source_keys":["ibn-kathir"]},'
+            '{"statement":"Time and accountability are central.","source_keys":["tazkirul-quran"]}]}],'
+            '"unique_insights":[{"statement":"Communal counsel is highlighted.",'
+            '"source_keys":["ahsanul-bayaan"]}],"synthesis":{'
+            '"summary":"The readings overlap while retaining differences.",'
+            '"evolution":"Classical and contemporary works are represented.",'
+            '"methodological_notes":"Narrative and thematic methods appear.",'
+            '"balance_note":"All claims remain tied to retrieved works.",'
+            '"cited_source_keys":["ibn-kathir"]}}'
+        )
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+                generator=FakeComparisonGenerator(response_json),
+            )
+        )
+        assert response.synthesis.summary.startswith("The readings overlap")
+        assert response.synthesis.cited_source_keys == ["ibn-kathir"]
+        assert response.consensus[0].support_ratio == pytest.approx(2 / 12, abs=0.0001)
+        assert response.divergences[0].positions[1].source_keys == ["tazkirul-quran"]
+
+    def test_invalid_synthesis_citations_fall_back_to_deterministic_summary(self):
+        response_json = (
+            '{"consensus":[],"divergences":[],"unique_insights":[],'
+            '"synthesis":{"summary":"bad", "evolution":"bad", "methodological_notes":"bad", '
+            '"balance_note":"bad", "cited_source_keys":["unknown"]}}'
+        )
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+                generator=FakeComparisonGenerator(response_json),
+            )
+        )
+        assert response.synthesis.summary.startswith("Compared 12 retrieved tafsir works")
+        assert set(response.synthesis.cited_source_keys) == {item.key for item in response.sources}
+
+    @pytest.mark.parametrize(
+        "comparison_request",
+        [
+            TafsirComparisonRequest.model_construct(reference="103:1", tafsirs=["ibn-kathir"]),
+            TafsirComparisonRequest(reference="103:1-2"),
+        ],
+    )
+    def test_comparison_requires_ten_distinct_works_and_one_ayah(self, comparison_request):
+        with pytest.raises(InvalidReference):
+            run(build_tafsir_comparison(comparison_request, source=make_comparison_source()))
 
 
 # ---------------------------------------------------------------------------
