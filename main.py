@@ -69,6 +69,7 @@ from fiqh import (
     normalize_madhhab,
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from hadith_context import router as hadith_context_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -203,6 +204,8 @@ app.include_router(tafsir_router)
 app.include_router(page_analysis_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
+# Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
+app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
 app.include_router(audio_hadith_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
