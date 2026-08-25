@@ -82,9 +82,11 @@ from memory.extraction import (
     summarize_conversation_turns,
 )
 from arabic_ocr import router as arabic_ocr_router
+from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from model_router import router as model_routing_router
+from reasoning_chains import router as reasoning_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -249,6 +251,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(reasoning_router)
 app.include_router(study_router)
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)
@@ -256,6 +259,8 @@ app.include_router(sentiment_router)
 app.include_router(tafsir_router)
 # Page analysis: layout understanding of scanned Islamic book pages
 app.include_router(page_analysis_router)
+# Calligraphy: deterministic style estimation for Arabic calligraphic hands
+app.include_router(calligraphy_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
