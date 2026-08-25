@@ -58,6 +58,8 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
+| `GET` | `/metrics` | Prometheus format metrics for monitoring & alerting (see [Observability](docs/observability.md)) |
+| `GET` | `/metrics/json` | JSON telemetry snapshot (model calls, latency, tokens, cache) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/learning-path` | Personalized, catalog-grounded study path from a learner profile + progress (see [Learning-path contract](#learning-path-contract-for-dnb-backend)) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
@@ -229,6 +231,9 @@ services:
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+| `METRICS_TOKEN` | Bearer token / secret header for `/metrics` endpoint protection | — (unprotected) |
+| `METRICS_IP_ALLOWLIST` | Comma-separated allowed IPs/CIDRs for `/metrics` | — (unprotected) |
+| `ENABLE_METRICS` | Toggle HTTP metrics instrumentation | `true` |
 
 ### Multilingual support (language field)
 

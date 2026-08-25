@@ -174,8 +174,20 @@ class SemanticCache:
             if entry is not None and not entry.expired:
                 self._access_times[chunk_id] = time.time()
                 self.hits += 1
+                try:
+                    import metrics
+
+                    metrics.record_cache_hit(cache_type="semantic")
+                except Exception:  # noqa: BLE001
+                    pass
                 return entry
         self.misses += 1
+        try:
+            import metrics
+
+            metrics.record_cache_miss(cache_type="semantic")
+        except Exception:  # noqa: BLE001
+            pass
         return None
 
     def put(
@@ -288,6 +300,12 @@ class KeyedCache:
         entry = self._entries.get(key)
         if entry is None:
             self.misses += 1
+            try:
+                import metrics
+
+                metrics.record_cache_miss(cache_type="exact")
+            except Exception:  # noqa: BLE001
+                pass
             return None
         value, expires_at = entry
         if time.time() > expires_at:
@@ -295,9 +313,21 @@ class KeyedCache:
             self._access_times.pop(key, None)
             self.evictions += 1
             self.misses += 1
+            try:
+                import metrics
+
+                metrics.record_cache_miss(cache_type="exact")
+            except Exception:  # noqa: BLE001
+                pass
             return None
         self._access_times[key] = time.time()
         self.hits += 1
+        try:
+            import metrics
+
+            metrics.record_cache_hit(cache_type="exact")
+        except Exception:  # noqa: BLE001
+            pass
         return value
 
     def put(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:

@@ -381,5 +381,18 @@ def record_model_call(
     if trace is not None:
         trace.calls.append(call)
     registry.record_call(call)
+    try:
+        import metrics
+
+        metrics.record_model_call_metrics(
+            model=call.model,
+            stage=call.stage,
+            latency_ms=call.latency_ms,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to record Prometheus model metrics: %s", exc)
+
     logger.info("model call completed", extra=call.as_labels())
     return call

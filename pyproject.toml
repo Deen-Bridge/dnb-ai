@@ -72,5 +72,11 @@ module = [
     "firebase_admin.*",
     "locust",
     "locust.*",
+    "prometheus_fastapi_instrumentator",
+    "prometheus_fastapi_instrumentator.*",
+    "prometheus_client",
+    "prometheus_client.*",
+    "PIL",
+    "PIL.*",
 ]
 ignore_missing_imports = true
