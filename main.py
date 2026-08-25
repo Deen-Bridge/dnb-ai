@@ -36,6 +36,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from audio_hadith import router as audio_hadith_router
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
@@ -202,6 +203,8 @@ app.include_router(tafsir_router)
 app.include_router(page_analysis_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
+# Audio Hadith: verify transcribed narrations against an authenticated corpus
+app.include_router(audio_hadith_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
 app.include_router(history_router)
 # Model routing: pick the optimal model per query by complexity, latency and cost
