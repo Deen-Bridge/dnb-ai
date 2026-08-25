@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+WORK_AL_BIDAYAH = "Al-Bidayah wan-Nihayah"
+AUTHOR_IBN_KATHIR = "Ibn Kathir"
+WORK_AL_KAMIL = "Al-Kamil fi al-Tarikh"
+AUTHOR_IBN_AL_ATHIR = "Ibn al-Athir"
+
 
 def get_tarikh_islami_items() -> list[dict[str, Any]]:
     base_items = [
@@ -27,7 +32,7 @@ def get_tarikh_islami_items() -> list[dict[str, Any]]:
             "citations": [
                 {"type": "hadith", "collection": "abudawud", "number": "4607"},
                 {"type": "scholarly", "work": "Tarikh al-Umam wal-Muluk", "author": "Ibn Jarir al-Tabari"},
-                {"type": "scholarly", "work": "Al-Bidayah wan-Nihayah", "author": "Ibn Kathir"},
+                {"type": "scholarly", "work": WORK_AL_BIDAYAH, "author": AUTHOR_IBN_KATHIR},
             ],
             "has_ikhtilaf": False,
             "ikhtilaf_details": None,
@@ -57,7 +62,7 @@ def get_tarikh_islami_items() -> list[dict[str, Any]]:
             "citations": [
                 {"type": "hadith", "collection": "bukhari", "number": "1400"},
                 {"type": "scholarly", "work": "Tarikh al-Tabari", "author": "Al-Tabari"},
-                {"type": "scholarly", "work": "Al-Kamil fi al-Tarikh", "author": "Ibn al-Athir"},
+                {"type": "scholarly", "work": WORK_AL_KAMIL, "author": AUTHOR_IBN_AL_ATHIR},
             ],
             "has_ikhtilaf": False,
             "ikhtilaf_details": None,
@@ -150,7 +155,7 @@ def get_tarikh_islami_items() -> list[dict[str, Any]]:
             ],
             "citations": [
                 {"type": "scholarly", "work": "Al-Nawadir al-Sultaniyyah", "author": "Baha' al-Din Ibn Shaddad"},
-                {"type": "scholarly", "work": "Al-Kamil fi al-Tarikh", "author": "Ibn al-Athir"},
+                {"type": "scholarly", "work": WORK_AL_KAMIL, "author": AUTHOR_IBN_AL_ATHIR},
             ],
             "has_ikhtilaf": False,
             "ikhtilaf_details": None,
@@ -225,7 +230,7 @@ def get_tarikh_islami_items() -> list[dict[str, Any]]:
                 "Subsequent Mongol defeat at Ayn Jalut in 1260 CE.",
             ],
             [
-                {"type": "scholarly", "work": "Al-Bidayah wan-Nihayah", "author": "Ibn Kathir"},
+                {"type": "scholarly", "work": WORK_AL_BIDAYAH, "author": AUTHOR_IBN_KATHIR},
                 {"type": "scholarly", "work": "Tarikh al-Islam", "author": "Al-Dhahabi"},
             ],
             False,
@@ -249,7 +254,7 @@ def get_tarikh_islami_items() -> list[dict[str, Any]]:
             ],
             [
                 {"type": "scholarly", "work": "Al-Suluk li-Ma'rifat Duwal al-Muluk", "author": "Al-Maqrizi"},
-                {"type": "scholarly", "work": "Al-Bidayah wan-Nihayah", "author": "Ibn Kathir"},
+                {"type": "scholarly", "work": WORK_AL_BIDAYAH, "author": AUTHOR_IBN_KATHIR},
             ],
             False,
             None,
@@ -289,7 +294,7 @@ def get_tarikh_islami_items() -> list[dict[str, Any]]:
             f"في حوليات التاريخ الإسلامي، شكلت مسألة {t_ar} حدثاً بارزاً ومؤثراً تفاصيله {d_ar}.",
             [f"Historical accuracy for {t_en}.", "Context within Islamic dynastic and social history."],
             [
-                {"type": "scholarly", "work": "Al-Kamil fi al-Tarikh", "author": "Ibn al-Athir"},
+                {"type": "scholarly", "work": WORK_AL_KAMIL, "author": AUTHOR_IBN_AL_ATHIR},
                 {"type": "scholarly", "work": "Tarikh al-Islam", "author": "Al-Dhahabi"},
             ],
             False,

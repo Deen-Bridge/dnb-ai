@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+AUTHOR_IBN_KATHIR = "Ibn Kathir"
+
 
 def get_ulum_al_quran_items() -> list[dict[str, Any]]:
     base_items = [
@@ -115,7 +117,7 @@ def get_ulum_al_quran_items() -> list[dict[str, Any]]:
             ],
             "citations": [
                 {"type": "scholarly", "work": "Muqaddimah fi Usul al-Tafsir", "author": "Ibn Taymiyyah"},
-                {"type": "scholarly", "work": "Tafsir al-Quran al-Azim (Introduction)", "author": "Ibn Kathir"},
+                {"type": "scholarly", "work": "Tafsir al-Quran al-Azim (Introduction)", "author": AUTHOR_IBN_KATHIR},
             ],
             "has_ikhtilaf": False,
             "ikhtilaf_details": None,
@@ -241,11 +243,11 @@ def get_ulum_al_quran_items() -> list[dict[str, Any]]:
             ],
             [
                 {"type": "scholarly", "work": "Jami al-Bayan", "author": "Al-Tabari"},
-                {"type": "scholarly", "work": "Tafsir al-Quran al-Azim", "author": "Ibn Kathir"},
+                {"type": "scholarly", "work": "Tafsir al-Quran al-Azim", "author": AUTHOR_IBN_KATHIR},
             ],
             False,
             None,
-            ["Tabari", "Ibn Kathir", "Isnad", "Sunnah", "Isra'iliyyat"],
+            ["Tabari", AUTHOR_IBN_KATHIR, "Isnad", "Sunnah", "Isra'iliyyat"],
             "Contrasts Tabari and Ibn Kathir exegeses accurately.",
         ),
         (

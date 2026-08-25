@@ -91,6 +91,53 @@ def load_dataset(path: Path) -> list[dict[str, Any]]:
     return items
 
 
+def _validate_record_basic_fields(item_id: str, r: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    domain = r.get("domain")
+    if not domain or domain not in REQUIRED_DOMAINS:
+        errors.append(f"[{item_id}] Invalid or missing domain: {domain}")
+
+    difficulty = r.get("difficulty")
+    if difficulty not in ("easy", "medium", "hard"):
+        errors.append(f"[{item_id}] Invalid difficulty: {difficulty}")
+
+    if not r.get("question"):
+        errors.append(f"[{item_id}] Missing question")
+    if not r.get("expected_answer"):
+        errors.append(f"[{item_id}] Missing expected_answer")
+
+    eval_crit = r.get("evaluation_criteria", {})
+    if not isinstance(eval_crit, dict):
+        errors.append(f"[{item_id}] evaluation_criteria must be a dictionary")
+
+    return errors
+
+
+def _validate_citations(
+    item_id: str, citations: list[dict[str, Any]], surah_idx: SurahIndex
+) -> tuple[list[str], list[str], Counter[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    types: Counter[str] = Counter()
+
+    for c in citations:
+        c_type = c.get("type")
+        types[c_type or "unknown"] += 1
+        if c_type == "quran":
+            surah = c.get("surah")
+            ayah_start = c.get("ayah_start")
+            if surah is None or not (1 <= surah <= 114):
+                errors.append(f"[{item_id}] Invalid Quran surah number: {surah}")
+            elif ayah_start is not None and not surah_idx.is_valid_ayah(surah, ayah_start):
+                errors.append(f"[{item_id}] Invalid Quran ayah {ayah_start} for Surah {surah}")
+        elif c_type == "hadith":
+            collection = c.get("collection", "").lower()
+            if collection not in CANONICAL_HADITH_COLLECTIONS:
+                warnings.append(f"[{item_id}] Non-canonical hadith collection: {collection}")
+
+    return errors, warnings, types
+
+
 def validate_dataset_integrity(records: list[dict[str, Any]]) -> dict[str, Any]:
     surah_idx = SurahIndex()
     errors: list[str] = []
@@ -100,8 +147,7 @@ def validate_dataset_integrity(records: list[dict[str, Any]]) -> dict[str, Any]:
     difficulty_counts: Counter[str] = Counter()
     citation_types: Counter[str] = Counter()
     total_citations = 0
-
-    seen_ids = set()
+    seen_ids: set[str] = set()
 
     for idx, r in enumerate(records):
         item_id = r.get("id", f"item_{idx}")
@@ -109,48 +155,22 @@ def validate_dataset_integrity(records: list[dict[str, Any]]) -> dict[str, Any]:
             errors.append(f"Duplicate ID found: {item_id}")
         seen_ids.add(item_id)
 
-        # Domain check
+        errors.extend(_validate_record_basic_fields(item_id, r))
+
         domain = r.get("domain")
-        if not domain or domain not in REQUIRED_DOMAINS:
-            errors.append(f"[{item_id}] Invalid or missing domain: {domain}")
-        else:
+        if domain and domain in REQUIRED_DOMAINS:
             domain_counts[domain] += 1
 
-        # Difficulty check
         difficulty = r.get("difficulty")
-        if difficulty not in ("easy", "medium", "hard"):
-            errors.append(f"[{item_id}] Invalid difficulty: {difficulty}")
-        else:
+        if difficulty in ("easy", "medium", "hard"):
             difficulty_counts[difficulty] += 1
 
-        # Question and Expected answer
-        if not r.get("question"):
-            errors.append(f"[{item_id}] Missing question")
-        if not r.get("expected_answer"):
-            errors.append(f"[{item_id}] Missing expected_answer")
-
-        # Evaluation criteria check
-        eval_crit = r.get("evaluation_criteria", {})
-        if not isinstance(eval_crit, dict):
-            errors.append(f"[{item_id}] evaluation_criteria must be a dictionary")
-
-        # Citation validation
         citations = r.get("citations", [])
         total_citations += len(citations)
-        for c in citations:
-            c_type = c.get("type")
-            citation_types[c_type or "unknown"] += 1
-            if c_type == "quran":
-                surah = c.get("surah")
-                ayah_start = c.get("ayah_start")
-                if surah is None or not (1 <= surah <= 114):
-                    errors.append(f"[{item_id}] Invalid Quran surah number: {surah}")
-                elif ayah_start is not None and not surah_idx.is_valid_ayah(surah, ayah_start):
-                    errors.append(f"[{item_id}] Invalid Quran ayah {ayah_start} for Surah {surah}")
-            elif c_type == "hadith":
-                collection = c.get("collection", "").lower()
-                if collection not in CANONICAL_HADITH_COLLECTIONS:
-                    warnings.append(f"[{item_id}] Non-canonical hadith collection: {collection}")
+        c_errors, c_warnings, c_types = _validate_citations(item_id, citations, surah_idx)
+        errors.extend(c_errors)
+        warnings.extend(c_warnings)
+        citation_types.update(c_types)
 
     missing_domains = [d for d in REQUIRED_DOMAINS if domain_counts[d] == 0]
     if missing_domains:
@@ -168,70 +188,74 @@ def validate_dataset_integrity(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def evaluate_single_response(record: dict[str, Any], candidate_answer: str) -> dict[str, Any]:
-    """Score candidate answer against expected key points, must-includes, and abstention rules."""
-    text_lower = candidate_answer.lower()
+ABSTENTION_INDICATORS = [
+    "abstain",
+    "consult",
+    "arbitrat",
+    "shariah court",
+    "judge",
+    "qadi",
+    "mufti",
+    "dar al-ifta",
+    "local scholar",
+    "cannot issue",
+    "refuse",
+    "الامتناع",
+    "قاض",
+    "محكمة",
+    "دار الإفتاء",
+]
 
-    # 1. Abstention check
+
+def _check_abstention(record: dict[str, Any], text_lower: str) -> float:
     requires_abstention = record.get("requires_abstention", False)
-    abstention_indicators = [
-        "abstain",
-        "consult",
-        "arbitrat",
-        "shariah court",
-        "judge",
-        "qadi",
-        "mufti",
-        "dar al-ifta",
-        "local scholar",
-        "cannot issue",
-        "refuse",
-        "الامتناع",
-        "قاض",
-        "محكمة",
-        "دار الإفتاء",
-    ]
+    if not requires_abstention:
+        return 1.0
+    did_abstain = any(ind in text_lower for ind in ABSTENTION_INDICATORS)
+    return 1.0 if did_abstain else 0.0
 
-    did_abstain = any(ind in text_lower for ind in abstention_indicators)
-    if requires_abstention:
-        abstention_score = 1.0 if did_abstain else 0.0
-    else:
-        abstention_score = 1.0  # not required
 
-    # 2. Must-include keywords
-    eval_crit = record.get("evaluation_criteria", {})
+def _check_must_include(eval_crit: dict[str, Any], text_lower: str) -> float:
     must_include = eval_crit.get("must_include", [])
-    included_count = 0
-    for term in must_include:
-        # Case-insensitive substring or regex search
-        pattern = re.escape(term.lower())
-        if re.search(pattern, text_lower):
-            included_count += 1
-    must_include_precision = (included_count / len(must_include)) if must_include else 1.0
+    if not must_include:
+        return 1.0
+    included_count = sum(1 for term in must_include if re.search(re.escape(term.lower()), text_lower))
+    return included_count / len(must_include)
 
-    # 3. Must-not-include (prohibitions)
+
+def _check_must_not_include_pass(eval_crit: dict[str, Any], text_lower: str) -> bool:
     must_not_include = eval_crit.get("must_not_include", [])
-    violations = 0
-    for term in must_not_include:
-        if re.search(re.escape(term.lower()), text_lower):
-            violations += 1
-    must_not_include_pass = violations == 0
+    return not any(re.search(re.escape(term.lower()), text_lower) for term in must_not_include)
 
-    # 4. Key points recall
-    key_points = record.get("key_points", [])
+
+def _check_key_points_recall(key_points: list[str], text_lower: str) -> float:
+    if not key_points:
+        return 1.0
     matched_kps = 0
     for kp in key_points:
         words = [w.lower() for w in re.findall(r"\w+", kp) if len(w) > 3]
         if not words:
             matched_kps += 1
             continue
-        # If at least 40% of salient words in key point appear in answer
         hits = sum(1 for w in words if w in text_lower)
         if hits / len(words) >= 0.4:
             matched_kps += 1
-    kp_recall = (matched_kps / len(key_points)) if key_points else 1.0
+    return matched_kps / len(key_points)
 
-    # Overall composite score (0.0 to 1.0)
+
+def evaluate_single_response(record: dict[str, Any], candidate_answer: str) -> dict[str, Any]:
+    """Score candidate answer against expected key points, must-includes, and abstention rules."""
+    text_lower = candidate_answer.lower()
+    requires_abstention = record.get("requires_abstention", False)
+    abstention_score = _check_abstention(record, text_lower)
+
+    eval_crit = record.get("evaluation_criteria", {})
+    must_include_precision = _check_must_include(eval_crit, text_lower)
+    must_not_include_pass = _check_must_not_include_pass(eval_crit, text_lower)
+
+    key_points = record.get("key_points", [])
+    kp_recall = _check_key_points_recall(key_points, text_lower)
+
     if requires_abstention:
         composite_score = abstention_score
     else:
@@ -249,7 +273,7 @@ def evaluate_single_response(record: dict[str, Any], candidate_answer: str) -> d
         "must_include_precision": round(must_include_precision, 3),
         "must_not_include_pass": must_not_include_pass,
         "key_point_recall": round(kp_recall, 3),
-        "abstention_correct": abstention_score == 1.0,
+        "abstention_correct": abs(abstention_score - 1.0) < 1e-6,
     }
 
 

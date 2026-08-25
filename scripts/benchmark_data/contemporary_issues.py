@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+AUTHOR_OIC_FIQH_ACADEMY = "OIC Islamic Fiqh Academy"
+
 
 def get_contemporary_issues_items() -> list[dict[str, Any]]:
     base_items = [
@@ -28,7 +30,7 @@ def get_contemporary_issues_items() -> list[dict[str, Any]]:
                 {
                     "type": "scholarly",
                     "work": "OIC Islamic Fiqh Academy Resolution No. 26",
-                    "author": "OIC Islamic Fiqh Academy",
+                    "author": AUTHOR_OIC_FIQH_ACADEMY,
                 },
                 {
                     "type": "scholarly",
@@ -158,7 +160,7 @@ def get_contemporary_issues_items() -> list[dict[str, Any]]:
                 {
                     "type": "scholarly",
                     "work": "Islamic Fiqh Academy Resolution on Assisted Reproduction",
-                    "author": "OIC Islamic Fiqh Academy",
+                    "author": AUTHOR_OIC_FIQH_ACADEMY,
                 },
             ],
             "has_ikhtilaf": False,
@@ -220,7 +222,7 @@ def get_contemporary_issues_items() -> list[dict[str, Any]]:
                 {
                     "type": "scholarly",
                     "work": "OIC Islamic Fiqh Academy Resolution No. 17",
-                    "author": "OIC Islamic Fiqh Academy",
+                    "author": AUTHOR_OIC_FIQH_ACADEMY,
                 }
             ],
             False,
@@ -245,7 +247,7 @@ def get_contemporary_issues_items() -> list[dict[str, Any]]:
                 {
                     "type": "scholarly",
                     "work": "Islamic Fiqh Academy Resolution on Human Cloning",
-                    "author": "OIC Islamic Fiqh Academy",
+                    "author": AUTHOR_OIC_FIQH_ACADEMY,
                 },
                 {"type": "quran", "surah": 4, "ayah_start": 119, "reference": "An-Nisa 4:119"},
             ],

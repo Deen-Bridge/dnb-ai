@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+REF_ASH_SHURA_42_11 = "Ash-Shura 42:11"
+
 
 def get_aqeedah_items() -> list[dict[str, Any]]:
     base_items = [
@@ -24,7 +26,7 @@ def get_aqeedah_items() -> list[dict[str, Any]]:
             ],
             "citations": [
                 {"type": "quran", "surah": 1, "ayah_start": 5, "reference": "Al-Fatihah 1:5"},
-                {"type": "quran", "surah": 42, "ayah_start": 11, "reference": "Ash-Shura 42:11"},
+                {"type": "quran", "surah": 42, "ayah_start": 11, "reference": REF_ASH_SHURA_42_11},
                 {"type": "scholarly", "work": "Kitab at-Tawhid", "author": "Ibn Abd al-Wahhab"},
             ],
             "has_ikhtilaf": False,
@@ -147,7 +149,7 @@ def get_aqeedah_items() -> list[dict[str, Any]]:
                 "Rejection of anthropomorphism (tamthil) and rejection of stripping divine attributes (ta'til).",
             ],
             "citations": [
-                {"type": "quran", "surah": 42, "ayah_start": 11, "reference": "Ash-Shura 42:11"},
+                {"type": "quran", "surah": 42, "ayah_start": 11, "reference": REF_ASH_SHURA_42_11},
                 {"type": "quran", "surah": 112, "ayah_start": 1, "ayah_end": 4, "reference": "Al-Ikhlas 112:1-4"},
                 {"type": "scholarly", "work": "Sharh al-Aqeedah at-Tahawiyyah", "author": "Ibn Abi al-Izz"},
             ],
@@ -291,7 +293,7 @@ def get_aqeedah_items() -> list[dict[str, Any]]:
                 "Ash'ari/Maturidi method: Tanzih through either Tafwid or contextual linguistic Ta'wil.",
             ],
             "citations": [
-                {"type": "quran", "surah": 42, "ayah_start": 11, "reference": "Ash-Shura 42:11"},
+                {"type": "quran", "surah": 42, "ayah_start": 11, "reference": REF_ASH_SHURA_42_11},
                 {"type": "scholarly", "work": "Lum'at al-I'tiqad", "author": "Ibn Qudamah"},
                 {"type": "scholarly", "work": "Al-Iqtisad fi al-I'tiqad", "author": "Al-Ghazali"},
             ],
