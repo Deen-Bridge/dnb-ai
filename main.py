@@ -38,7 +38,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
+from calligraphy import router as calligraphy_router
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
@@ -55,6 +57,7 @@ from confidence import (
     thresholds as confidence_thresholds,
 )
 from config import get_settings
+from consistency import consistency_router, get_consistency_enforcer
 from errors import APIException
 from feedback import (
     COMMENT_MAX_CHARS,
@@ -73,6 +76,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from hadith_context import router as hadith_context_router
+from history import router as history_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -81,13 +85,11 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
-from arabic_ocr import router as arabic_ocr_router
-from calligraphy import router as calligraphy_router
+from model_router import router as model_routing_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
-from model_router import router as model_routing_router
-from reformulation import router as reformulation_router
 from reasoning_chains import router as reasoning_router
+from reformulation import router as reformulation_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -115,7 +117,6 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
-from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
@@ -278,6 +279,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Factual consistency: cross-session contradiction prevention and reconciliation
+app.include_router(consistency_router)
 
 # Configure CORS
 app.add_middleware(
@@ -424,6 +427,9 @@ memory_store = create_memory_store()
 # otherwise Redis, otherwise in-memory. Used by both the non-streaming and
 # streaming chat endpoints, and by the history/list/delete endpoints below.
 session_store = create_session_store()
+
+# Cross-session factual consistency enforcer
+consistency_enforcer = get_consistency_enforcer()
 
 MAX_CHAT_HISTORY_TURNS = 20
 
@@ -1003,6 +1009,19 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         if caution:
             response_text = f"{response_text.rstrip()}\n\n{caution}"
 
+        # --- Cross-session factual consistency check ---
+        with trace.span("consistency"):
+            consistency_result = await consistency_enforcer.evaluate_response(
+                response_text=response_text,
+                prompt=prompt,
+                chat_id=chat_id,
+                user_id=body.user_id,
+                madhhab=madhhab,
+            )
+            response_text = consistency_result.final_text
+            fastapi_response.headers["X-Consistency-Action"] = consistency_result.action.value
+            fastapi_response.headers["X-Consistency-Valid"] = str(consistency_result.is_consistent).lower()
+
         # --- Confidence, abstention, and scholar escalation ---
         # is_religious and is_high_stakes reuse classification that already ran
         # this turn (the fiqh classifier and the hadith annotator) rather than
@@ -1123,6 +1142,16 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
 
         # --- Persist chat history ---
         asyncio.create_task(_persist_chat_history(chat_id, body.user_id, chat_session))
+
+        # --- Background factual claim indexing ---
+        if body.remember:
+            asyncio.create_task(
+                consistency_enforcer.index_claims(
+                    response_text,
+                    chat_id=chat_id,
+                    user_id=body.user_id,
+                )
+            )
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
@@ -1445,6 +1474,17 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 if caution:
                     combined_text = f"{combined_text.rstrip()}\n\n{caution}"
 
+                # --- Cross-session factual consistency check ---
+                with trace.span("consistency"):
+                    consistency_result = await consistency_enforcer.evaluate_response(
+                        response_text=combined_text,
+                        prompt=prompt,
+                        chat_id=chat_id,
+                        user_id=body.user_id,
+                        madhhab=madhhab,
+                    )
+                    combined_text = consistency_result.final_text
+
                 # --- Confidence assessment & scholar review ---
                 signals = build_signals(
                     combined_text,
@@ -1531,6 +1571,16 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 # reloads the chat list sees this turn. Failures are caught
                 # inside the helper; the stream is already complete.
                 await _persist_chat_history(chat_id, body.user_id, chat_session)
+
+                # --- Background factual claim indexing ---
+                if body.remember:
+                    asyncio.create_task(
+                        consistency_enforcer.index_claims(
+                            combined_text,
+                            chat_id=chat_id,
+                            user_id=body.user_id,
+                        )
+                    )
 
             except asyncio.CancelledError:
                 # Client disconnected mid-stream. Consume remaining chunks

@@ -121,6 +121,9 @@ jobs:
       - name: Run calligraphy style estimation tests
         run: pytest -q tests/test_calligraphy.py
 
+      - name: Run factual consistency tests
+        run: pytest -q tests/test_factual_consistency.py
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 
