@@ -92,6 +92,7 @@ from semantic_cache import (
     get_token_quota_tracker,
     normalize_text,
 )
+from sentiment import router as sentiment_router
 from stellar import (
     PurchaseContext,
     PurchaseInfo,
@@ -191,6 +192,8 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
 app.include_router(study_router)
+# Religious sentiment analysis: reads the emotional/spiritual tone of a question
+app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
 app.include_router(tafsir_router)
 # Scholar review: the human end of the abstention loop
