@@ -59,6 +59,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
+| `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
@@ -605,6 +606,33 @@ curl -X POST http://localhost:8000/tafsir \
   key through `semantic_cache.KeyedCache` — the keyed sibling of the semantic
   response cache, sharing its TTL and eviction settings rather than adding a
   second cache system.
+
+### Batch tafsir lookup
+
+`POST /tafsir/batch` retrieves tafsir for multiple references in one request.
+References are fetched concurrently and each result is keyed by the exact
+reference submitted. Invalid references or individual retrieval failures do not
+discard successful results; they appear under `errors` instead.
+
+```bash
+curl -X POST http://localhost:8000/tafsir/batch \
+  -H 'Content-Type: application/json' \
+  -d '{"references": ["2:255", "103:1-3", "112:1-4"], "tafsirs": ["ibn-kathir"], "language": "en"}'
+```
+
+```jsonc
+{
+  "results": {
+    "2:255": {"ayat": [], "language": "en"},
+    "103:1-3": {"ayat": [], "language": "en"},
+    "112:1-4": {"ayat": [], "language": "en"}
+  },
+  "errors": {}
+}
+```
+
+The request accepts at most 10 references and 20 total ayat. Exceeding either
+limit rejects the batch before retrieval begins.
 
 In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
 "explain 2:255") is detected offline and answered from the same retrieved
