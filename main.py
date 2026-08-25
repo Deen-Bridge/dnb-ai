@@ -76,6 +76,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from page_analysis import router as page_analysis_router
 from model_router import router as model_routing_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
@@ -196,6 +197,8 @@ app.include_router(study_router)
 app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
 app.include_router(tafsir_router)
+# Page analysis: layout understanding of scanned Islamic book pages
+app.include_router(page_analysis_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
 # Model routing: pick the optimal model per query by complexity, latency and cost
