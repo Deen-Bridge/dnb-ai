@@ -20,18 +20,19 @@ Architecture:
 - UserPreferences: Stores user's default preferences
 """
 
+import json
 import logging
 import os
-import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class DepthLevel(str, Enum):
     """Available answer depth levels."""
+
     BRIEF = "brief"
     STANDARD = "standard"
     DETAILED = "detailed"
@@ -41,6 +42,7 @@ class DepthLevel(str, Enum):
 @dataclass
 class DepthConfig:
     """Configuration settings for a depth level."""
+
     level: DepthLevel
     max_length: int  # Maximum response length in tokens
     citation_density: float  # 0.0 to 1.0, how frequently to cite
@@ -135,13 +137,14 @@ DEPTH_CONFIGS: dict[DepthLevel, DepthConfig] = {
 @dataclass
 class UserDepthPreferences:
     """User's answer depth preferences."""
+
     user_id: str
     default_level: DepthLevel = DepthLevel.STANDARD
     custom_overrides: dict[str, Any] = field(default_factory=dict)
     per_topic_levels: dict[str, DepthLevel] = field(default_factory=dict)
     auto_expand_sections: bool = False
     always_show_arabic: bool = False
-    preferred_madhhab: Optional[str] = None
+    preferred_madhhab: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -160,9 +163,7 @@ class UserDepthPreferences:
             user_id=data["user_id"],
             default_level=DepthLevel(data.get("default_level", "standard")),
             custom_overrides=data.get("custom_overrides", {}),
-            per_topic_levels={
-                k: DepthLevel(v) for k, v in data.get("per_topic_levels", {}).items()
-            },
+            per_topic_levels={k: DepthLevel(v) for k, v in data.get("per_topic_levels", {}).items()},
             auto_expand_sections=data.get("auto_expand_sections", False),
             always_show_arabic=data.get("always_show_arabic", False),
             preferred_madhhab=data.get("preferred_madhhab"),
@@ -172,19 +173,21 @@ class UserDepthPreferences:
 @dataclass
 class AnswerSection:
     """A section of an answer that can be expanded/collapsed."""
+
     id: str
     title: str
     content: str
     level: str  # "primary", "secondary", "tertiary"
     initially_expanded: bool = True
-    arabic_content: Optional[str] = None
+    arabic_content: str | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
 class StructuredAnswer:
     """A hierarchically structured answer for progressive disclosure."""
-    summary: Optional[str]
+
+    summary: str | None
     main_content: str
     sections: list[AnswerSection] = field(default_factory=list)
     citations: list[dict[str, Any]] = field(default_factory=list)
@@ -235,7 +238,7 @@ class DepthAdapter:
     def get_effective_config(
         self,
         level: DepthLevel,
-        preferences: Optional[UserDepthPreferences] = None,
+        preferences: UserDepthPreferences | None = None,
     ) -> DepthConfig:
         """Get effective configuration considering user preferences."""
         base_config = self._configs[level]
@@ -254,9 +257,7 @@ class DepthAdapter:
             max_length=overrides.get("max_length", base_config.max_length),
             citation_density=overrides.get("citation_density", base_config.citation_density),
             include_arabic=preferences.always_show_arabic or base_config.include_arabic,
-            include_transliteration=overrides.get(
-                "include_transliteration", base_config.include_transliteration
-            ),
+            include_transliteration=overrides.get("include_transliteration", base_config.include_transliteration),
             include_scholarly_disagreements=overrides.get(
                 "include_scholarly_disagreements", base_config.include_scholarly_disagreements
             ),
@@ -266,13 +267,9 @@ class DepthAdapter:
             include_madhhab_comparison=overrides.get(
                 "include_madhhab_comparison", base_config.include_madhhab_comparison
             ),
-            terminology_complexity=overrides.get(
-                "terminology_complexity", base_config.terminology_complexity
-            ),
+            terminology_complexity=overrides.get("terminology_complexity", base_config.terminology_complexity),
             evidence_detail=overrides.get("evidence_detail", base_config.evidence_detail),
-            collapsible_sections=overrides.get(
-                "collapsible_sections", base_config.collapsible_sections
-            ),
+            collapsible_sections=overrides.get("collapsible_sections", base_config.collapsible_sections),
             summary_position=overrides.get("summary_position", base_config.summary_position),
         )
 
@@ -282,17 +279,11 @@ class DepthAdapter:
 
         # Length guidance
         if config.level == DepthLevel.BRIEF:
-            instructions.append(
-                "Provide a concise answer in 1-2 sentences. Focus on the core answer only."
-            )
+            instructions.append("Provide a concise answer in 1-2 sentences. Focus on the core answer only.")
         elif config.level == DepthLevel.STANDARD:
-            instructions.append(
-                "Provide a clear, moderate-length answer with key supporting evidence."
-            )
+            instructions.append("Provide a clear, moderate-length answer with key supporting evidence.")
         elif config.level == DepthLevel.DETAILED:
-            instructions.append(
-                "Provide a comprehensive answer with detailed explanations and evidence."
-            )
+            instructions.append("Provide a comprehensive answer with detailed explanations and evidence.")
         else:  # SCHOLARLY
             instructions.append(
                 "Provide an academically rigorous answer with full scholarly analysis, "
@@ -309,17 +300,13 @@ class DepthAdapter:
 
         # Arabic text
         if config.include_arabic:
-            instructions.append(
-                "Include relevant Arabic text with transliteration and translation."
-            )
+            instructions.append("Include relevant Arabic text with transliteration and translation.")
         elif config.include_transliteration:
             instructions.append("Include transliteration of key Arabic terms.")
 
         # Scholarly content
         if config.include_scholarly_disagreements:
-            instructions.append(
-                "Discuss scholarly differences of opinion (ikhtilaf) where relevant."
-            )
+            instructions.append("Discuss scholarly differences of opinion (ikhtilaf) where relevant.")
 
         if config.include_historical_context:
             instructions.append("Provide historical context for the ruling or concept.")
@@ -334,9 +321,7 @@ class DepthAdapter:
         if config.terminology_complexity < 0.3:
             instructions.append("Use simple, accessible language for a general audience.")
         elif config.terminology_complexity > 0.7:
-            instructions.append(
-                "Use precise scholarly terminology with brief explanations."
-            )
+            instructions.append("Use precise scholarly terminology with brief explanations.")
 
         return "\n".join(f"- {i}" for i in instructions)
 
@@ -363,9 +348,7 @@ class DepthAdapter:
             return StructuredAnswer(
                 summary=full_answer.summary,
                 main_content=full_answer.main_content,
-                sections=[
-                    s for s in full_answer.sections[:2] if s.level == "primary"
-                ],
+                sections=[s for s in full_answer.sections[:2] if s.level == "primary"],
                 citations=full_answer.citations[:5],
                 metadata={"compressed_from": full_answer.metadata.get("depth_level")},
             )
@@ -397,30 +380,38 @@ class DepthAdapter:
         """Build a template for expanding a brief answer to more detail."""
         target_config = self._configs[target_level]
 
-        expansion_template = {
-            "original_answer": brief_answer,
-            "target_level": target_level.value,
-            "required_sections": [],
-            "prompt_additions": self.build_prompt_instructions(target_config),
-        }
+        required_sections: list[dict[str, str]] = []
 
         if target_config.include_scholarly_disagreements:
-            expansion_template["required_sections"].append({
-                "title": "Scholarly Perspectives",
-                "description": "Different views among scholars on this matter",
-            })
+            required_sections.append(
+                {
+                    "title": "Scholarly Perspectives",
+                    "description": "Different views among scholars on this matter",
+                }
+            )
 
         if target_config.include_historical_context:
-            expansion_template["required_sections"].append({
-                "title": "Historical Context",
-                "description": "Background and historical development",
-            })
+            required_sections.append(
+                {
+                    "title": "Historical Context",
+                    "description": "Background and historical development",
+                }
+            )
 
         if target_config.include_madhhab_comparison:
-            expansion_template["required_sections"].append({
-                "title": "School of Thought Comparison",
-                "description": "Positions of the four major madhhabs",
-            })
+            required_sections.append(
+                {
+                    "title": "School of Thought Comparison",
+                    "description": "Positions of the four major madhhabs",
+                }
+            )
+
+        expansion_template: dict[str, Any] = {
+            "original_answer": brief_answer,
+            "target_level": target_level.value,
+            "required_sections": required_sections,
+            "prompt_additions": self.build_prompt_instructions(target_config),
+        }
 
         return expansion_template
 
@@ -428,10 +419,8 @@ class DepthAdapter:
 class UserPreferencesStore:
     """Store for user depth preferences."""
 
-    def __init__(self, data_file: Optional[str] = None) -> None:
-        self._data_file = data_file or os.getenv(
-            "DEPTH_PREFS_FILE", "./data/depth_preferences.json"
-        )
+    def __init__(self, data_file: str | None = None) -> None:
+        self._data_file: str = str(data_file or os.getenv("DEPTH_PREFS_FILE") or "./data/depth_preferences.json")
         self._preferences: dict[str, UserDepthPreferences] = {}
         self._load_data()
 
@@ -452,9 +441,7 @@ class UserPreferencesStore:
     def _save_data(self) -> None:
         """Save preferences to file."""
         os.makedirs(os.path.dirname(self._data_file) or ".", exist_ok=True)
-        data = {
-            "preferences": [p.to_dict() for p in self._preferences.values()]
-        }
+        data = {"preferences": [p.to_dict() for p in self._preferences.values()]}
         with open(self._data_file, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -475,9 +462,7 @@ class UserPreferencesStore:
         prefs.default_level = level
         self.save(prefs)
 
-    def set_topic_level(
-        self, user_id: str, topic: str, level: DepthLevel
-    ) -> None:
+    def set_topic_level(self, user_id: str, topic: str, level: DepthLevel) -> None:
         """Set depth level for a specific topic."""
         prefs = self.get(user_id)
         prefs.per_topic_levels[topic] = level
@@ -488,8 +473,8 @@ class UserPreferencesStore:
 # Singleton instances
 # ─────────────────────────────────────────────────────────────────────────────
 
-_adapter: Optional[DepthAdapter] = None
-_prefs_store: Optional[UserPreferencesStore] = None
+_adapter: DepthAdapter | None = None
+_prefs_store: UserPreferencesStore | None = None
 
 
 def get_depth_adapter() -> DepthAdapter:
@@ -509,9 +494,9 @@ def get_preferences_store() -> UserPreferencesStore:
 
 
 def get_answer_config(
-    user_id: Optional[str] = None,
-    requested_level: Optional[DepthLevel] = None,
-    topic: Optional[str] = None,
+    user_id: str | None = None,
+    requested_level: DepthLevel | None = None,
+    topic: str | None = None,
 ) -> DepthConfig:
     """Get the appropriate depth configuration for an answer.
 
@@ -537,5 +522,5 @@ def get_answer_config(
         level = DepthLevel.STANDARD
 
     # Get config with user preferences applied
-    prefs = prefs_store.get(user_id) if user_id else None
-    return adapter.get_effective_config(level, prefs)
+    user_prefs: UserDepthPreferences | None = prefs_store.get(user_id) if user_id else None
+    return adapter.get_effective_config(level, user_prefs)
