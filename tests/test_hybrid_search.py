@@ -15,12 +15,12 @@ from hybrid_search import (
     CHANNEL_KEYWORD,
     CHANNEL_SEMANTIC,
     DEFAULT_RRF_K,
+    STRATEGY_REGISTRY,
     HashingVectorBackend,
-    HybridSearchRequest,
     HybridSearcher,
+    HybridSearchRequest,
     InMemoryKeywordBackend,
     ScoredPassage,
-    STRATEGY_REGISTRY,
     analyze_query,
     assign_variant,
     get_ab_stats,
@@ -104,9 +104,7 @@ class TestReciprocalRankFusion:
 
     def test_tie_breaks_deterministically_by_id(self):
         """x and y swap channels so both score 1/61 + 1/62; id order decides."""
-        fused = reciprocal_rank_fusion(
-            {CHANNEL_SEMANTIC: [mk("x"), mk("y")], CHANNEL_KEYWORD: [mk("y"), mk("x")]}
-        )
+        fused = reciprocal_rank_fusion({CHANNEL_SEMANTIC: [mk("x"), mk("y")], CHANNEL_KEYWORD: [mk("y"), mk("x")]})
         assert [item.fused_score for item in fused] == pytest.approx([1 / 61 + 1 / 62] * 2)
         assert [item.passage.id for item in fused] == ["x", "y"]
 
@@ -256,9 +254,7 @@ class TestAnalyzeQuery:
 # Backends (offline implementations)
 # ---------------------------------------------------------------------------
 CORPUS = [
-    ScoredPassage(
-        id="quran:2:153", text="seek help through patience and prayer", source="quran", reference="2:153"
-    ),
+    ScoredPassage(id="quran:2:153", text="seek help through patience and prayer", source="quran", reference="2:153"),
     ScoredPassage(
         id="quran:2:255",
         text="Allah there is no deity except Him the Ever-Living",

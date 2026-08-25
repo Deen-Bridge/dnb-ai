@@ -175,15 +175,11 @@ class TestStubEngine:
         assert analysis.manuscript_type.label == "hadith"
 
     async def test_printed_marker_flips_the_flag(self):
-        analysis = await StubManuscriptEngine().analyze(
-            _jpeg(b"MSS-PRINTED"), "image/jpeg"
-        )
+        analysis = await StubManuscriptEngine().analyze(_jpeg(b"MSS-PRINTED"), "image/jpeg")
         assert analysis.printed is True
 
     async def test_low_quality_marker_yields_empty_low_confidence_output(self):
-        analysis = await StubManuscriptEngine().analyze(
-            _jpeg(b"MSS-LOW-QUALITY"), "image/jpeg"
-        )
+        analysis = await StubManuscriptEngine().analyze(_jpeg(b"MSS-LOW-QUALITY"), "image/jpeg")
         assert analysis.extracted_text == ""
         assert analysis.confidence < 0.35
 

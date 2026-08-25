@@ -7,8 +7,8 @@ GEMINI_API_KEY is provided only so ``import main`` satisfies Settings; CI has
 no real secrets.
 """
 
-from httpx import ASGITransport, AsyncClient
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from calligraphy_ocr import (
     CalligraphyAnalysis,

@@ -36,7 +36,7 @@ class FakeEmbedder:
 
     def embed(self, text: str) -> np.ndarray:
         vec = np.zeros(2, dtype=np.float32)
-        vec[0] = sum(1 for ch in text if "\u0600" <= ch <= "\u06FF")
+        vec[0] = sum(1 for ch in text if "\u0600" <= ch <= "\u06ff")
         vec[1] = sum(1 for ch in text if ch.isascii() and ch.isalpha())
         norm = float(np.linalg.norm(vec))
         return vec / norm if norm > 0 else vec
@@ -149,7 +149,7 @@ class TestGlossary:
         matches = get_glossary().find_terms("surah al-fatiha recitation")
         spans = [(m.start, m.end) for m in matches]
         assert spans == sorted(spans)
-        for (_, end1), (start2, _) in zip(spans, spans[1:]):
+        for (_, end1), (start2, _) in zip(spans, spans[1:], strict=False):
             assert end1 <= start2
 
     def test_word_boundary_prevents_substring_hits(self):
@@ -337,9 +337,7 @@ class TestLangPrefFiltering:
 
     async def test_invalid_lang_pref_rejected(self):
         with pytest.raises(ValueError):
-            await crosslingual_search(
-                "prayer", k=3, lang_pref="fr", documents=DOCS, embedder=FakeEmbedder()
-            )
+            await crosslingual_search("prayer", k=3, lang_pref="fr", documents=DOCS, embedder=FakeEmbedder())
 
     async def test_hit_contract_fields(self):
         resp = await crosslingual_search(

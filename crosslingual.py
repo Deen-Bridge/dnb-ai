@@ -25,8 +25,9 @@ import logging
 import os
 import re
 import unicodedata
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Literal, NamedTuple, Protocol
+from typing import Literal, NamedTuple, Protocol
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -65,9 +66,7 @@ DEFAULT_CORPUS_PATH = Path(__file__).parent / "data" / "quran_uthmani.json"
 
 # Keys shaped like placeholders (CI exports GEMINI_API_KEY=dummy) must never
 # trigger network attempts: default paths have to stay fully offline-capable.
-_PLACEHOLDER_KEYS = frozenset(
-    {"", "dummy", "test", "test-key", "testing", "changeme", "your_api_key_here", "none"}
-)
+_PLACEHOLDER_KEYS = frozenset({"", "dummy", "test", "test-key", "testing", "changeme", "your_api_key_here", "none"})
 _EMBEDDER_MODE_ENV = "CROSS_LINGUAL_EMBEDDER"
 
 _SNIPPET_CHARS = 240
@@ -149,7 +148,7 @@ def detect_script(text: str) -> ScriptDetection:
 # ---------------------------------------------------------------------------
 
 # Tatweel (0640), harakat (064B-065F), dagger alif (0670).
-_AR_MARKS_RE = re.compile("[\u0640\u064B-\u065F\u0670]")
+_AR_MARKS_RE = re.compile("[\u0640\u064b-\u065f\u0670]")
 
 
 _AR_NORMALIZE_TABLE = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي"})
@@ -160,9 +159,36 @@ _AR_PREFIXES = ("وال", "فال", "بال", "كال", "لل", "ال", "و", "�
 _EN_PUNCT = ".,!?;:\"'()[]{}<>/\\|`~@#$%^&*_+=«»“”‘’…،؛؟"
 _EN_STOPWORDS = frozenset(
     {
-        "the", "a", "an", "is", "are", "was", "were", "am", "be", "been",
-        "do", "does", "did", "to", "of", "in", "on", "for", "and", "or",
-        "i", "you", "my", "me", "it", "its", "that", "this", "these", "those",
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "am",
+        "be",
+        "been",
+        "do",
+        "does",
+        "did",
+        "to",
+        "of",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "i",
+        "you",
+        "my",
+        "me",
+        "it",
+        "its",
+        "that",
+        "this",
+        "these",
+        "those",
     }
 )
 
@@ -175,7 +201,7 @@ def normalize_arabic_token(token: str) -> str:
         changed = False
         for prefix in _AR_PREFIXES:
             if t.startswith(prefix) and len(t) - len(prefix) >= 2:
-                t = t[len(prefix):]
+                t = t[len(prefix) :]
                 changed = True
                 break
     return t
@@ -272,11 +298,7 @@ class TransliterationGlossary:
         # consume the escaped forms first so no stray backslash survives.
         sep = "\x00"
         escaped = (
-            escaped.replace(r"\ ", sep)
-            .replace(r"\-", sep)
-            .replace(" ", sep)
-            .replace("-", sep)
-            .replace(sep, r"[\s\-]+")
+            escaped.replace(r"\ ", sep).replace(r"\-", sep).replace(" ", sep).replace("-", sep).replace(sep, r"[\s\-]+")
         )
         if arabic_script:
             # Tolerate clitics such as ال، وال، بال before an Arabic term.
@@ -399,7 +421,9 @@ def _gemini_translate_sync(text: str, target_lang: Literal["ar", "en"], protecti
     return translated
 
 
-def apply_term_protection(text: str, matches: Iterable[TermMatch], target_lang: Literal["ar", "en"]) -> tuple[str, list[TermProtection]]:
+def apply_term_protection(
+    text: str, matches: Iterable[TermMatch], target_lang: Literal["ar", "en"]
+) -> tuple[str, list[TermProtection]]:
     """Substitute matched glossary surfaces with their canonical form.
 
     Toward Arabic the romanization is replaced by the canonical Arabic term;
@@ -410,10 +434,12 @@ def apply_term_protection(text: str, matches: Iterable[TermMatch], target_lang: 
     out: list[str] = []
     cursor = 0
     for m in matches:
-        out.append(text[cursor:m.start])
+        out.append(text[cursor : m.start])
         out.append(m.canonical_ar if target_lang == "ar" else m.canonical_en)
         cursor = m.end
-        protections.append(TermProtection(matched_text=m.matched_text, canonical_ar=m.canonical_ar, canonical_en=m.canonical_en))
+        protections.append(
+            TermProtection(matched_text=m.matched_text, canonical_ar=m.canonical_ar, canonical_en=m.canonical_en)
+        )
     out.append(text[cursor:])
     return "".join(out), protections
 
@@ -536,7 +562,7 @@ class HashingCrossScriptEmbedder:
             if len(padded) < size:
                 continue
             for i in range(len(padded) - size + 1):
-                gram = f"g{size}:{padded[i:i + size]}"
+                gram = f"g{size}:{padded[i : i + size]}"
                 idx, sign = self._hash_feature(gram)
                 features[idx] = features.get(idx, 0.0) + weight * sign
 

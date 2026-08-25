@@ -34,19 +34,20 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+import metrics
 import telemetry
+from calligraphy_ocr import (
+    CalligraphyAnalysis,
+    GeminiCalligraphyEngine,
+    StubCalligraphyEngine,
+    sniff_image_mime,
+)
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
     CitationExtraction,
     CitationStreamFilter,
     extract_citations,
-)
-from calligraphy_ocr import (
-    CalligraphyAnalysis,
-    GeminiCalligraphyEngine,
-    StubCalligraphyEngine,
-    sniff_image_mime,
 )
 from confidence import (
     ConfidenceAssessment,
@@ -83,6 +84,14 @@ from history import trim_history
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from learning import router as learning_router
 from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
+from manuscript_ocr import (
+    ManuscriptAnalysis,
+    PoorQualityError,
+    UnsupportedFormatError,
+    UploadTooLargeError,
+    analyze_manuscript_bytes,
+    manuscript_rate_limiter,
+)
 from memory import (
     ChatSummary,
     PersonalContext,
@@ -97,14 +106,6 @@ from memory.extraction import (
     extract_updates,
     merge_summaries,
     summarize_conversation_turns,
-)
-from manuscript_ocr import (
-    ManuscriptAnalysis,
-    PoorQualityError,
-    UnsupportedFormatError,
-    UploadTooLargeError,
-    analyze_manuscript_bytes,
-    manuscript_rate_limiter,
 )
 from prompts import (
     ExperimentAssignment,
@@ -168,6 +169,9 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
+
+# --- Prometheus instrumentation ---
+metrics.setup_metrics(app)
 
 # --- Prompt template registry and A/B experimentation ---
 register_defaults()
@@ -1953,10 +1957,14 @@ async def search_hybrid(body: HybridSearchRequest) -> HybridSearchResponse:
     if not settings.hybrid_enabled:
         raise HTTPException(status_code=503, detail="Hybrid search is disabled.")
     return await run_in_threadpool(handle_hybrid_search, body)
+
+
 @app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
 async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
     """Arabic–English cross-lingual retrieval over the bundled corpus (#232)."""
     return await crosslingual_search(body.query, body.k, body.lang_pref)
+
+
 # --- Calligraphy OCR (#234) ---------------------------------------------------
 
 
@@ -2079,16 +2087,35 @@ async def cache_stats() -> dict[str, Any]:
 
 
 @app.get("/metrics")
-async def metrics() -> dict[str, Any]:
-    """Lightweight LLM observability surface: token, cost, and latency
-    aggregates plus error rate. Contains only counts, durations, costs, model
-    names, and trace-derived aggregates - never prompt or answer content.
+async def prometheus_metrics(
+    request: Request,
+    format: str | None = None,
+) -> Response:
+    """Prometheus exposition metrics endpoint for monitoring and observability (#116).
 
-    Cache hit-rate is sourced from the semantic cache's own precise counters
-    (#27) rather than re-derived here, so the numbers stay consistent with
-    /cache/stats. #9 (auth/rate limiting) can consume the cost/token totals
-    below without this endpoint enforcing anything itself.
+    Exposes standard HTTP request metrics along with custom telemetry for model calls,
+    latencies, tokens, cache hits/misses, confidence scores, and scholar queue depth.
+    Access can be restricted via METRICS_TOKEN and/or METRICS_IP_ALLOWLIST.
     """
+    metrics.verify_metrics_access(request)
+    await metrics.refresh_scholar_queue_depth()
+
+    accept_header = request.headers.get("accept", "")
+    if format == "json" or "application/json" in accept_header:
+        snapshot = telemetry.registry.snapshot()
+        snapshot["semantic_cache"] = semantic_cache.get_stats()
+        return JSONResponse(content=snapshot)
+
+    return Response(
+        content=metrics.generate_prometheus_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+@app.get("/metrics/json")
+async def metrics_json(request: Request) -> dict[str, Any]:
+    """Return JSON telemetry snapshot for internal consumers."""
+    metrics.verify_metrics_access(request)
     snapshot = telemetry.registry.snapshot()
     snapshot["semantic_cache"] = semantic_cache.get_stats()
     return snapshot

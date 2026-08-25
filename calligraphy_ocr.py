@@ -121,8 +121,7 @@ class CalligraphyAnalysis(BaseModel):
 class CalligraphyEngine(Protocol):
     """Any backend able to analyze one calligraphy image."""
 
-    def analyze(self, image_bytes: bytes, mime: str) -> CalligraphyAnalysis:
-        ...
+    def analyze(self, image_bytes: bytes, mime: str) -> CalligraphyAnalysis: ...
 
 
 # ---------------------------------------------------------------------------
@@ -525,9 +524,7 @@ def to_manuscript_payload(analysis: CalligraphyAnalysis) -> dict[str, Any]:
             "raw": analysis.extracted_text,
             "normalized": analysis.transcription_normalized,
         },
-        "regions": [
-            {"text": r.text, "confidence": r.confidence, "bbox": r.bbox_hint} for r in analysis.regions
-        ],
+        "regions": [{"text": r.text, "confidence": r.confidence, "bbox": r.bbox_hint} for r in analysis.regions],
         "script": {
             "family": analysis.style.label,
             "variants": analysis.style.alternates,

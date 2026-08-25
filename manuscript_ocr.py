@@ -52,9 +52,7 @@ manuscript_rate_limiter = RateLimiter(
     window_seconds=env_int("MANUSCRIPTS_RATE_LIMIT_WINDOW", 60),
 )
 
-MANUSCRIPT_TYPES: frozenset[str] = frozenset(
-    {"quran", "hadith", "fiqh", "tafsir", "history", "letter", "unknown"}
-)
+MANUSCRIPT_TYPES: frozenset[str] = frozenset({"quran", "hadith", "fiqh", "tafsir", "history", "letter", "unknown"})
 
 
 # ---------------------------------------------------------------------------
@@ -118,25 +116,18 @@ def validate_upload(filename: str, data: bytes, max_bytes: int = DEFAULT_MAX_UPL
     the file is, and the extension (when recognizable) must agree with them.
     """
     if len(data) > max_bytes:
-        raise UploadTooLargeError(
-            f"Upload is {len(data)} bytes; the maximum allowed is {max_bytes} bytes."
-        )
+        raise UploadTooLargeError(f"Upload is {len(data)} bytes; the maximum allowed is {max_bytes} bytes.")
     sniffed = sniff_format(data)
     if sniffed is None:
-        raise UnsupportedFormatError(
-            "Unsupported file. Upload a JPEG image, PNG image, or PDF manuscript."
-        )
+        raise UnsupportedFormatError("Unsupported file. Upload a JPEG image, PNG image, or PDF manuscript.")
     suffix = PurePosixPath(filename.replace("\\", "/")).suffix.lower()
     declared = _EXTENSION_MIME.get(suffix)
     if declared is None:
         raise UnsupportedFormatError(
-            f"File extension {suffix or '(missing)'} is not supported; "
-            "use .jpg, .jpeg, .png, or .pdf."
+            f"File extension {suffix or '(missing)'} is not supported; use .jpg, .jpeg, .png, or .pdf."
         )
     if declared != sniffed:
-        raise UnsupportedFormatError(
-            f"File content ({sniffed}) does not match its extension ({declared})."
-        )
+        raise UnsupportedFormatError(f"File content ({sniffed}) does not match its extension ({declared}).")
     return ValidatedUpload(filename=filename, data=data, mime=sniffed)
 
 
