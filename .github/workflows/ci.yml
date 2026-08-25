@@ -63,6 +63,9 @@ jobs:
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
 
+      - name: Run model routing tests
+        run: pytest -q tests/test_model_router.py
+
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
 
@@ -71,6 +74,9 @@ jobs:
 
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
+
+      - name: Run religious sentiment tests
+        run: pytest -q tests/test_sentiment.py
 
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
