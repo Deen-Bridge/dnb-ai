@@ -81,6 +81,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from arabic_ocr import router as arabic_ocr_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from model_router import router as model_routing_router
@@ -267,6 +268,8 @@ app.include_router(query_optimizer_router)
 app.include_router(history_router)
 # Model routing: pick the optimal model per query by complexity, latency and cost
 app.include_router(model_routing_router)
+# Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
+app.include_router(arabic_ocr_router)
 
 # Configure CORS
 app.add_middleware(
