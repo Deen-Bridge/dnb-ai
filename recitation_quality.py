@@ -277,7 +277,9 @@ def analyze_recitation(inp: RecitationInput) -> RecitationAnalysis:
         idx = end
 
         seg_pronunciation = float(np.mean([p.accuracy_score for p in seg_phonemes])) if seg_phonemes else 0.0
-        seg_tajweed = len([p for p in seg_phonemes if not p.tajweed_violations]) / len(seg_phonemes) if seg_phonemes else 1.0
+        seg_tajweed = (
+            len([p for p in seg_phonemes if not p.tajweed_violations]) / len(seg_phonemes) if seg_phonemes else 1.0
+        )
         seg_rhythm = _rhythm_score(seg_phonemes)
         seg_consistency = _consistency_score(seg_phonemes)
 
@@ -291,24 +293,30 @@ def analyze_recitation(inp: RecitationInput) -> RecitationAnalysis:
             w_phonemes = seg_phonemes[widx:wend]
             widx = wend
             w_acc = float(np.mean([p.accuracy_score for p in w_phonemes])) if w_phonemes else 0.0
-            w_tajweed = len([p for p in w_phonemes if not p.tajweed_violations]) / len(w_phonemes) if w_phonemes else 1.0
+            w_tajweed = (
+                len([p for p in w_phonemes if not p.tajweed_violations]) / len(w_phonemes) if w_phonemes else 1.0
+            )
             w_rhythm = _rhythm_score(w_phonemes)
-            word_analyses.append(WordAnalysis(
-                word_text=w,
-                phoneme_scores=[p.accuracy_score for p in w_phonemes],
-                accuracy_score=w_acc,
-                tajweed_score=w_tajweed,
-                rhythm_score=w_rhythm,
-            ))
+            word_analyses.append(
+                WordAnalysis(
+                    word_text=w,
+                    phoneme_scores=[p.accuracy_score for p in w_phonemes],
+                    accuracy_score=w_acc,
+                    tajweed_score=w_tajweed,
+                    rhythm_score=w_rhythm,
+                )
+            )
 
-        segment_analyses.append(SegmentAnalysis(
-            segment_text=seg_text,
-            word_analyses=word_analyses,
-            accuracy_score=seg_pronunciation,
-            tajweed_score=seg_tajweed,
-            rhythm_score=seg_rhythm,
-            consistency_score=seg_consistency,
-        ))
+        segment_analyses.append(
+            SegmentAnalysis(
+                segment_text=seg_text,
+                word_analyses=word_analyses,
+                accuracy_score=seg_pronunciation,
+                tajweed_score=seg_tajweed,
+                rhythm_score=seg_rhythm,
+                consistency_score=seg_consistency,
+            )
+        )
 
     return RecitationAnalysis(
         overall_score=round(overall, 4),
@@ -347,12 +355,14 @@ def compare_to_reference(
     seg_deltas: list[dict[str, Any]] = []
     for seg in analysis.segment_analyses:
         ref_seg = reference.segment_scores.get(seg.segment_text, reference.overall_score)
-        seg_deltas.append({
-            "segment": seg.segment_text,
-            "your_score": seg.accuracy_score,
-            "reference_score": ref_seg,
-            "delta": round(seg.accuracy_score - ref_seg, 4),
-        })
+        seg_deltas.append(
+            {
+                "segment": seg.segment_text,
+                "your_score": seg.accuracy_score,
+                "reference_score": ref_seg,
+                "delta": round(seg.accuracy_score - ref_seg, 4),
+            }
+        )
 
     overall_delta = round(analysis.overall_score - reference.overall_score, 4)
     pron_delta = round(analysis.pronunciation_score - reference.pronunciation_score, 4)
@@ -416,10 +426,12 @@ def generate_quality_feedback(analysis: RecitationAnalysis) -> QualityFeedback:
     segment_notes: list[dict[str, Any]] = []
     for seg in analysis.segment_analyses:
         if seg.accuracy_score < 0.7:
-            segment_notes.append({
-                "segment": seg.segment_text,
-                "note": f"Score {seg.accuracy_score:.2f} — focus on character accuracy.",
-            })
+            segment_notes.append(
+                {
+                    "segment": seg.segment_text,
+                    "note": f"Score {seg.accuracy_score:.2f} — focus on character accuracy.",
+                }
+            )
 
     if not strengths:
         strengths.append("Consistent effort across the recitation.")

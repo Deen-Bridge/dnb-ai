@@ -2,23 +2,19 @@
 
 import uuid
 
-import pytest
-
 from recitation_quality import (
     PhonemeResult,
+    ProgressReport,
     QualityFeedback,
-    RecitationAnalysis,
     RecitationInput,
     ReferenceProfile,
-    ProgressReport,
+    analyze_recitation,
     compare_to_reference,
     detect_tajweed_violations,
     generate_quality_feedback,
-    track_progress,
     reset_progress,
-    analyze_recitation,
+    track_progress,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -229,7 +225,8 @@ class TestProgressTracking:
                 inp = RecitationInput(
                     phonemes=[
                         PhonemeResult(expected_char="ا", actual_char="ا", duration_ms=int(100 * s)),
-                    ] * 5,
+                    ]
+                    * 5,
                 )
                 analysis = analyze_recitation(inp)
                 # Force the overall_score for trend detection
@@ -290,9 +287,7 @@ class TestTajweed:
 class TestAPISchema:
     def test_recitation_input_schema(self) -> None:
         data = {
-            "phonemes": [
-                {"expected_char": "ب", "actual_char": "ب", "duration_ms": 100, "confidence": 1.0}
-            ],
+            "phonemes": [{"expected_char": "ب", "actual_char": "ب", "duration_ms": 100, "confidence": 1.0}],
             "text_segments": ["بسم"],
             "metadata": {},
         }

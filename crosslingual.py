@@ -153,8 +153,8 @@ _AR_MARKS_RE = re.compile("[\u0640\u064b-\u065f\u0670]")
 
 _AR_NORMALIZE_TABLE = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي"})
 
-# Ordered longest-first so وال/بال/... win over their bare-clitic prefixes.
-_AR_PREFIXES = ("وال", "فال", "بال", "كال", "لل", "ال", "و", "ب", "ف", "ك", "ل")
+# Ordered longest-first so فبال/وال/بال/... win over their bare-clitic prefixes.
+_AR_PREFIXES = ("فبال", "وبال", "وكال", "فكال", "ولل", "فلل", "وال", "فال", "بال", "كال", "لل", "ال", "ب")
 
 _EN_PUNCT = ".,!?;:\"'()[]{}<>/\\|`~@#$%^&*_+=«»“”‘’…،؛؟"
 _EN_STOPWORDS = frozenset(
@@ -196,14 +196,9 @@ _EN_STOPWORDS = frozenset(
 def normalize_arabic_token(token: str) -> str:
     """Diacritic-fold and clitic-strip one Arabic token."""
     t = _AR_MARKS_RE.sub("", token.translate(_AR_NORMALIZE_TABLE))
-    changed = True
-    while changed:
-        changed = False
-        for prefix in _AR_PREFIXES:
-            if t.startswith(prefix) and len(t) - len(prefix) >= 2:
-                t = t[len(prefix) :]
-                changed = True
-                break
+    for prefix in _AR_PREFIXES:
+        if t.startswith(prefix) and len(t) - len(prefix) >= 2:
+            return t[len(prefix) :]
     return t
 
 
