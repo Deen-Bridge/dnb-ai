@@ -36,6 +36,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from audio_hadith import router as audio_hadith_router
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
@@ -77,6 +78,8 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from page_analysis import router as page_analysis_router
+from model_router import router as model_routing_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -92,6 +95,7 @@ from semantic_cache import (
     get_token_quota_tracker,
     normalize_text,
 )
+from sentiment import router as sentiment_router
 from stellar import (
     PurchaseContext,
     PurchaseInfo,
@@ -103,6 +107,7 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
@@ -191,12 +196,22 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
 app.include_router(study_router)
+# Religious sentiment analysis: reads the emotional/spiritual tone of a question
+app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
 app.include_router(tafsir_router)
+# Page analysis: layout understanding of scanned Islamic book pages
+app.include_router(page_analysis_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
 app.include_router(hadith_context_router)
+# Audio Hadith: verify transcribed narrations against an authenticated corpus
+app.include_router(audio_hadith_router)
+# Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
+app.include_router(history_router)
+# Model routing: pick the optimal model per query by complexity, latency and cost
+app.include_router(model_routing_router)
 
 # Configure CORS
 app.add_middleware(

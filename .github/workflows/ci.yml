@@ -51,6 +51,9 @@ jobs:
       - name: Run hadith grading tests
         run: pytest -q tests/test_hadith.py
 
+      - name: Run audio hadith verification tests
+        run: pytest -q tests/test_audio_hadith.py
+
       - name: Run structured citation tests
         run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 
@@ -60,11 +63,16 @@ jobs:
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
 
+      - name: Run historical context tests
+        run: pytest -q tests/test_history.py
+
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
 
       - name: Run contextual hadith interpretation tests
         run: pytest -q tests/test_hadith_context.py
+      - name: Run model routing tests
+        run: pytest -q tests/test_model_router.py
 
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
@@ -74,6 +82,9 @@ jobs:
 
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
+
+      - name: Run religious sentiment tests
+        run: pytest -q tests/test_sentiment.py
 
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
@@ -89,6 +100,9 @@ jobs:
 
       - name: Run memory integration tests
         run: pytest -q tests/test_memory_integration.py
+
+      - name: Run page analysis tests
+        run: pytest -q tests/test_page_analysis.py
 
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
