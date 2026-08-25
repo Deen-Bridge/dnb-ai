@@ -42,6 +42,12 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
+from calligraphy_ocr import (
+    CalligraphyAnalysis,
+    GeminiCalligraphyEngine,
+    StubCalligraphyEngine,
+    sniff_image_mime,
+)
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -51,6 +57,11 @@ from confidence import (
     thresholds as confidence_thresholds,
 )
 from config import get_settings
+from crosslingual import (
+    CrosslingualSearchRequest,
+    CrosslingualSearchResponse,
+    crosslingual_search,
+)
 from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
@@ -69,6 +80,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from history import trim_history
+from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from learning import router as learning_router
 from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
 from memory import (
@@ -1923,6 +1935,83 @@ async def feedback_records(
     except Exception as exc:
         logger.exception("failed to fetch feedback records")
         raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
+
+
+# ---------------------------------------------------------------------------
+# Hybrid search: vector + keyword fusion retrieval (#226)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/search/hybrid", response_model=HybridSearchResponse)
+async def search_hybrid(body: HybridSearchRequest) -> HybridSearchResponse:
+    """Fuse semantic and keyword retrieval channels with RRF over the corpus.
+
+    All channels run offline in-process; production backends (pgvector,
+    Pinecone, ...) plug into hybrid_search's Protocols without touching this
+    handler.
+    """
+    if not settings.hybrid_enabled:
+        raise HTTPException(status_code=503, detail="Hybrid search is disabled.")
+    return await run_in_threadpool(handle_hybrid_search, body)
+@app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
+async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
+    """Arabic–English cross-lingual retrieval over the bundled corpus (#232)."""
+    return await crosslingual_search(body.query, body.k, body.lang_pref)
+# --- Calligraphy OCR (#234) ---------------------------------------------------
+
+
+@app.post("/calligraphy/analyze", response_model=CalligraphyAnalysis)
+@limiter.limit("10/minute")
+async def analyze_calligraphy(request: Request, file: UploadFile = File(...)) -> CalligraphyAnalysis:
+    """Recognize text in an Arabic calligraphy image and classify its style.
+
+    Accepts a single multipart JPEG or PNG (validated by magic bytes, capped at
+    ``calligraphy_max_image_bytes``). Heavy lifting lives in calligraphy_ocr;
+    this handler only enforces transport rules and picks the provider.
+
+    Errors: 413 oversize, 415 unsupported format, 422 no legible calligraphy,
+    502 engine failure, 503 provider unavailable. Rate-limited per API key/IP.
+    """
+    max_bytes = settings.calligraphy_max_image_bytes
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {max_bytes // (1024 * 1024)}MB size limit.",
+        )
+
+    mime = sniff_image_mime(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported.")
+
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    if settings.calligraphy_provider == "stub":
+        # The stub fabricates results from marker bytes — a dev/test aid only.
+        if environment == "production":
+            raise HTTPException(status_code=503, detail="The stub calligraphy provider is disabled in production.")
+        engine: GeminiCalligraphyEngine | StubCalligraphyEngine = StubCalligraphyEngine(
+            min_confidence=settings.calligraphy_min_confidence
+        )
+    elif settings.calligraphy_provider == "gemini":
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+        engine = GeminiCalligraphyEngine(timeout=GEMINI_TIMEOUT, min_confidence=settings.calligraphy_min_confidence)
+    else:
+        raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+
+    try:
+        # The vision call is synchronous; keep it off the event loop.
+        analysis = await run_in_threadpool(engine.analyze, data, mime)
+    except Exception as exc:
+        logger.error("Calligraphy analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Calligraphy analysis failed upstream.") from exc
+
+    if not analysis.extracted_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No legible Arabic calligraphy was detected in the image.",
+        )
+    return analysis
 
 
 @app.get("/ping")

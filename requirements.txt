@@ -9,6 +9,7 @@ numpy==2.2.4
 redis>=5.0.0,<6.0.0
 httpx==0.28.1
 slowapi==0.1.9
+python-multipart==0.0.20
 firebase-admin>=6.6.0,<8.0.0
 hijridate>=2.6.0
 tzdata
