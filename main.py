@@ -1106,6 +1106,9 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             is_religious=is_fiqh or bool(hadith_refs),
             is_high_stakes=is_fiqh,
             citation_verification=citation_extraction.score,
+            prompt=prompt,
+            hadith_refs=hadith_refs,
+            citations=citation_extraction.citations,
         )
         assessment = assess(signals)
         answer_before_policy = response_text
@@ -1546,6 +1549,9 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                     is_religious=is_fiqh or bool(hadith_refs),
                     is_high_stakes=is_fiqh,
                     citation_verification=citation_extraction.score,
+                    prompt=prompt,
+                    hadith_refs=hadith_refs,
+                    citations=citation_extraction.citations,
                 )
                 assessment = assess(signals)
 
@@ -2127,6 +2133,20 @@ async def confidence_policy() -> dict[str, Any]:
     return {
         "thresholds": confidence_thresholds(),
         "review_queue": await review_store.stats(),
+    }
+
+
+@app.get("/uncertainty/taxonomy")
+async def uncertainty_taxonomy() -> dict[str, Any]:
+    """Islamic epistemology and uncertainty quantification taxonomy (#199)."""
+    from uncertainty import EpistemicCertainty, EvidenceStrength, PositionType, UncertaintyFactor
+
+    return {
+        "epistemic_certainty": [e.value for e in EpistemicCertainty],
+        "position_types": [p.value for p in PositionType],
+        "evidence_strengths": [s.value for s in EvidenceStrength],
+        "uncertainty_factors": [f.value for f in UncertaintyFactor],
+        "description": "Taxonomy defining ruling certainty (Qat'i vs Dhanni), juristic positions, and evidence levels.",
     }
 
 

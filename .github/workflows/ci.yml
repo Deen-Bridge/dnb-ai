@@ -69,8 +69,8 @@ jobs:
       - name: Run structured citation tests
         run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 
-      - name: Run confidence and abstention tests
-        run: pytest -q tests/test_confidence.py
+      - name: Run confidence, uncertainty, and abstention tests
+        run: pytest -q tests/test_confidence.py tests/test_uncertainty.py
 
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
