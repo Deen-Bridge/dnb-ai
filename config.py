@@ -36,6 +36,11 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
+    # Context manager
+    enable_context_manager: bool = Field(default=True)
+    context_max_turns: int = Field(default=50, ge=1)
+    context_session_ttl_hours: int = Field(default=24, ge=1)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):
