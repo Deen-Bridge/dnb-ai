@@ -22,13 +22,14 @@ import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class RevelationPeriod(str, Enum):
     """Period of revelation for a surah or verse."""
+
     MECCAN = "meccan"
     MEDINAN = "medinan"
     UNKNOWN = "unknown"
@@ -37,12 +38,13 @@ class RevelationPeriod(str, Enum):
 @dataclass
 class Theme:
     """A theme in the taxonomy hierarchy."""
+
     id: str
     name: str
     name_arabic: str
     description: str
-    scholarly_definition: Optional[str] = None
-    parent_id: Optional[str] = None
+    scholarly_definition: str | None = None
+    parent_id: str | None = None
     level: int = 0  # 0 = main, 1 = sub, 2 = micro
     keywords: list[str] = field(default_factory=list)
     related_themes: list[str] = field(default_factory=list)
@@ -64,18 +66,20 @@ class Theme:
 @dataclass
 class VerseThemeMapping:
     """Association between a verse and a theme."""
+
     surah: int
     ayah: int
     theme_id: str
     relevance_score: float = 1.0
-    annotation: Optional[str] = None
-    scholarly_notes: Optional[str] = None
+    annotation: str | None = None
+    scholarly_notes: str | None = None
     context_type: str = "primary"  # primary, secondary, tangential
 
 
 @dataclass
 class ThematicSummary:
     """Summary of a theme across the Quran."""
+
     theme_id: str
     total_verses: int
     meccan_verses: int
@@ -310,13 +314,13 @@ SUB_THEMES = [
 
 # Surah revelation periods (partial list - expand as needed)
 SURAH_PERIODS: dict[int, RevelationPeriod] = {
-    1: RevelationPeriod.MECCAN,   # Al-Fatiha
+    1: RevelationPeriod.MECCAN,  # Al-Fatiha
     2: RevelationPeriod.MEDINAN,  # Al-Baqarah
     3: RevelationPeriod.MEDINAN,  # Ali 'Imran
     4: RevelationPeriod.MEDINAN,  # An-Nisa
     5: RevelationPeriod.MEDINAN,  # Al-Ma'idah
-    6: RevelationPeriod.MECCAN,   # Al-An'am
-    7: RevelationPeriod.MECCAN,   # Al-A'raf
+    6: RevelationPeriod.MECCAN,  # Al-An'am
+    7: RevelationPeriod.MECCAN,  # Al-A'raf
     # ... (would be expanded for all 114 surahs)
 }
 
@@ -342,7 +346,7 @@ class ThematicTaxonomy:
                 self._children[theme.parent_id] = []
             self._children[theme.parent_id].append(theme.id)
 
-    def get_theme(self, theme_id: str) -> Optional[Theme]:
+    def get_theme(self, theme_id: str) -> Theme | None:
         """Get a theme by ID."""
         return self._themes.get(theme_id)
 
@@ -390,11 +394,7 @@ class ThematicTaxonomy:
         theme = self._themes.get(theme_id)
         if not theme:
             return []
-        return [
-            self._themes[rid]
-            for rid in theme.related_themes
-            if rid in self._themes
-        ]
+        return [self._themes[rid] for rid in theme.related_themes if rid in self._themes]
 
     def to_dict(self) -> dict[str, Any]:
         """Export taxonomy as a dictionary."""
@@ -407,13 +407,11 @@ class ThematicTaxonomy:
 class ThemeVerseStore:
     """Manages verse-to-theme mappings."""
 
-    def __init__(self, data_file: Optional[str] = None) -> None:
+    def __init__(self, data_file: str | None = None) -> None:
         self._mappings: list[VerseThemeMapping] = []
         self._by_verse: dict[tuple[int, int], list[VerseThemeMapping]] = {}
         self._by_theme: dict[str, list[VerseThemeMapping]] = {}
-        self._data_file = data_file or os.getenv(
-            "THEME_VERSE_DATA", "./data/theme_verses.json"
-        )
+        self._data_file: str = data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json"
         self._load_data()
 
     def _load_data(self) -> None:
@@ -450,9 +448,7 @@ class ThemeVerseStore:
             self._by_theme[mapping.theme_id] = []
         self._by_theme[mapping.theme_id].append(mapping)
 
-    def get_themes_for_verse(
-        self, surah: int, ayah: int
-    ) -> list[VerseThemeMapping]:
+    def get_themes_for_verse(self, surah: int, ayah: int) -> list[VerseThemeMapping]:
         """Get all theme mappings for a verse."""
         return self._by_verse.get((surah, ayah), [])
 
@@ -460,7 +456,7 @@ class ThemeVerseStore:
         self,
         theme_id: str,
         min_relevance: float = 0.0,
-        context_type: Optional[str] = None,
+        context_type: str | None = None,
     ) -> list[VerseThemeMapping]:
         """Get all verse mappings for a theme with optional filters."""
         mappings = self._by_theme.get(theme_id, [])
@@ -496,8 +492,8 @@ class ThematicRetriever:
 
     def __init__(
         self,
-        taxonomy: Optional[ThematicTaxonomy] = None,
-        verse_store: Optional[ThemeVerseStore] = None,
+        taxonomy: ThematicTaxonomy | None = None,
+        verse_store: ThemeVerseStore | None = None,
     ) -> None:
         self.taxonomy = taxonomy or ThematicTaxonomy()
         self.verse_store = verse_store or ThemeVerseStore()
@@ -565,12 +561,14 @@ class ThematicRetriever:
         for m in mappings:
             theme = self.taxonomy.get_theme(m.theme_id)
             if theme:
-                results.append({
-                    "theme": theme.to_dict(),
-                    "relevance_score": m.relevance_score,
-                    "annotation": m.annotation,
-                    "context_type": m.context_type,
-                })
+                results.append(
+                    {
+                        "theme": theme.to_dict(),
+                        "relevance_score": m.relevance_score,
+                        "annotation": m.annotation,
+                        "context_type": m.context_type,
+                    }
+                )
         return results
 
     def get_theme_cooccurrence(self, theme_id: str) -> dict[str, int]:
@@ -586,9 +584,7 @@ class ThematicRetriever:
 
         return dict(sorted(cooccurrence.items(), key=lambda x: -x[1]))
 
-    def get_chronological_distribution(
-        self, theme_id: str
-    ) -> dict[str, Any]:
+    def get_chronological_distribution(self, theme_id: str) -> dict[str, Any]:
         """Get distribution of theme verses by revelation period."""
         verses = self.verse_store.get_verses_for_theme(theme_id)
         meccan = 0
@@ -612,9 +608,7 @@ class ThematicRetriever:
             "total": len(verses),
         }
 
-    def compare_themes(
-        self, theme_ids: list[str]
-    ) -> dict[str, Any]:
+    def compare_themes(self, theme_ids: list[str]) -> dict[str, Any]:
         """Compare multiple themes by their verse coverage and overlap."""
         themes_data = []
         all_verses: dict[str, set[tuple[int, int]]] = {}
@@ -626,16 +620,18 @@ class ThematicRetriever:
             verses = self.verse_store.get_verses_for_theme(tid)
             verse_set = {(v.surah, v.ayah) for v in verses}
             all_verses[tid] = verse_set
-            themes_data.append({
-                "theme": theme.to_dict(),
-                "verse_count": len(verses),
-                "chronology": self.get_chronological_distribution(tid),
-            })
+            themes_data.append(
+                {
+                    "theme": theme.to_dict(),
+                    "verse_count": len(verses),
+                    "chronology": self.get_chronological_distribution(tid),
+                }
+            )
 
         # Calculate overlap between themes
         overlap = {}
         for i, tid1 in enumerate(theme_ids):
-            for tid2 in theme_ids[i + 1:]:
+            for tid2 in theme_ids[i + 1 :]:
                 if tid1 in all_verses and tid2 in all_verses:
                     shared = len(all_verses[tid1] & all_verses[tid2])
                     overlap[f"{tid1}:{tid2}"] = shared
@@ -645,7 +641,7 @@ class ThematicRetriever:
             "overlap": overlap,
         }
 
-    def generate_theme_summary(self, theme_id: str) -> Optional[ThematicSummary]:
+    def generate_theme_summary(self, theme_id: str) -> ThematicSummary | None:
         """Generate a summary of a theme's presence in the Quran."""
         theme = self.taxonomy.get_theme(theme_id)
         if not theme:
@@ -673,9 +669,7 @@ class ThematicRetriever:
                 if related_theme:
                     related_names.append(related_theme.name)
             if related_names:
-                summary_text += (
-                    f"It frequently co-occurs with themes of {', '.join(related_names)}."
-                )
+                summary_text += f"It frequently co-occurs with themes of {', '.join(related_names)}."
 
         return ThematicSummary(
             theme_id=theme_id,
@@ -692,7 +686,7 @@ class ThematicRetriever:
 # Singleton instance for the application
 # ─────────────────────────────────────────────────────────────────────────────
 
-_retriever: Optional[ThematicRetriever] = None
+_retriever: ThematicRetriever | None = None
 
 
 def get_thematic_retriever() -> ThematicRetriever:
