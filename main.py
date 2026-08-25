@@ -76,6 +76,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from model_router import router as model_routing_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -197,6 +198,8 @@ app.include_router(sentiment_router)
 app.include_router(tafsir_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
+# Model routing: pick the optimal model per query by complexity, latency and cost
+app.include_router(model_routing_router)
 
 # Configure CORS
 app.add_middleware(
