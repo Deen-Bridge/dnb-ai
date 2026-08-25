@@ -81,6 +81,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from latency_profiler import router as latency_profiler_router
 from arabic_ocr import router as arabic_ocr_router
 from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
@@ -278,6 +279,9 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Latency profiling: component timing, request tracing, budget enforcement (#211)
+if settings.enable_latency_profiling:
+    app.include_router(latency_profiler_router)
 
 # Configure CORS
 app.add_middleware(

@@ -36,6 +36,14 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
+    # --- Latency profiling (issue #211) ---
+    enable_latency_profiling: bool = Field(default=True)
+    latency_budget_database_ms: float = Field(default=100.0, ge=0)
+    latency_budget_api_call_ms: float = Field(default=500.0, ge=0)
+    latency_budget_retrieval_ms: float = Field(default=200.0, ge=0)
+    latency_budget_inference_ms: float = Field(default=2000.0, ge=0)
+    latency_budget_default_ms: float = Field(default=1000.0, ge=0)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):
