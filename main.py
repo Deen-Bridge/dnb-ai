@@ -81,10 +81,13 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from arabic_ocr import router as arabic_ocr_router
 from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from model_router import router as model_routing_router
+from reformulation import router as reformulation_router
+from reasoning_chains import router as reasoning_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -249,6 +252,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(reasoning_router)
 app.include_router(study_router)
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)
@@ -260,6 +264,8 @@ app.include_router(page_analysis_router)
 app.include_router(calligraphy_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
+# Question reformulation: deterministic quality assessment + rewrite suggestions
+app.include_router(reformulation_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
@@ -270,6 +276,8 @@ app.include_router(query_optimizer_router)
 app.include_router(history_router)
 # Model routing: pick the optimal model per query by complexity, latency and cost
 app.include_router(model_routing_router)
+# Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
+app.include_router(arabic_ocr_router)
 
 # Configure CORS
 app.add_middleware(
