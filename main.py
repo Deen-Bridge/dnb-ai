@@ -6,7 +6,8 @@ import secrets
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,6 +37,13 @@ from slowapi.util import get_remote_address
 
 import metrics
 import telemetry
+from async_runtime import (
+    TaskPriority,
+    background_tasks,
+    chat_locks,
+    http_client_pool,
+    llm_limiter,
+)
 from calligraphy_ocr import (
     CalligraphyAnalysis,
     GeminiCalligraphyEngine,
@@ -168,7 +176,19 @@ CHAT_CONTEXT_MAX_LENGTH = 8000
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-app = FastAPI(title="DeenBridge AI API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    """Own shared async resources and cancel unfinished work on shutdown."""
+    await background_tasks.start()
+    try:
+        yield
+    finally:
+        await background_tasks.stop()
+        await http_client_pool.aclose()
+
+
+app = FastAPI(title="DeenBridge AI API", lifespan=lifespan)
 
 # --- Prometheus instrumentation ---
 metrics.setup_metrics(app)
@@ -461,7 +481,11 @@ async def purchase_retriever(
 ) -> PurchaseContext | None:
     """Load purchase metadata for a chat turn; never fail the turn over it."""
     try:
-        return await build_chat_purchase_context(prompt, transactions=transactions, auth_token=auth_token)
+        return await build_chat_purchase_context(
+            prompt,
+            transactions=transactions,
+            auth_token=auth_token,
+        )
     except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
         logger.warning("Purchase lookup failed; answering without it: %s", exc)
         return None
@@ -488,6 +512,34 @@ async def personal_context_retriever(
     except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
         logger.warning("Personal context retrieval failed; answering without it: %s", exc)
         return None
+
+
+async def retrieve_chat_contexts(
+    request: ChatRequest,
+    prompt: str,
+) -> tuple[TafsirContext | None, ZakatContext | None, PurchaseContext | None, PersonalContext | None]:
+    """Run independent best-effort enrichments concurrently."""
+
+    async def best_effort(name: str, operation: Awaitable[Any]) -> Any:
+        try:
+            return await operation
+        except Exception as exc:  # noqa: BLE001 - one enrichment must not cancel its siblings
+            logger.warning("%s retrieval failed; answering without it: %s", name, exc)
+            return None
+
+    tafsir_context, zakat_context, purchase_context, personal_context = await asyncio.gather(
+        best_effort("tafsir", tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)),
+        best_effort("zakat", zakat_retriever(request.prompt, request.context)),
+        best_effort(
+            "purchase",
+            purchase_retriever(request.prompt, request.transactions, request.auth_token),
+        ),
+        best_effort(
+            "personal context",
+            personal_context_retriever(request.prompt, request.user_id, request.auth_token),
+        ),
+    )
+    return tafsir_context, zakat_context, purchase_context, personal_context
 
 
 def get_safety_settings() -> list[dict[str, str]]:
@@ -757,10 +809,11 @@ async def send_message_with_retry(
             kwargs: dict[str, Any] = {"request_options": {"timeout": timeout}}
             if generation_config:
                 kwargs["generation_config"] = generation_config
-            response = await chat_session.send_message_async(
-                message,
-                **kwargs,
-            )
+            async with llm_limiter.slot():
+                response = await chat_session.send_message_async(
+                    message,
+                    **kwargs,
+                )
             return response
         except (TimeoutError, ServiceUnavailable, DeadlineExceeded) as exc:
             if hasattr(chat_session, "history") and chat_session.history is not None:
@@ -821,6 +874,18 @@ async def run_strict_corrective_loop(
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response) -> ChatResponse:
+    """Serialize one conversation while unrelated chats remain fully concurrent."""
+    chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
+    async with chat_locks.hold(chat_id):
+        return await _chat(request, http_request, fastapi_response, chat_id)
+
+
+async def _chat(
+    request: ChatRequest,
+    http_request: Request,
+    fastapi_response: Response,
+    chat_id: str,
+) -> ChatResponse:
     trace = telemetry.Trace()
     _ctx_token = telemetry.current_trace.set(trace)
     _handler_start = time.perf_counter()
@@ -837,7 +902,6 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
 
@@ -876,33 +940,24 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(request.language)
 
-        # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
+        # --- Independent retrieval fan-out (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
-            # Tafsir detection is offline (regex + the bundled surah index),
-            # so a non-tafsir prompt costs nothing.
-            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+                request,
+                prompt,
+            )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
-
-            # Zakat detection is offline (keywords plus a key-shaped match), so
-            # an ordinary prompt never touches Horizon or the gold-price API.
-            zakat_context = await zakat_retriever(request.prompt, request.context)
             zakat_info = zakat_context.info if zakat_context else None
-
-            # Purchase detection is offline (keywords). History comes from an
-            # inline summary or a best-effort JWT fetch — never other users'.
-            purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
-
-            # Per-user retrieval: only this user's most-relevant records (deny by
-            # default without user_id/auth_token; ownership re-checked post-fetch).
-            personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
         summary: ChatSummary | None = None
         if request.user_id:
-            profile = await memory_store.get_profile(request.user_id)
-            summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
+            profile, summary = await asyncio.gather(
+                memory_store.get_profile(request.user_id),
+                memory_store.get_chat_summary(f"{request.user_id}:{chat_id}"),
+            )
 
         # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
         # through the semantic response cache: the first is built from retrieved
@@ -974,11 +1029,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     system_context += FIQH_IKHTILAF_CONTEXT
                 context = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{context}User question: {safety_prompt}"
-                reply = await provider_router.generate(
-                    provider_history + [ProviderMessage("user", full_prompt)],
-                    system=system_context,
-                    config=ProviderGenerationConfig(**GENERATION_CONFIG),
-                )
+                async with llm_limiter.slot():
+                    reply = await provider_router.generate(
+                        provider_history + [ProviderMessage("user", full_prompt)],
+                        system=system_context,
+                        config=ProviderGenerationConfig(**GENERATION_CONFIG),
+                    )
                 chat_session = active_chats.setdefault(chat_id, _ProviderChatSession(provider_history))
                 chat_session.append("user", full_prompt)
                 chat_session.append("model", reply.text)
@@ -1197,38 +1253,47 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _succeeded = True
 
         # --- Persist chat history ---
-        asyncio.create_task(_persist_chat_history(chat_id, request.user_id, chat_session))
+        background_tasks.submit(
+            lambda: _persist_chat_history(chat_id, request.user_id, chat_session),
+            priority=TaskPriority.HIGH,
+            name=f"persist-chat-{chat_id}",
+        )
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
-        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
-            asyncio.create_task(
-                _extract_and_update_memory(
-                    request.user_id,
+        user_id = request.user_id
+        if user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+            background_tasks.submit(
+                lambda: _extract_and_update_memory(
+                    user_id,
                     prompt,
                     response_text,
                     chat_id,
                     summary,
                     memory_store,
-                )
+                ),
+                priority=TaskPriority.NORMAL,
+                name=f"extract-memory-{chat_id}",
             )
-            logger.info("Memory extraction scheduled for user %s", request.user_id[:8])
+            logger.info("Memory extraction scheduled for user %s", user_id[:8])
 
         # --- Summary eviction ---
         # After enough turns accumulate, summarize old history and persist.
-        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
+        if user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
             chat_session = active_chats.get(chat_id)
             if chat_session and hasattr(chat_session, "history") and chat_session.history:
                 if len(chat_session.history) >= MAX_CHAT_HISTORY_TURNS:
-                    asyncio.create_task(
-                        _summarize_history(
-                            f"{request.user_id}:{chat_id}",
+                    background_tasks.submit(
+                        lambda: _summarize_history(
+                            f"{user_id}:{chat_id}",
                             chat_session.history,
                             summary,
                             memory_store,
-                        )
+                        ),
+                        priority=TaskPriority.LOW,
+                        name=f"summarize-chat-{chat_id}",
                     )
-                    logger.info("History summarization triggered for %s", request.user_id[:8])
+                    logger.info("History summarization triggered for %s", user_id[:8])
 
         return response_obj
 
@@ -1288,7 +1353,7 @@ async def _extract_and_update_memory(
     existing_summary: ChatSummary | None,
     store: Any,
 ) -> None:
-    """Fire-and-forget memory extraction. Runs via asyncio.create_task."""
+    """Run memory extraction submitted to the bounded background scheduler."""
     try:
         updates = await extract_updates(prompt, response)
         if updates.get("none"):
@@ -1376,11 +1441,13 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(request.language)
 
-        # --- Tafsir and zakat retrieval ---
+        # --- Independent retrieval fan-out ---
         with trace.span("retrieval"):
-            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+                request,
+                prompt,
+            )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
-            zakat_context = await zakat_retriever(request.prompt, request.context)
             zakat_info = zakat_context.info if zakat_context else None
 
         combined_text: str = ""  # accumulated full response for post-processing
@@ -1388,13 +1455,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
         safety_enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
 
-        # --- Purchase history ---
-        purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
-
-        # --- Per-user personal context (deny by default without user_id/token) ---
-        personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
-
-        async def event_generator() -> AsyncGenerator[str, None]:
+        async def _locked_event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
             nonlocal combined_text, chat_session
 
@@ -1475,44 +1536,45 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                     logger.info("streaming response started", extra={"chat_id": chat_id})
                     _t0 = time.perf_counter()
 
-                    stream_response = await active_chats[chat_id].send_message_async(
-                        full_prompt,
-                        generation_config={
-                            "temperature": settings.temperature,
-                            "top_p": settings.top_p,
-                            "top_k": settings.top_k,
-                            "max_output_tokens": settings.max_output_tokens,
-                        },
-                        stream=True,
-                    )
-
-                    # The citation block must never flash in a delta. The filter
-                    # withholds any tail that could still turn out to be the
-                    # start marker, including one split across two chunks.
-                    citation_filter = CitationStreamFilter()
-                    async for chunk in stream_response:
-                        if chunk.text:
-                            visible = citation_filter.feed(chunk.text)
-                            if visible:
-                                combined_text += visible
-                                delta = json.dumps(
-                                    {
-                                        "type": "content",
-                                        "delta": visible,
-                                    }
-                                )
-                                yield f"data: {delta}\n\n"
-
-                    trailing, citation_extraction = citation_filter.finish()
-                    if trailing:
-                        combined_text += trailing
-                        delta = json.dumps(
-                            {
-                                "type": "content",
-                                "delta": trailing,
-                            }
+                    async with llm_limiter.slot():
+                        stream_response = await active_chats[chat_id].send_message_async(
+                            full_prompt,
+                            generation_config={
+                                "temperature": settings.temperature,
+                                "top_p": settings.top_p,
+                                "top_k": settings.top_k,
+                                "max_output_tokens": settings.max_output_tokens,
+                            },
+                            stream=True,
                         )
-                        yield f"data: {delta}\n\n"
+
+                        # The citation block must never flash in a delta. The filter
+                        # withholds any tail that could still turn out to be the
+                        # start marker, including one split across two chunks.
+                        citation_filter = CitationStreamFilter()
+                        async for chunk in stream_response:
+                            if chunk.text:
+                                visible = citation_filter.feed(chunk.text)
+                                if visible:
+                                    combined_text += visible
+                                    delta = json.dumps(
+                                        {
+                                            "type": "content",
+                                            "delta": visible,
+                                        }
+                                    )
+                                    yield f"data: {delta}\n\n"
+
+                        trailing, citation_extraction = citation_filter.finish()
+                        if trailing:
+                            combined_text += trailing
+                            delta = json.dumps(
+                                {
+                                    "type": "content",
+                                    "delta": trailing,
+                                }
+                            )
+                            yield f"data: {delta}\n\n"
 
                     telemetry.record_model_call(
                         stream_response,
@@ -1663,6 +1725,11 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                     # Client may have already disconnected; nothing to do.
                     pass
 
+        async def event_generator() -> AsyncGenerator[str, None]:
+            async with chat_locks.hold(chat_id):
+                async for event in _locked_event_generator():
+                    yield event
+
         return StreamingResponse(
             event_generator(),
             media_type="text/event-stream",
@@ -1774,20 +1841,21 @@ async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
 @app.delete("/chat/{chat_id}")
 async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
     chat_id_str = str(chat_id)
-    try:
-        existed = chat_id_str in active_chats
-        active_chats.pop(chat_id_str, None)
-        # Drop this session's feedback bookkeeping too, so the message-id list
-        # and answer snapshots do not outlive the conversation they describe.
-        for message_id in chat_message_ids.pop(chat_id_str, []):
-            answer_snapshots.pop((chat_id_str, message_id), None)
-        # Remove from persistent store
-        persisted = await session_store.delete_session(chat_id_str)
-        if user_id:
-            await session_store.remove_user_chat(user_id, chat_id_str)
-    except Exception as e:
-        logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+    async with chat_locks.hold(chat_id_str):
+        try:
+            existed = chat_id_str in active_chats
+            active_chats.pop(chat_id_str, None)
+            # Drop this session's feedback bookkeeping too, so the message-id list
+            # and answer snapshots do not outlive the conversation they describe.
+            for message_id in chat_message_ids.pop(chat_id_str, []):
+                answer_snapshots.pop((chat_id_str, message_id), None)
+            # Remove from persistent store
+            persisted = await session_store.delete_session(chat_id_str)
+            if user_id:
+                await session_store.remove_user_chat(user_id, chat_id_str)
+        except Exception as e:
+            logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     if not (existed or persisted):
         raise HTTPException(status_code=404, detail="Chat session not found")
@@ -2104,6 +2172,11 @@ async def prometheus_metrics(
     if format == "json" or "application/json" in accept_header:
         snapshot = telemetry.registry.snapshot()
         snapshot["semantic_cache"] = semantic_cache.get_stats()
+        snapshot["async_runtime"] = {
+            "background_tasks": background_tasks.stats(),
+            "llm": llm_limiter.stats(),
+            "http_pool": http_client_pool.stats(),
+        }
         return JSONResponse(content=snapshot)
 
     return Response(
@@ -2118,6 +2191,11 @@ async def metrics_json(request: Request) -> dict[str, Any]:
     metrics.verify_metrics_access(request)
     snapshot = telemetry.registry.snapshot()
     snapshot["semantic_cache"] = semantic_cache.get_stats()
+    snapshot["async_runtime"] = {
+        "background_tasks": background_tasks.stats(),
+        "llm": llm_limiter.stats(),
+        "http_pool": http_client_pool.stats(),
+    }
     return snapshot
 
 

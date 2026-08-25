@@ -201,6 +201,13 @@ services:
 | `TOP_K` | Top-K sampling value | 40 |
 | `MAX_OUTPUT_TOKENS` | Maximum response tokens | 2048 |
 | `PORT` | Server port used by Uvicorn | 8000 |
+| `LLM_MAX_CONCURRENCY` | Maximum simultaneous model generations per process; excess requests wait without blocking the event loop | `100` |
+| `ASYNC_BACKGROUND_WORKERS` | Workers for prioritized persistence, memory extraction, and summarization tasks | `4` |
+| `ASYNC_BACKGROUND_QUEUE_SIZE` | Maximum queued response-side tasks before new work is rejected and logged | `1000` |
+| `ASYNC_SHUTDOWN_GRACE_SECONDS` | Time allowed for background work to drain before cancellation during shutdown | `10` |
+| `HTTP_MAX_CONNECTIONS` | Maximum outbound HTTP connections retained by the shared pool | `200` |
+| `HTTP_MAX_KEEPALIVE_CONNECTIONS` | Maximum idle keep-alive connections retained by the shared pool | `50` |
+| `HTTP_KEEPALIVE_EXPIRY_SECONDS` | Idle lifetime for pooled outbound HTTP connections | `30` |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |

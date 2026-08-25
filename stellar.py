@@ -25,6 +25,7 @@ from stellar_sdk import Server
 from stellar_sdk.exceptions import NotFoundError
 from stellar_sdk.strkey import StrKey
 
+from async_runtime import http_client_pool
 from nisab import NisabQuote, get_nisab, override_quote
 
 logger = logging.getLogger(__name__)
@@ -645,15 +646,10 @@ async def fetch_user_transactions(
     """
     url = f"{DNB_BACKEND_URL}/api/stellar/payment/transactions"
     headers = {"Authorization": f"Bearer {auth_token.strip()}"}
-    owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=PURCHASE_FETCH_TIMEOUT)
-    try:
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
-        payload = response.json()
-    finally:
-        if owns_client:
-            await client.aclose()
+    client = client or http_client_pool.get()
+    response = await client.get(url, headers=headers, timeout=PURCHASE_FETCH_TIMEOUT)
+    response.raise_for_status()
+    payload = response.json()
 
     if isinstance(payload, list):
         raw_items = payload
@@ -736,7 +732,7 @@ async def resolve_nisab(nisab_usd_override: float | None) -> NisabQuote:
         return override_quote(Decimal(str(nisab_usd_override)))
     if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
         return override_quote(Decimal(os.getenv("MOCK_NISAB_USD", "50")))
-    return await get_nisab()
+    return await get_nisab(client=http_client_pool.get())
 
 
 async def zakat_for_account(public_key: str, nisab_usd_override: float | None = None) -> ZakatResponse:
