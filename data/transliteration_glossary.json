@@ -1,0 +1,810 @@
+{
+  "schema_version": "1.0",
+  "source": "DeenBridge curated Arabic transliteration glossary (#232). Covers ALA-LC, DIN and Hunterian-style romanizations people actually type, plus a few common English equivalents for high-frequency terms.",
+  "matching_hints": {
+    "case": "keys are matched case-insensitively",
+    "apostrophes": "straight, curly and ʼayn/hamza apostrophes are treated as equivalent and optional",
+    "separators": "spaces and hyphens are interchangeable in multi-word variants",
+    "diacritics": "Latin diacritics are folded before matching"
+  },
+  "terms": [
+    {
+      "id": "salah",
+      "ar": "صلاة",
+      "en": "ritual prayer",
+      "category": "worship",
+      "variants": ["salah", "salat", "salaat", "salaah", "salaath", "salât", "assalah", "as-salah", "alsalah", "as-salaat", "namaz"]
+    },
+    {
+      "id": "rakat",
+      "ar": "ركعة",
+      "en": "unit of prayer",
+      "category": "worship",
+      "variants": ["rakah", "rakaat", "rakat", "rakats", "rakahs", "rakaah", "rakaa", "rak'ah", "rekât"]
+    },
+    {
+      "id": "sujud",
+      "ar": "سجود",
+      "en": "prostration",
+      "category": "worship",
+      "variants": ["sujud", "sujood", "sajdah", "sajda", "sijda", "sijdah", "sajde"]
+    },
+    {
+      "id": "ruku",
+      "ar": "ركوع",
+      "en": "bowing in prayer",
+      "category": "worship",
+      "variants": ["ruku", "rukoo", "rukuh", "ruku"]
+    },
+    {
+      "id": "jamaah",
+      "ar": "جماعة",
+      "en": "congregation",
+      "category": "worship",
+      "variants": ["jamaat", "jamaah", "jama'ah", "jammat", "cemaat", "jamat"]
+    },
+    {
+      "id": "wudu",
+      "ar": "وضوء",
+      "en": "ablution",
+      "category": "purification",
+      "variants": ["wudu", "wudhu", "wudoo", "wodhu", "wuzu", "wuzoo", "abdast", "abdest"]
+    },
+    {
+      "id": "ghusl",
+      "ar": "غسل",
+      "en": "full ritual bath",
+      "category": "purification",
+      "variants": ["ghusl", "ghusul", "gusal", "ghosl"]
+    },
+    {
+      "id": "tayammum",
+      "ar": "تيمم",
+      "en": "dry ablution",
+      "category": "purification",
+      "variants": ["tayammum", "tayamum", "taiyammum", "teyemmüm"]
+    },
+    {
+      "id": "janabah",
+      "ar": "جنابة",
+      "en": "major ritual impurity",
+      "category": "purification",
+      "variants": ["janabah", "janabat", "janaba", "junub"]
+    },
+    {
+      "id": "taharah",
+      "ar": "طهارة",
+      "en": "ritual purity",
+      "category": "purification",
+      "variants": ["taharah", "taharat", "tahara", "tahaarah"]
+    },
+    {
+      "id": "najasah",
+      "ar": "نجاسة",
+      "en": "ritual impurity",
+      "category": "purification",
+      "variants": ["najasah", "najasa", "najis", "najas"]
+    },
+    {
+      "id": "sawm",
+      "ar": "صوم",
+      "en": "fasting",
+      "category": "worship",
+      "variants": ["sawm", "siyam", "siyaam", "saum", "sowm", "roza", "rozah"]
+    },
+    {
+      "id": "ramadan",
+      "ar": "رمضان",
+      "en": "month of fasting",
+      "category": "time",
+      "variants": ["ramadan", "ramadhan", "ramzan", "ramzaan", "ramazan"]
+    },
+    {
+      "id": "iftar",
+      "ar": "إفطار",
+      "en": "breaking of the fast",
+      "category": "time",
+      "variants": ["iftar", "iftaar", "eftar", "futoor", "ftour"]
+    },
+    {
+      "id": "suhoor",
+      "ar": "سحور",
+      "en": "pre-dawn meal",
+      "category": "time",
+      "variants": ["suhoor", "suhur", "sahoor", "sehri", "sehari"]
+    },
+    {
+      "id": "taraweeh",
+      "ar": "تراويح",
+      "en": "Ramadan night prayers",
+      "category": "worship",
+      "variants": ["taraweeh", "tarawih", "taraveeh", "taraweeh", "teravih"]
+    },
+    {
+      "id": "tahajjud",
+      "ar": "تهجد",
+      "en": "night vigil prayer",
+      "category": "worship",
+      "variants": ["tahajjud", "tahajud", "tahajjad", "teheccud"]
+    },
+    {
+      "id": "laylat_al_qadr",
+      "ar": "ليلة القدر",
+      "en": "Night of Decree",
+      "category": "time",
+      "variants": ["laylat al-qadr", "laylatul qadr", "lailatul qadr", "lailat al-qadr", "shab-e-qadr", "shabe qadr"]
+    },
+    {
+      "id": "eid_al_fitr",
+      "ar": "عيد الفطر",
+      "en": "festival after Ramadan",
+      "category": "time",
+      "variants": ["eid al-fitr", "eid ul fitr", "eidul fitr", "idul fitr", "id-ul-fitr", "eid fitr"]
+    },
+    {
+      "id": "eid_al_adha",
+      "ar": "عيد الأضحى",
+      "en": "festival of sacrifice",
+      "category": "time",
+      "variants": ["eid al-adha", "eid ul adha", "id ul adha", "eidul azha", "bakra eid", "bakrid"]
+    },
+    {
+      "id": "hajj",
+      "ar": "حج",
+      "en": "pilgrimage to Makkah",
+      "category": "worship",
+      "variants": ["hajj", "haj", "haajj", "al-hajj", "alhajj", "el-hajj", "hacc"]
+    },
+    {
+      "id": "umrah",
+      "ar": "عمرة",
+      "en": "lesser pilgrimage",
+      "category": "worship",
+      "variants": ["umrah", "umra", "umraa", "omra", "omrah", "umre"]
+    },
+    {
+      "id": "ihram",
+      "ar": "إحرام",
+      "en": "pilgrimage consecration state",
+      "category": "worship",
+      "variants": ["ihram", "ihraam", "ehram"]
+    },
+    {
+      "id": "tawaf",
+      "ar": "طواف",
+      "en": "circumambulation of the Kaaba",
+      "category": "worship",
+      "variants": ["tawaf", "tawaaf", "tavaf"]
+    },
+    {
+      "id": "kaaba",
+      "ar": "الكعبة",
+      "en": "the Sacred House in Makkah",
+      "category": "places",
+      "variants": ["kaaba", "kabah", "ka'bah", "kaba", "kaabah", "khana kaaba"]
+    },
+    {
+      "id": "masjid",
+      "ar": "مسجد",
+      "en": "mosque",
+      "category": "places",
+      "variants": ["masjid", "musjid", "mescid", "masjids", "mosque"]
+    },
+    {
+      "id": "madrasa",
+      "ar": "مدرسة",
+      "en": "Islamic school",
+      "category": "places",
+      "variants": ["madrasa", "madrasah", "madrassa", "madarsa", "medrese"]
+    },
+    {
+      "id": "qibla",
+      "ar": "قبلة",
+      "en": "direction of prayer",
+      "category": "worship",
+      "variants": ["qibla", "qiblah", "kibla", "kiblah"]
+    },
+    {
+      "id": "adhan",
+      "ar": "أذان",
+      "en": "call to prayer",
+      "category": "worship",
+      "variants": ["adhan", "adhaan", "azan", "azaan", "athan", "ezan"]
+    },
+    {
+      "id": "iqamah",
+      "ar": "إقامة",
+      "en": "second call to prayer",
+      "category": "worship",
+      "variants": ["iqamah", "iqama", "iqaamah", "ikamet"]
+    },
+    {
+      "id": "jumuah",
+      "ar": "الجمعة",
+      "en": "Friday congregational prayer",
+      "category": "worship",
+      "variants": ["jumuah", "jumu'ah", "jummah", "jumma", "juma", "jumu'ah prayer"]
+    },
+    {
+      "id": "khutbah",
+      "ar": "خطبة",
+      "en": "sermon",
+      "category": "worship",
+      "variants": ["khutbah", "khutba", "khutbas", "khutbahs"]
+    },
+    {
+      "id": "fajr",
+      "ar": "الفجر",
+      "en": "dawn prayer",
+      "category": "worship",
+      "variants": ["fajr", "fajar", "fajer", "fajir"]
+    },
+    {
+      "id": "dhuhr",
+      "ar": "الظهر",
+      "en": "midday prayer",
+      "category": "worship",
+      "variants": ["dhuhr", "zuhr", "zohr", "thuhr", "zuhar"]
+    },
+    {
+      "id": "asr",
+      "ar": "العصر",
+      "en": "afternoon prayer",
+      "category": "worship",
+      "variants": ["asr", "asar", "asri"]
+    },
+    {
+      "id": "maghrib",
+      "ar": "المغرب",
+      "en": "sunset prayer",
+      "category": "worship",
+      "variants": ["maghrib", "magrib", "magreb"]
+    },
+    {
+      "id": "isha",
+      "ar": "العشاء",
+      "en": "night prayer",
+      "category": "worship",
+      "variants": ["isha", "ishaa", "isha'a", "esha", "isa"]
+    },
+    {
+      "id": "janazah",
+      "ar": "جنازة",
+      "en": "funeral prayer",
+      "category": "worship",
+      "variants": ["janazah", "janaza", "jenazah", "cenaze", "janazah prayer"]
+    },
+    {
+      "id": "shahada",
+      "ar": "شهادة",
+      "en": "testimony of faith",
+      "category": "worship",
+      "variants": ["shahada", "shahadah", "shahaadah", "sehadet", "kalima", "kalimah"]
+    },
+    {
+      "id": "duaa",
+      "ar": "دعاء",
+      "en": "supplication",
+      "category": "spirituality",
+      "variants": ["dua", "du'a", "duaa", "du'aa", "doa", "dooa", "duwa", "supplication"]
+    },
+    {
+      "id": "dhikr",
+      "ar": "ذكر",
+      "en": "remembrance of Allah",
+      "category": "spirituality",
+      "variants": ["dhikr", "zikr", "zikir", "thikr", "zhikr"]
+    },
+    {
+      "id": "tasbih",
+      "ar": "تسبيح",
+      "en": "glorifying Allah; prayer beads",
+      "category": "spirituality",
+      "variants": ["tasbih", "tasbeeh", "tasbihat", "tespih", "subha"]
+    },
+    {
+      "id": "inshallah",
+      "ar": "إن شاء الله",
+      "en": "God willing",
+      "category": "phrases",
+      "variants": ["inshallah", "insha'allah", "insha allah", "insyaallah", "inchallah"]
+    },
+    {
+      "id": "mashallah",
+      "ar": "ما شاء الله",
+      "en": "what Allah has willed",
+      "category": "phrases",
+      "variants": ["mashallah", "masha'allah", "ma sha allah", "maşallah"]
+    },
+    {
+      "id": "alhamdulillah",
+      "ar": "الحمد لله",
+      "en": "all praise is for Allah",
+      "category": "phrases",
+      "variants": ["alhamdulillah", "hamdulillah", "alhamdolillah", "alhamdu lillah", "elhamdulillah"]
+    },
+    {
+      "id": "bismillah",
+      "ar": "بسم الله",
+      "en": "in the name of Allah",
+      "category": "phrases",
+      "variants": ["bismillah", "besmillah", "bismilla", "bismillahirrahmanirrahim"]
+    },
+    {
+      "id": "subhanallah",
+      "ar": "سبحان الله",
+      "en": "glory be to Allah",
+      "category": "phrases",
+      "variants": ["subhanallah", "subhan allah", "sobhanallah", "subhanellah"]
+    },
+    {
+      "id": "astaghfirullah",
+      "ar": "أستغفر الله",
+      "en": "I seek Allah's forgiveness",
+      "category": "phrases",
+      "variants": ["astaghfirullah", "astagfirullah", "estagfirullah", "astaghferullah"]
+    },
+    {
+      "id": "allahu_akbar",
+      "ar": "الله أكبر",
+      "en": "Allah is the greatest",
+      "category": "phrases",
+      "variants": ["allahu akbar", "allahuakbar", "allah ho akbar", "allahuekber"]
+    },
+    {
+      "id": "tawhid",
+      "ar": "توحيد",
+      "en": "oneness of Allah",
+      "category": "aqidah",
+      "variants": ["tawhid", "tawheed", "tauheed", "touhid", "tevhid", "tewhid"]
+    },
+    {
+      "id": "shirk",
+      "ar": "شرك",
+      "en": "associating partners with Allah",
+      "category": "aqidah",
+      "variants": ["shirk", "shirk", "shirik"]
+    },
+    {
+      "id": "kufr",
+      "ar": "كفر",
+      "en": "disbelief",
+      "category": "aqidah",
+      "variants": ["kufr", "kofr", "kufur", "kuffar"]
+    },
+    {
+      "id": "iman",
+      "ar": "إيمان",
+      "en": "faith",
+      "category": "aqidah",
+      "variants": ["iman", "imaan", "eeman", "imân"]
+    },
+    {
+      "id": "taqwa",
+      "ar": "تقوى",
+      "en": "God-consciousness",
+      "category": "aqidah",
+      "variants": ["taqwa", "takva", "taqwah", "takwa"]
+    },
+    {
+      "id": "bidah",
+      "ar": "بدعة",
+      "en": "religious innovation",
+      "category": "aqidah",
+      "variants": ["bidah", "bid'ah", "bida", "bid'at", "bidaah"]
+    },
+    {
+      "id": "fitnah",
+      "ar": "فتنة",
+      "en": "trial; discord",
+      "category": "aqidah",
+      "variants": ["fitnah", "fitna", "fitnaa"]
+    },
+    {
+      "id": "dunya",
+      "ar": "دنيا",
+      "en": "worldly life",
+      "category": "aqidah",
+      "variants": ["dunya", "duniya", "dunia", "dunya", "dünya"]
+    },
+    {
+      "id": "akhirah",
+      "ar": "الآخرة",
+      "en": "the hereafter",
+      "category": "aqidah",
+      "variants": ["akhirah", "akhirat", "aakhirah", "ahiret", "akherat"]
+    },
+    {
+      "id": "jannah",
+      "ar": "الجنة",
+      "en": "paradise",
+      "category": "eschatology",
+      "variants": ["jannah", "jannat", "janna", "cennet", "paradise"]
+    },
+    {
+      "id": "jahannam",
+      "ar": "جهنم",
+      "en": "hellfire",
+      "category": "eschatology",
+      "variants": ["jahannam", "jahanam", "jahannum", "cehennem", "hell"]
+    },
+    {
+      "id": "quran",
+      "ar": "قرآن",
+      "en": "the Qur'an",
+      "category": "quran",
+      "variants": ["quran", "qur'an", "koran", "quraan", "kuran", "khoran", "qurani"]
+    },
+    {
+      "id": "surah",
+      "ar": "سورة",
+      "en": "chapter of the Qur'an",
+      "category": "quran",
+      "variants": ["surah", "surat", "sura", "soorah", "soora", "chapters"]
+    },
+    {
+      "id": "ayah",
+      "ar": "آية",
+      "en": "verse of the Qur'an",
+      "category": "quran",
+      "variants": ["ayah", "aya", "aayah", "ayat", "ayaat", "verse", "verses"]
+    },
+    {
+      "id": "juz",
+      "ar": "جزء",
+      "en": "one of thirty Qur'an sections",
+      "category": "quran",
+      "variants": ["juz", "juze", "juzz", "para", "sipara"]
+    },
+    {
+      "id": "tafsir",
+      "ar": "تفسير",
+      "en": "Qur'anic exegesis",
+      "category": "quran",
+      "variants": ["tafsir", "tafseer", "tefsir", "tafsirs"]
+    },
+    {
+      "id": "tajwid",
+      "ar": "تجويد",
+      "en": "rules of Qur'anic recitation",
+      "category": "quran",
+      "variants": ["tajwid", "tajweed", "tajvid", "tecvid"]
+    },
+    {
+      "id": "hafiz",
+      "ar": "حافظ",
+      "en": "memorizer of the Qur'an",
+      "category": "people",
+      "variants": ["hafiz", "hafeez", "hafidh", "hafiza", "hâfız"]
+    },
+    {
+      "id": "al_fatihah",
+      "ar": "سورة الفاتحة",
+      "en": "Surah Al-Fatihah (The Opening)",
+      "category": "quran",
+      "variants": ["al-fatiha", "al-fatihah", "fatiha", "fatihah", "fathea", "fateha", "surah al-fatiha", "surah fatiha", "surat al-fatihah", "suratul fatiha", "الفاتحة"]
+    },
+    {
+      "id": "al_baqarah",
+      "ar": "سورة البقرة",
+      "en": "Surah Al-Baqarah (The Cow)",
+      "category": "quran",
+      "variants": ["al-baqarah", "al-baqara", "baqarah", "baqara", "bakara", "surah al-baqarah", "surah baqarah", "البقرة"]
+    },
+    {
+      "id": "aal_imran",
+      "ar": "سورة آل عمران",
+      "en": "Surah Aal Imran (Family of Imran)",
+      "category": "quran",
+      "variants": ["aal imran", "ali imran", "ale imran", "al-imran", "aali imran", "surah aal imran", "آل عمران"]
+    },
+    {
+      "id": "an_nisa",
+      "ar": "سورة النساء",
+      "en": "Surah An-Nisa (The Women)",
+      "category": "quran",
+      "variants": ["an-nisa", "an-nisaa", "nisa", "nisaa", "annisa", "surah an-nisa", "النساء"]
+    },
+    {
+      "id": "al_kahf",
+      "ar": "سورة الكهف",
+      "en": "Surah Al-Kahf (The Cave)",
+      "category": "quran",
+      "variants": ["al-kahf", "kahf", "alkahf", "surah al-kahf", "الكهف"]
+    },
+    {
+      "id": "yasin",
+      "ar": "سورة يس",
+      "en": "Surah Ya-Sin",
+      "category": "quran",
+      "variants": ["yasin", "yaseen", "ya-seen", "ya sin", "ya-sin", "surah yasin", "يس"]
+    },
+    {
+      "id": "ar_rahman",
+      "ar": "سورة الرحمن",
+      "en": "Surah Ar-Rahman (The Most Merciful)",
+      "category": "quran",
+      "variants": ["ar-rahman", "arrahman", "rahman", "surah ar-rahman", "الرحمن"]
+    },
+    {
+      "id": "al_waqiah",
+      "ar": "سورة الواقعة",
+      "en": "Surah Al-Waqi'ah (The Inevitable Event)",
+      "category": "quran",
+      "variants": ["al-waqiah", "waqiah", "waqi'ah", "surah al-waqiah", "الواقعة"]
+    },
+    {
+      "id": "al_mulk",
+      "ar": "سورة الملك",
+      "en": "Surah Al-Mulk (The Sovereignty)",
+      "category": "quran",
+      "variants": ["al-mulk", "mulk", "tabarak", "surah al-mulk", "الملك"]
+    },
+    {
+      "id": "al_ikhlas",
+      "ar": "سورة الإخلاص",
+      "en": "Surah Al-Ikhlas (Sincerity)",
+      "category": "quran",
+      "variants": ["al-ikhlas", "ikhlas", "ikhlaas", "surah al-ikhlas", "الإخلاص"]
+    },
+    {
+      "id": "al_falaq",
+      "ar": "سورة الفلق",
+      "en": "Surah Al-Falaq (The Daybreak)",
+      "category": "quran",
+      "variants": ["al-falaq", "falaq", "surah al-falaq", "الفلق"]
+    },
+    {
+      "id": "an_nas",
+      "ar": "سورة الناس",
+      "en": "Surah An-Nas (Mankind)",
+      "category": "quran",
+      "variants": ["an-nas", "annas", "nas", "naas", "surah an-nas", "الناس"]
+    },
+    {
+      "id": "ayat_al_kursi",
+      "ar": "آية الكرسي",
+      "en": "Ayat al-Kursi (the Throne Verse)",
+      "category": "quran",
+      "variants": ["ayat al-kursi", "ayatul kursi", "ayat kursi", "aayatul kursi", "throne verse", "verse of the throne", "آية الكرسي"]
+    },
+    {
+      "id": "hadith",
+      "ar": "حديث",
+      "en": "prophetic tradition",
+      "category": "hadith",
+      "variants": ["hadith", "hadees", "hadeeth", "ahadith", "ahaadeeth", "hadis", "hadiths"]
+    },
+    {
+      "id": "sunnah",
+      "ar": "سنة",
+      "en": "the Prophet's way",
+      "category": "hadith",
+      "variants": ["sunnah", "sunna", "sunnat", "sunnahs"]
+    },
+    {
+      "id": "sirah",
+      "ar": "سيرة",
+      "en": "prophetic biography",
+      "category": "hadith",
+      "variants": ["sirah", "seerah", "sira", "serah"]
+    },
+    {
+      "id": "sahaba",
+      "ar": "الصحابة",
+      "en": "companions of the Prophet",
+      "category": "people",
+      "variants": ["sahaba", "sahabah", "sahabi", "sahabe", "ashab"]
+    },
+    {
+      "id": "fiqh",
+      "ar": "فقه",
+      "en": "Islamic jurisprudence",
+      "category": "fiqh",
+      "variants": ["fiqh", "fikih", "fikh", "feqh", "fikhu"]
+    },
+    {
+      "id": "shariah",
+      "ar": "شريعة",
+      "en": "Islamic law",
+      "category": "fiqh",
+      "variants": ["sharia", "shariah", "shari'ah", "shariat", "syariah", "seriat"]
+    },
+    {
+      "id": "madhhab",
+      "ar": "مذهب",
+      "en": "school of jurisprudence",
+      "category": "fiqh",
+      "variants": ["madhhab", "madhab", "mathhab", "mazhab", "mezhep"]
+    },
+    {
+      "id": "fatwa",
+      "ar": "فتوى",
+      "en": "legal verdict",
+      "category": "fiqh",
+      "variants": ["fatwa", "fatwah", "fatwaa", "fetva", "fatwas"]
+    },
+    {
+      "id": "halal",
+      "ar": "حلال",
+      "en": "lawful",
+      "category": "fiqh",
+      "variants": ["halal", "halaal", "helal"]
+    },
+    {
+      "id": "haram",
+      "ar": "حرام",
+      "en": "unlawful",
+      "category": "fiqh",
+      "variants": ["haram", "haraam"]
+    },
+    {
+      "id": "makruh",
+      "ar": "مكروه",
+      "en": "disliked act",
+      "category": "fiqh",
+      "variants": ["makruh", "makrooh", "mekruh"]
+    },
+    {
+      "id": "mubah",
+      "ar": "مباح",
+      "en": "permissible act",
+      "category": "fiqh",
+      "variants": ["mubah", "mobah", "mubaah"]
+    },
+    {
+      "id": "wajib",
+      "ar": "واجب",
+      "en": "obligatory act",
+      "category": "fiqh",
+      "variants": ["wajib", "waajib", "vacip", "wajibaat"]
+    },
+    {
+      "id": "fard",
+      "ar": "فرض",
+      "en": "obligatory duty",
+      "category": "fiqh",
+      "variants": ["fard", "fardh", "farz", "fardain"]
+    },
+    {
+      "id": "riba",
+      "ar": "ربا",
+      "en": "usury; interest",
+      "category": "finance",
+      "variants": ["riba", "ribaa", "reba", "ribba", "usury", "interest"]
+    },
+    {
+      "id": "zakat",
+      "ar": "زكاة",
+      "en": "obligatory alms",
+      "category": "finance",
+      "variants": ["zakat", "zakah", "zakaat", "zakaah", "zakath", "zekat", "az-zakat", "azzakat", "alms"]
+    },
+    {
+      "id": "sadaqah",
+      "ar": "صدقة",
+      "en": "voluntary charity",
+      "category": "finance",
+      "variants": ["sadaqah", "sadaqa", "sadaka", "sadqa", "sedekah", "khairat"]
+    },
+    {
+      "id": "nisab",
+      "ar": "نصاب",
+      "en": "zakat threshold",
+      "category": "finance",
+      "variants": ["nisab", "nisaab", "nisap"]
+    },
+    {
+      "id": "nikah",
+      "ar": "نكاح",
+      "en": "marriage contract",
+      "category": "family",
+      "variants": ["nikah", "nikaah", "nekah", "nikha", "nikkah", "marriage"]
+    },
+    {
+      "id": "talaq",
+      "ar": "طلاق",
+      "en": "divorce",
+      "category": "family",
+      "variants": ["talaq", "talaaq", "talak", "divorce"]
+    },
+    {
+      "id": "khulah",
+      "ar": "خلع",
+      "en": "wife-initiated divorce",
+      "category": "family",
+      "variants": ["khula", "khulah", "khulla", "khul"]
+    },
+    {
+      "id": "iddah",
+      "ar": "عدة",
+      "en": "waiting period after divorce",
+      "category": "family",
+      "variants": ["iddah", "iddat", "idda", "iddath"]
+    },
+    {
+      "id": "mahr",
+      "ar": "مهر",
+      "en": "dower",
+      "category": "family",
+      "variants": ["mahr", "mehr", "mehar", "meher", "mohor"]
+    },
+    {
+      "id": "hijab",
+      "ar": "حجاب",
+      "en": "head covering",
+      "category": "dress",
+      "variants": ["hijab", "hijaab", "hejab", "veil"]
+    },
+    {
+      "id": "niqab",
+      "ar": "نقاب",
+      "en": "face veil",
+      "category": "dress",
+      "variants": ["niqab", "niqaab", "nikab", "purdah"]
+    },
+    {
+      "id": "allah",
+      "ar": "الله",
+      "en": "Allah",
+      "category": "core",
+      "variants": ["allah", "allahu", "allah ta'ala"]
+    },
+    {
+      "id": "imam",
+      "ar": "إمام",
+      "en": "prayer leader",
+      "category": "people",
+      "variants": ["imam", "imaam", "emam", "immam"]
+    },
+    {
+      "id": "sheikh",
+      "ar": "شيخ",
+      "en": "scholar; elder",
+      "category": "people",
+      "variants": ["sheikh", "shaikh", "shaykh", "sheik", "sheykh", "şeyh"]
+    },
+    {
+      "id": "mufti",
+      "ar": "مفتي",
+      "en": "issuer of fatwas",
+      "category": "people",
+      "variants": ["mufti", "muftis"]
+    },
+    {
+      "id": "ustadh",
+      "ar": "أستاذ",
+      "en": "teacher",
+      "category": "people",
+      "variants": ["ustadh", "ustaadh", "ustaz", "ustad", "hodja", "hoca"]
+    },
+    {
+      "id": "khalifah",
+      "ar": "خليفة",
+      "en": "caliph",
+      "category": "people",
+      "variants": ["khalifa", "khalifah", "caliph", "khilafah", "caliphate"]
+    },
+    {
+      "id": "rasul",
+      "ar": "رسول",
+      "en": "messenger",
+      "category": "people",
+      "variants": ["rasul", "rasool", "resul"]
+    },
+    {
+      "id": "nabi",
+      "ar": "نبي",
+      "en": "prophet",
+      "category": "people",
+      "variants": ["nabi", "nabiyy", "nebi", "anbia"]
+    },
+    {
+      "id": "jihad",
+      "ar": "جهاد",
+      "en": "striving in God's cause",
+      "category": "aqidah",
+      "variants": ["jihad", "jihaad", "jehad", "cihad"]
+    }
+  ]
+}

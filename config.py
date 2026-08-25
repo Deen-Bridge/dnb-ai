@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    gemini_api_key: str = Field(default="test-key")
+    gemini_api_key: str = ""
 
     model_name: str = "gemini-1.5-flash"
 
@@ -24,6 +24,23 @@ class Settings(BaseSettings):
     max_output_tokens: int = Field(default=2048, ge=1)
 
     gemini_timeout: int = Field(default=30, ge=1)
+
+    # Calligraphy OCR (#234)
+    calligraphy_provider: str = "gemini"
+    calligraphy_max_image_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    calligraphy_min_confidence: float = Field(default=0.35, ge=0, le=1)
+    manuscripts_provider: str = Field(default="gemini")
+    manuscripts_max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    manuscripts_min_confidence: float = Field(default=0.35, ge=0.0, le=1.0)
+
+    # --- Hybrid retrieval (#226) ---
+    hybrid_enabled: bool = True
+    hybrid_rrf_k: int = Field(default=60, ge=1)
+    hybrid_semantic_weight: float = Field(default=0.5, ge=0, le=1)
+    hybrid_keyword_weight: float = Field(default=0.5, ge=0, le=1)
+    hybrid_top_k: int = Field(default=5, ge=1, le=50)
+    hybrid_enable_semantic_channel: bool = True
+    hybrid_enable_keyword_channel: bool = True
 
     cors_origins: list[str] = Field(
         default_factory=lambda: [
