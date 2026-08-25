@@ -51,6 +51,9 @@ jobs:
       - name: Run hadith grading tests
         run: pytest -q tests/test_hadith.py
 
+      - name: Run audio hadith verification tests
+        run: pytest -q tests/test_audio_hadith.py
+
       - name: Run structured citation tests
         run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 

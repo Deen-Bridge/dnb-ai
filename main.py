@@ -36,6 +36,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from audio_hadith import router as audio_hadith_router
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
@@ -194,6 +195,8 @@ app.include_router(study_router)
 app.include_router(tafsir_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
+# Audio Hadith: verify transcribed narrations against an authenticated corpus
+app.include_router(audio_hadith_router)
 
 # Configure CORS
 app.add_middleware(
