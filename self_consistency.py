@@ -37,9 +37,10 @@ import hashlib
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -136,12 +137,8 @@ class SelfConsistencyResult(BaseModel):
     score: float = Field(..., ge=0.0, le=1.0, description="Agreement score 0-1")
     sample_count: int = Field(..., description="Number of samples generated")
     claim_count: int = Field(..., description="Total unique claims across samples")
-    agreement_matrix: dict[str, float] = Field(
-        default_factory=dict, description="Per-claim agreement scores"
-    )
-    low_agreement_claims: list[str] = Field(
-        default_factory=list, description="Claims with < 50% agreement"
-    )
+    agreement_matrix: dict[str, float] = Field(default_factory=dict, description="Per-claim agreement scores")
+    low_agreement_claims: list[str] = Field(default_factory=list, description="Claims with < 50% agreement")
     total_latency_ms: float = Field(0.0, description="Total sampling latency")
     early_exit: bool = Field(False, description="Whether early exit was triggered")
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -332,7 +329,7 @@ async def sample_answer(
 
         return SampleResult(text=text, claims=claims, latency_ms=latency)
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return SampleResult(
             text="",
             latency_ms=timeout_ms,
@@ -450,9 +447,7 @@ async def run_self_consistency(
 # ---------------------------------------------------------------------------
 
 
-def apply_consistency_policy(
-    answer: str, result: SelfConsistencyResult
-) -> tuple[str, bool]:
+def apply_consistency_policy(answer: str, result: SelfConsistencyResult) -> tuple[str, bool]:
     """Apply response policy based on self-consistency score.
 
     Returns:
@@ -505,9 +500,7 @@ def get_cached_result(prompt: str, context: str | None = None) -> SelfConsistenc
     return _session_cache.get(key)
 
 
-def cache_result(
-    prompt: str, context: str | None, result: SelfConsistencyResult
-) -> None:
+def cache_result(prompt: str, context: str | None, result: SelfConsistencyResult) -> None:
     """Cache a self-consistency result."""
     key = _cache_key(prompt, context)
     _session_cache[key] = result
@@ -539,9 +532,7 @@ async def get_self_consistency_score(
     if cached is not None:
         return cached.score
 
-    result = await run_self_consistency(
-        prompt, original_answer, generator, is_high_stakes
-    )
+    result = await run_self_consistency(prompt, original_answer, generator, is_high_stakes)
 
     # Cache the result
     cache_result(prompt, context, result)

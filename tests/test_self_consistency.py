@@ -1,8 +1,5 @@
 """Tests for self-consistency sampling (#55)."""
 
-import asyncio
-from unittest.mock import AsyncMock
-
 import pytest
 
 from self_consistency import (
