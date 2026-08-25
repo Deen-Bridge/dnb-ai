@@ -284,6 +284,12 @@ def should_queue_for_scholar(score: float, signals: ConfidenceSignals) -> bool:
 def assess(signals: ConfidenceSignals) -> ConfidenceAssessment:
     """Score the answer and decide what to do with it."""
     score = compute_confidence(signals)
+    try:
+        import metrics
+
+        metrics.record_confidence_score(score)
+    except Exception:  # noqa: BLE001
+        pass
     band = band_for(score)
     return ConfidenceAssessment(
         score=score,
