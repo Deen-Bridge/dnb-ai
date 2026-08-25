@@ -48,9 +48,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from errors import APIException
 from semantic_cache import get_keyed_cache
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,8 @@ LANGUAGE_NAMES: dict[str, str] = {
 
 MAX_AYAT_PER_REQUEST = int(os.getenv("TAFSIR_MAX_AYAT", "10"))
 MAX_TAFSIRS_PER_REQUEST = 6
+MAX_REFERENCES_PER_BATCH = 10
+MAX_TOTAL_AYAT_PER_BATCH = 20
 
 # Wall-clock budget for retrieving tafsir inside a /chat turn. Retrieval runs
 # concurrently, but a slow upstream must not hold a chat turn open indefinitely:
@@ -892,6 +895,51 @@ class TafsirResponse(BaseModel):
     disclaimer: str = DISCLAIMER
 
 
+class TafsirBatchRequest(BaseModel):
+    references: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_REFERENCES_PER_BATCH,
+        description=(
+            f"A non-empty array of ayah references. At most {MAX_REFERENCES_PER_BATCH} "
+            f"references and {MAX_TOTAL_AYAT_PER_BATCH} total ayat may be requested."
+        ),
+        json_schema_extra={"examples": [["2:255", "103:1-3", "112:1-4"]]},
+    )
+    tafsirs: list[str] | None = Field(
+        None,
+        description=(f"Tafsir keys to include (see GET /tafsir/sources). Defaults to {list(DEFAULT_TAFSIR_KEYS)}."),
+    )
+    language: str = Field(
+        DEFAULT_TRANSLATION_LANGUAGE,
+        description="Preferred language code for tafsir text and translation",
+    )
+    allow_language_fallback: bool = Field(
+        True,
+        description=(
+            "When a tafsir is not published in the requested language, return "
+            "it in its original language (labelled) instead of omitting it"
+        ),
+    )
+
+
+class TafsirBatchResult(BaseModel):
+    language: str
+    ayat: list[AyahTafsir]
+    disclaimer: str = DISCLAIMER
+
+
+class TafsirBatchResponse(BaseModel):
+    results: dict[str, TafsirBatchResult] = Field(
+        default_factory=dict,
+        description="Successfully retrieved results keyed by their requested reference.",
+    )
+    errors: dict[str, str] = Field(
+        default_factory=dict,
+        description="References that could not be retrieved, keyed by their requested reference.",
+    )
+
+
 class TafsirSourceInfo(BaseModel):
     key: str
     name: str
@@ -981,6 +1029,68 @@ async def build_tafsir_response(request: TafsirRequest, source: TafsirSource | N
     )
 
     return TafsirResponse(reference=request.reference, language=language, ayat=list(ayat))
+
+
+class InvalidBatchRequest(ValueError):
+    """Raised when a batch exceeds a request-wide limit."""
+
+
+async def build_tafsir_batch_response(
+    request: TafsirBatchRequest,
+    source: TafsirSource | None = None,
+) -> TafsirBatchResponse:
+    """Retrieve multiple references concurrently while preserving partial results."""
+    parsed_references: dict[str, list[AyahRef]] = {}
+    errors: dict[str, str] = {}
+    total_ayat = 0
+
+    for reference in request.references:
+        try:
+            refs = parse_reference(reference)
+        except InvalidReference as exc:
+            errors[reference] = str(exc)
+            continue
+
+        total_ayat += len(refs)
+        if total_ayat > MAX_TOTAL_AYAT_PER_BATCH:
+            raise InvalidBatchRequest(
+                f"Batch covers {total_ayat} ayat; at most {MAX_TOTAL_AYAT_PER_BATCH} total ayat may be requested."
+            )
+        parsed_references[reference] = refs
+
+    keys = resolve_requested_tafsirs(request.tafsirs)
+    language = (request.language or DEFAULT_TRANSLATION_LANGUAGE).strip().casefold()
+
+    async def retrieve(reference: str, refs: list[AyahRef]) -> tuple[str, TafsirBatchResult | None, str | None]:
+        try:
+            ayat = list(
+                await asyncio.gather(
+                    *(
+                        assemble_ayah(
+                            ref,
+                            keys,
+                            language,
+                            allow_language_fallback=request.allow_language_fallback,
+                            source=source,
+                        )
+                        for ref in refs
+                    )
+                )
+            )
+        except Exception as exc:
+            logger.warning("Batch tafsir lookup failed for %s: %s", reference, exc)
+            return reference, None, "Failed to retrieve tafsir for this reference."
+        return reference, TafsirBatchResult(language=language, ayat=ayat), None
+
+    retrieved = await asyncio.gather(*(retrieve(reference, refs) for reference, refs in parsed_references.items()))
+    results: dict[str, TafsirBatchResult] = {}
+    for reference, result, error in retrieved:
+        if result is not None:
+            results[reference] = result
+        elif error is not None:
+            errors[reference] = error
+
+    return TafsirBatchResponse(results=results, errors=errors)
 
 
 # ---------------------------------------------------------------------------
@@ -1165,12 +1275,48 @@ async def get_tafsir(request: TafsirRequest) -> TafsirResponse:
     try:
         response = await build_tafsir_response(request)
     except InvalidReference as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint=(
+                "Use format 'surah:ayah' (e.g., '2:255'), 'surah:start-end' (e.g., '103:1-3'), "
+                "or named surah format (e.g., 'Al-Asr 1-3'). Surah numbers run from 1 to 114."
+            ),
+        ) from exc
 
     logger.info(
         "Tafsir lookup %s (%s) -> %d ayat",
         request.reference,
         request.language,
         len(response.ayat),
+    )
+    return response
+
+
+@router.post("/tafsir/batch", response_model=TafsirBatchResponse)
+async def get_tafsir_batch(request: TafsirBatchRequest) -> TafsirBatchResponse:
+    """Explain multiple ayah references concurrently with partial failure handling."""
+    try:
+        response = await build_tafsir_batch_response(request)
+    except InvalidBatchRequest as exc:
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint=(
+                f"Submit at most {MAX_REFERENCES_PER_BATCH} references and "
+                f"{MAX_TOTAL_AYAT_PER_BATCH} total ayat per batch."
+            ),
+        ) from exc
+    except InvalidReference as exc:
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint="Use valid tafsir keys from GET /tafsir/sources.",
+        ) from exc
+
+    logger.info(
+        "Batch tafsir lookup: %d results, %d errors",
+        len(response.results),
+        len(response.errors),
     )
     return response
