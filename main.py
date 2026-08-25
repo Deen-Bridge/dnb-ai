@@ -81,6 +81,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from narrator_biography import router as narrator_router
 from arabic_ocr import router as arabic_ocr_router
 from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
@@ -278,6 +279,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Narrator biography: rijal lookup, isnad resolution, and network graphs
+app.include_router(narrator_router)
 
 # Configure CORS
 app.add_middleware(

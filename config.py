@@ -36,6 +36,10 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
+    # Narrator biography (rijal) database
+    enable_narrator_db: bool = Field(default=True)
+    narrator_db_path: str = Field(default="data/narrators.json")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):
