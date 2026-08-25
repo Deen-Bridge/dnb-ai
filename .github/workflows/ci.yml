@@ -83,6 +83,9 @@ jobs:
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
 
+      - name: Run reformulation tests
+        run: pytest -q tests/test_reformulation.py
+
       - name: Run religious sentiment tests
         run: pytest -q tests/test_sentiment.py
 

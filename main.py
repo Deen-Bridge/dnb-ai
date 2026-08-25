@@ -84,6 +84,7 @@ from memory.extraction import (
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from model_router import router as model_routing_router
+from reformulation import router as reformulation_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -257,6 +258,8 @@ app.include_router(tafsir_router)
 app.include_router(page_analysis_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
+# Question reformulation: deterministic quality assessment + rewrite suggestions
+app.include_router(reformulation_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
