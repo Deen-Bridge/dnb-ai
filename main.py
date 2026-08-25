@@ -104,6 +104,7 @@ from semantic_cache import (
     normalize_text,
 )
 from sentiment import router as sentiment_router
+from tajweed_detector import router as tajweed_router
 from stellar import (
     PurchaseContext,
     PurchaseInfo,
@@ -278,6 +279,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Tajweed error detection and educational feedback system
+app.include_router(tajweed_router)
 
 # Configure CORS
 app.add_middleware(

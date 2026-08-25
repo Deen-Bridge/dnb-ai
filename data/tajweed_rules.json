@@ -1,0 +1,193 @@
+{
+  "makharij": {
+    "ghunnah_letters": ["ن", "م"],
+    "idghaam_letters_no_ghunnah": ["ل", "ر"],
+    "idghaam_letters_with_ghunnah": ["ي", "و", "ن", "م"],
+    "ikhfa_letters": ["ت", "ث", "ج", "د", "ذ", "ز", "س", "ش", "ص", "ض", "ط", "ظ", "ف", "ق", "ك"],
+    "qalqalah_letters": ["ب", "ج", "د", "ط", "ق"],
+    "makharij_classes": {
+      "halqi": ["ع", "ح", "خ", "غ", "ه", "ء", "أ", "إ", "ؤ", "ئ"],
+      "lisani": ["ص", "ض", "ط", "ظ", "ل", "ن"],
+      "shajari": ["ت", "ث", "ج", "د", "ذ", "ز", "س", "ش"],
+      "tarfi": ["ب", "م", "و", "ف"],
+      "ghayn_lathawiyya": ["ق", "ك"],
+      "wastaniyya": ["ر"]
+    }
+  },
+  "madd_durations": {
+    "madd_al_tabi_i": {
+      "haraka": "hamza",
+      "duration_harakat": 2,
+      "description": "Natural prolongation after hamza — 2 harakat"
+    },
+    "madd_al_lazim": {
+      "haraka": "mim_sukun",
+      "duration_harakat": 4,
+      "description": "Obligatory prolongation over mim sukun — 4 harakat"
+    },
+    "madd_al_munfasil": {
+      "haraka": "word_boundary",
+      "duration_harakat": 4,
+      "description": "Permissible prolongation at word boundary with hamza — 4 harakat (2 optional + 2 obligatory)"
+    },
+    "madd_al_mutasil": {
+      "haraka": "hamza_within_word",
+      "duration_harakat": 4,
+      "description": "Obligatory prolongation within word with hamza — 4 harakat"
+    },
+    "madd_al_arid_lissukun": {
+      "haraka": "sukun_or_ending",
+      "duration_harakat": 6,
+      "description": "Temporary prolongation before sukun or word ending — 6 harakat (2 optional + 4 obligatory)"
+    },
+    "madd_al_aarid_lissukun": {
+      "haraka": "sukun_or_ending",
+      "duration_harakat": 6,
+      "description": "Temporary prolongation before sukun or word ending — 6 harakat (2 optional + 4 obligatory)"
+    },
+    "madd_al_leen": {
+      "haraka": "waw_alif_sukun",
+      "duration_harakat": 6,
+      "description": "Prolongation on waw/alif followed by sukun — 6 harakat"
+    }
+  },
+  "rules": {
+    "ghunnah": {
+      "name": "Ghunnah (الغنة)",
+      "description": "Nasalization emitted when nun or mim carries shadda or sukun. The sound resonates through the nose for 2 harakat.",
+      "severity_weight": 0.15,
+      "level": "beginner",
+      "exercises": [
+        "Practice sustaining 'nnn' sound with closed mouth for 2 beats after pronouncing 'minhum' and 'mimmā'.",
+        "Place finger on nose to feel vibration when pronouncing shadda on ن and م.",
+        "Recite سورة الناس slowly, emphasizing the ghunnah on each ن."
+      ],
+      "explanation_template": "Ghunnah requires a nasal resonance of 2 harakat when nun (ن) or mim (م) carries shadda or follows sukun. Your pronunciation at position {position} did not hold the nasal sound for the required duration."
+    },
+    "idghaam": {
+      "name": "Idghaam (الإدغام)",
+      "description": "Merging of nun sakinah into the following letter. Six categories exist: idghaam shafawi, idghaam ghunnah, idghaam la ghunnah, idghaam naqis, idghaam kamil, idghaam mutaqaarib.",
+      "severity_weight": 0.20,
+      "level": "intermediate",
+      "exercises": [
+        "Recite phrases ending with ن ساكنة followed by ل or ر — merge without ghunnah.",
+        "Practice ين replacing ن + ي in phrases like 'min yadin' → merge with ghunnah.",
+        "Practice ون replacing ن + و with sustained nasalization."
+      ],
+      "explanation_template": "When nun sakinah (نْ) precedes certain letters, it must merge. For '{target_letter}', the merge {with_without} ghunnah. At position {position}, the nun was pronounced separately instead of being absorbed."
+    },
+    "ikhfa": {
+      "name": "Ikhfa (الإخفاء)",
+      "description": "Concealing the nun sakinah by partially closing the articulation point while maintaining ghunnah, before 15 specific letters.",
+      "severity_weight": 0.15,
+      "level": "intermediate",
+      "exercises": [
+        "Say 'innā anzalnā' — feel the tongue approach the ظ position without fully closing.",
+        "Practice 'min thumma' — the ن transitions into the sound of ث with nasal resonance.",
+        "Recite سورة القيامة, focusing on concealed ن before each of the 15 ikhfa letters."
+      ],
+      "explanation_template": "Ikhfa requires concealing the نْ by shifting tongue position toward the next letter while maintaining 2-harakat nasalization. At position {position}, the ن before '{target_letter}' was not properly concealed."
+    },
+    "iqlab": {
+      "name": "Iqlab (القلب)",
+      "description": "Converting nun sakinah to mim sound when followed by the letter bā (ب), with ghunnah maintained throughout.",
+      "severity_weight": 0.15,
+      "level": "beginner",
+      "exercises": [
+        "Recite 'inba'ath' — replace نْ with مْ sound before ب.",
+        "Practice سورة المطففين: 'أن betūm' — feel the ن → م transition.",
+        "Exaggerate the bilabial closure: hold the م sound for 2 beats before releasing into ب."
+      ],
+      "explanation_template": "When نْ is followed by ب (bā), it converts to a م sound (iqlab). At position {position}, the ن before ب was pronounced as ن rather than being converted to م."
+    },
+    "qalqalah": {
+      "name": "Qalqalah (القلقلة)",
+      "description": "An echo or bouncing sound produced when bā, jīm, dāl, ṭā, or qāf carry sukun — the sound reverberates at the point of articulation.",
+      "severity_weight": 0.15,
+      "level": "beginner",
+      "exercises": [
+        "Say 'qāl' — feel the qāf bounce when released from sukun.",
+        "Practice 'bad', 'jadd', 'ṭalq', 'qadd' — emphasize the echo on each release.",
+        "Recite أ擢د الله العظيم repeatedly, feeling each qalqalah letter snap."
+      ],
+      "explanation_template": "Qalqalah letters (ب, ج, د, ط, ق) produce a bouncing echo when carrying sukun. At position {position}, the letter '{letter}' was pronounced flatly without the required reverberation."
+    },
+    "madd_al_tabi_i": {
+      "name": "Madd al-Tabi'i (المد الطبيعي)",
+      "description": "Natural prolongation of 2 harakat required when a long vowel letter (alif, waw, ya) is followed by hamza.",
+      "severity_weight": 0.10,
+      "level": "beginner",
+      "exercises": [
+        "Count 'aa' for 2 beats: 'qā-a-la', 'nū-u-run', 'khay-yi-run'.",
+        "Recite سورة الفاتحة slowly: 'ā-meen' with full 2-beat elongation.",
+        "Use a metronome at 120 bpm: each long vowel gets exactly 2 clicks."
+      ],
+      "explanation_template": "Long vowels followed by hamza require 2 harakat of prolongation. At position {position}, the vowel '{vowel}' was held for {actual} harakat instead of the required 2."
+    },
+    "madd_al_munfasil": {
+      "name": "Madd al-Munfasil (المد المنفصل)",
+      "description": "Prolongation at a word boundary where a long vowel meets hamza across two words. Minimum 2 harakat, recommended 4 (2 optional + 2 obligatory).",
+      "severity_weight": 0.10,
+      "level": "intermediate",
+      "exercises": [
+        "Recite 'alā an' — hold the ā across the word boundary for 4 harakat.",
+        "Practice 'ar-rūḥu ilā' — count 4 beats across the pause.",
+        "Distinguish from madd al-mutasil: this split occurs BETWEEN words, not within one."
+      ],
+      "explanation_template": "At word boundaries, if a long vowel meets hamza across words, at least 4 harakat are recommended. At position {position}, the prolongation was only {actual} harakat."
+    },
+    "madd_al_mutasil": {
+      "name": "Madd al-Mutasil (المد المتصل)",
+      "description": "Obligatory 4-harakat prolongation when a long vowel letter is followed by hamza WITHIN the same word.",
+      "severity_weight": 0.15,
+      "level": "intermediate",
+      "exercises": [
+        "Say 'sū-a' — hold the ū for 4 beats before the hamza.",
+        "Recite 'mu'tamir' — the wāw-madd to hamza must be 4 harakat.",
+        "Practice all madd al-mutasil words in سورة النور for repetition."
+      ],
+      "explanation_template": "Within a word, when a madd letter precedes hamza, 4 harakat are obligatory. At position {position}, the vowel '{vowel}' was held for {actual} harakat instead of 4."
+    },
+    "madd_al_aarid_lissukun": {
+      "name": "Madd al-'Aarid li-l-Sukun (المد العارض للسكون)",
+      "description": "Temporary prolongation of 6 harakat when a long vowel is followed by sukun (temporary stop). 2 harakat are the vowel's natural length + 4 optional.",
+      "severity_weight": 0.10,
+      "level": "advanced",
+      "exercises": [
+        "Recite 'an-nas' with a pause: the ā in 'an-' stretches to 6 harakat at the stop.",
+        "Practice this only when stopping: reciting continuously, the vowel reverts to 2 harakat.",
+        "Compare stopping vs continuous: 'ar-Raḥmān[stop]' vs 'ar-Raḥmānī'."
+      ],
+      "explanation_template": "When stopping at a sukun, the preceding long vowel extends to 6 harakat. At position {position}, the vowel before the stop was only {actual} harakat."
+    },
+    "waqf_ibtida": {
+      "name": "Waqf & Ibtida (الوقف والابتداء)",
+      "description": "Rules for stopping (waqf) and restarting (ibtida) recitation — proper pronunciation at pause points including mandatory stops, optional stops, and mandatory continuation signs.",
+      "severity_weight": 0.10,
+      "level": "advanced",
+      "exercises": [
+        "Learn the stop symbols: مـ (must stop), جـ (permissible), صـ (beautiful stop), لا (no stop).",
+        "Practice stopping on مَلِكِ يَوْمِ الدِّين — release the final dīn with ghunnah, not with idghaam.",
+        "When restarting after a stop ending in sukun, re-pronounce the hamzahWasl or keep the pause silent."
+      ],
+      "explanation_template": "At position {position}, the pause/start rule ({waqf_type}) was not observed correctly. {detail}"
+    }
+  },
+  "severity_weights": {
+    "ghunnah": 0.15,
+    "idghaam": 0.20,
+    "ikhfa": 0.15,
+    "iqlab": 0.15,
+    "qalqalah": 0.15,
+    "madd_al_tabi_i": 0.10,
+    "madd_al_munfasil": 0.10,
+    "madd_al_mutasil": 0.15,
+    "madd_al_aarid_lissukun": 0.10,
+    "waqf_ibtida": 0.10
+  },
+  "levels": {
+    "beginner": ["ghunnah", "iqlab", "qalqalah", "madd_al_tabi_i"],
+    "intermediate": ["ghunnah", "iqlab", "qalqalah", "madd_al_tabi_i", "idghaam", "ikhfa", "madd_al_munfasil", "madd_al_mutasil"],
+    "advanced": ["ghunnah", "iqlab", "qalqalah", "madd_al_tabi_i", "idghaam", "ikhfa", "madd_al_munfasil", "madd_al_mutasil", "madd_al_aarid_lissukun", "waqf_ibtida"]
+  }
+}

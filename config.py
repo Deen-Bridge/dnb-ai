@@ -1,7 +1,14 @@
+import enum
 from functools import lru_cache
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class TajweedLevel(str, enum.Enum):
+    beginner = "beginner"
+    intermediate = "intermediate"
+    advanced = "advanced"
 
 
 class Settings(BaseSettings):
@@ -35,6 +42,11 @@ class Settings(BaseSettings):
     )
 
     port: int = Field(default=8000, ge=1)
+
+    # Tajweed detection settings
+    enable_tajweed_detection: bool = Field(default=True, description="Enable the tajweed error detection system")
+    tajweed_min_score: float = Field(default=0.5, ge=0.0, le=1.0, description="Minimum acceptable tajweed score before flagging")
+    tajweed_level: TajweedLevel = Field(default=TajweedLevel.advanced, description="Default difficulty level for tajweed analysis")
 
     @field_validator("cors_origins", mode="before")
     @classmethod
