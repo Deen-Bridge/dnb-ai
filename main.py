@@ -84,6 +84,7 @@ from memory.extraction import (
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from model_router import router as model_routing_router
+from reasoning_chains import router as reasoning_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -248,6 +249,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(reasoning_router)
 app.include_router(study_router)
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)

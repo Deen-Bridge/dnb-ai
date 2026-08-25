@@ -69,6 +69,9 @@ jobs:
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
 
+      - name: Run reasoning chain tests
+        run: pytest -q tests/test_reasoning_chains.py
+
       - name: Run contextual hadith interpretation tests
         run: pytest -q tests/test_hadith_context.py
       - name: Run model routing tests
