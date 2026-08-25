@@ -79,6 +79,7 @@ from memory.extraction import (
     summarize_conversation_turns,
 )
 from page_analysis import router as page_analysis_router
+from query_optimizer import router as query_optimizer_router
 from model_router import router as model_routing_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
@@ -208,6 +209,8 @@ app.include_router(review_router)
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
 app.include_router(audio_hadith_router)
+# Database query optimization: static anti-pattern analysis + runtime profiling
+app.include_router(query_optimizer_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
 app.include_router(history_router)
 # Model routing: pick the optimal model per query by complexity, latency and cost
