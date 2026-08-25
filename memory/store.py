@@ -81,7 +81,7 @@ class InMemoryMemoryStore(MemoryStore):
         if entry is None:
             return None
         expires_at, profile = entry
-        if time.monotonic() > expires_at:
+        if time.monotonic() >= expires_at:
             del self._profiles[user_id]
             return None
         return profile
@@ -97,7 +97,7 @@ class InMemoryMemoryStore(MemoryStore):
         if entry is None:
             return None
         expires_at, summary = entry
-        if time.monotonic() > expires_at:
+        if time.monotonic() >= expires_at:
             del self._summaries[chat_id]
             return None
         return summary
