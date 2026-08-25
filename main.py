@@ -239,7 +239,8 @@ def _rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 
-limiter = Limiter(key_func=_rate_limit_key)
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() not in {"0", "false", "off"}
+limiter = Limiter(key_func=_rate_limit_key, enabled=RATE_LIMIT_ENABLED)
 app.state.limiter = limiter
 
 
@@ -713,7 +714,41 @@ def normalize_language(lang: str | None) -> str | None:
     return None
 
 
+class _MockResponse:
+    text = "Mock upstream response"
+
+
+class _MockPart:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _MockContent:
+    def __init__(self, role: str, text: str) -> None:
+        self.role = role
+        self.parts = [_MockPart(text)]
+
+
+class _MockChatSession:
+    def __init__(self, history: list[Any] | None = None) -> None:
+        self.history = list(history or [])
+
+    async def send_message_async(self, message: str, **_kwargs: Any) -> _MockResponse:
+        latency_ms = int(os.getenv("MOCK_LLM_LATENCY_MS", "50"))
+        if latency_ms > 0:
+            await asyncio.sleep(latency_ms / 1000)
+        self.history.extend([_MockContent("user", message), _MockContent("model", _MockResponse.text)])
+        return _MockResponse()
+
+
+class _MockModel:
+    def start_chat(self, history: list[Any] | None = None) -> _MockChatSession:
+        return _MockChatSession(history)
+
+
 def get_model() -> genai.GenerativeModel:
+    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
+        return _MockModel()  # type: ignore[return-value]
     return genai.GenerativeModel(
         model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
@@ -1010,15 +1045,16 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         # Use a conservative multiplier for system context and response
         estimated_tokens = int(estimated_tokens * 3)  # Account for system prompt and response
 
-        quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
-        if not quota_allowed:
-            logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
-            raise APIException(
-                status_code=429,
-                detail="Token quota exceeded. Please try again later.",
-                hint=f"Hourly token quota limit reached. Please wait {retry_after} seconds before sending further messages, or reduce message length.",
-                headers={"Retry-After": str(retry_after)},
-            )
+        if RATE_LIMIT_ENABLED:
+            quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
+            if not quota_allowed:
+                logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
+                raise APIException(
+                    status_code=429,
+                    detail="Token quota exceeded. Please try again later.",
+                    hint=f"Hourly token quota limit reached. Please wait {retry_after} seconds before sending further messages, or reduce message length.",
+                    headers={"Retry-After": str(retry_after)},
+                )
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
         async def generate(safety_prompt: str) -> str:
