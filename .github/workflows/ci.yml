@@ -60,6 +60,9 @@ jobs:
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
 
+      - name: Run historical context tests
+        run: pytest -q tests/test_history.py
+
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
 
