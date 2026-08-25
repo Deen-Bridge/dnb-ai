@@ -27,16 +27,18 @@ import os
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class JobStatus(str, Enum):
     """Status of a job in the queue."""
+
     PENDING = "pending"
     SCHEDULED = "scheduled"
     RUNNING = "running"
@@ -49,6 +51,7 @@ class JobStatus(str, Enum):
 
 class JobPriority(int, Enum):
     """Priority levels for jobs."""
+
     LOW = 0
     NORMAL = 50
     HIGH = 100
@@ -58,26 +61,29 @@ class JobPriority(int, Enum):
 @dataclass
 class JobResult:
     """Result of a job execution."""
+
     success: bool
-    data: Optional[Any] = None
-    error: Optional[str] = None
+    data: Any | None = None
+    error: str | None = None
     duration_ms: float = 0
 
 
 @dataclass
 class JobProgress:
     """Progress information for a running job."""
+
     job_id: str
     percent: float = 0
     current_step: str = ""
     total_steps: int = 0
     current_step_num: int = 0
-    estimated_remaining_ms: Optional[float] = None
+    estimated_remaining_ms: float | None = None
 
 
 @dataclass
 class ResourceConstraints:
     """Resource constraints for a job type."""
+
     max_memory_mb: int = 512
     max_cpu_percent: float = 100
     max_concurrent: int = 10
@@ -87,6 +93,7 @@ class ResourceConstraints:
 @dataclass
 class RetryConfig:
     """Retry configuration with exponential backoff."""
+
     max_retries: int = 3
     initial_delay_seconds: float = 1.0
     max_delay_seconds: float = 300.0
@@ -95,33 +102,35 @@ class RetryConfig:
 
     def get_delay(self, attempt: int) -> float:
         """Calculate delay for a given retry attempt."""
-        delay = self.initial_delay_seconds * (self.exponential_base ** attempt)
+        delay = self.initial_delay_seconds * (self.exponential_base**attempt)
         delay = min(delay, self.max_delay_seconds)
         if self.jitter:
             import random
-            delay *= (0.5 + random.random())
+
+            delay *= 0.5 + random.random()
         return delay
 
 
 @dataclass
 class Job:
     """Represents a job in the queue."""
+
     id: str
     job_type: str
     payload: dict[str, Any]
     priority: JobPriority = JobPriority.NORMAL
     status: JobStatus = JobStatus.PENDING
     created_at: float = field(default_factory=time.time)
-    scheduled_at: Optional[float] = None
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
+    scheduled_at: float | None = None
+    started_at: float | None = None
+    completed_at: float | None = None
     retry_count: int = 0
     max_retries: int = 3
-    error: Optional[str] = None
-    result: Optional[Any] = None
+    error: str | None = None
+    result: Any | None = None
     progress: float = 0
     progress_message: str = ""
-    parent_job_id: Optional[str] = None
+    parent_job_id: str | None = None
     depends_on: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -194,7 +203,7 @@ class JobHandler(ABC):
     async def execute(
         self,
         job: Job,
-        progress_callback: Optional[Callable[[float, str], None]] = None,
+        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
     ) -> JobResult:
         """Execute the job and return result."""
         pass
@@ -209,7 +218,7 @@ class JobStore(ABC):
         pass
 
     @abstractmethod
-    async def get_job(self, job_id: str) -> Optional[Job]:
+    async def get_job(self, job_id: str) -> Job | None:
         """Get a job by ID."""
         pass
 
@@ -219,9 +228,7 @@ class JobStore(ABC):
         pass
 
     @abstractmethod
-    async def get_jobs_by_status(
-        self, status: JobStatus, limit: int = 100
-    ) -> list[Job]:
+    async def get_jobs_by_status(self, status: JobStatus, limit: int = 100) -> list[Job]:
         """Get jobs by status."""
         pass
 
@@ -242,27 +249,23 @@ class InMemoryJobStore(JobStore):
         async with self._lock:
             self._jobs[job.id] = job
 
-    async def get_job(self, job_id: str) -> Optional[Job]:
+    async def get_job(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
     async def get_pending_jobs(self, limit: int = 100) -> list[Job]:
         now = time.time()
         pending = [
-            j for j in self._jobs.values()
+            j
+            for j in self._jobs.values()
             if j.status == JobStatus.PENDING
             and (j.scheduled_at is None or j.scheduled_at <= now)
-            and all(
-                self._jobs.get(dep) and self._jobs[dep].status == JobStatus.COMPLETED
-                for dep in j.depends_on
-            )
+            and all(self._jobs.get(dep) and self._jobs[dep].status == JobStatus.COMPLETED for dep in j.depends_on)
         ]
         # Sort by priority (descending) then created_at (ascending)
         pending.sort(key=lambda j: (-j.priority.value, j.created_at))
         return pending[:limit]
 
-    async def get_jobs_by_status(
-        self, status: JobStatus, limit: int = 100
-    ) -> list[Job]:
+    async def get_jobs_by_status(self, status: JobStatus, limit: int = 100) -> list[Job]:
         jobs = [j for j in self._jobs.values() if j.status == status]
         return jobs[:limit]
 
@@ -276,7 +279,7 @@ class InMemoryJobStore(JobStore):
 class RedisJobStore(JobStore):
     """Redis-backed job store for production."""
 
-    def __init__(self, redis_url: Optional[str] = None) -> None:
+    def __init__(self, redis_url: str | None = None) -> None:
         self._redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
         self._redis: Any = None
         self._prefix = "dnb:jobs:"
@@ -285,12 +288,13 @@ class RedisJobStore(JobStore):
         if self._redis is None:
             try:
                 import redis.asyncio as aioredis
+
                 self._redis = await aioredis.from_url(
                     self._redis_url,
                     decode_responses=True,
                 )
-            except ImportError:
-                raise RuntimeError("redis package not installed")
+            except ImportError as err:
+                raise RuntimeError("redis package not installed") from err
         return self._redis
 
     async def save_job(self, job: Job) -> None:
@@ -304,7 +308,7 @@ class RedisJobStore(JobStore):
             score = -job.priority.value * 1e12 + job.created_at
             await redis.zadd(f"{self._prefix}pending", {job.id: score})
 
-    async def get_job(self, job_id: str) -> Optional[Job]:
+    async def get_job(self, job_id: str) -> Job | None:
         redis = await self._get_redis()
         data = await redis.get(f"{self._prefix}{job_id}")
         if data:
@@ -321,9 +325,7 @@ class RedisJobStore(JobStore):
                 jobs.append(job)
         return jobs
 
-    async def get_jobs_by_status(
-        self, status: JobStatus, limit: int = 100
-    ) -> list[Job]:
+    async def get_jobs_by_status(self, status: JobStatus, limit: int = 100) -> list[Job]:
         redis = await self._get_redis()
         job_ids = await redis.smembers(f"{self._prefix}status:{status.value}")
         jobs = []
@@ -349,7 +351,7 @@ class JobQueue:
 
     def __init__(
         self,
-        store: Optional[JobStore] = None,
+        store: JobStore | None = None,
         max_workers: int = 4,
     ) -> None:
         self._store = store or InMemoryJobStore()
@@ -375,9 +377,9 @@ class JobQueue:
         job_type: str,
         payload: dict[str, Any],
         priority: JobPriority = JobPriority.NORMAL,
-        scheduled_at: Optional[datetime] = None,
-        depends_on: Optional[list[str]] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        scheduled_at: datetime | None = None,
+        depends_on: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Job:
         """Submit a new job to the queue."""
         if job_type not in self._handlers:
@@ -401,7 +403,7 @@ class JobQueue:
     async def submit_batch(
         self,
         jobs: list[dict[str, Any]],
-        parent_job_id: Optional[str] = None,
+        parent_job_id: str | None = None,
     ) -> list[Job]:
         """Submit multiple jobs as a batch."""
         created_jobs = []
@@ -416,7 +418,7 @@ class JobQueue:
             created_jobs.append(job)
         return created_jobs
 
-    async def get_job(self, job_id: str) -> Optional[Job]:
+    async def get_job(self, job_id: str) -> Job | None:
         """Get a job by ID."""
         return await self._store.get_job(job_id)
 
@@ -430,7 +432,7 @@ class JobQueue:
             return True
         return False
 
-    async def get_progress(self, job_id: str) -> Optional[JobProgress]:
+    async def get_progress(self, job_id: str) -> JobProgress | None:
         """Get progress for a running job."""
         job = await self._store.get_job(job_id)
         if job:
@@ -441,15 +443,11 @@ class JobQueue:
             )
         return None
 
-    def on_progress(
-        self, job_id: str, callback: Callable[[JobProgress], None]
-    ) -> None:
+    def on_progress(self, job_id: str, callback: Callable[[JobProgress], None]) -> None:
         """Register a progress callback for a job."""
         self._progress_callbacks[job_id] = callback
 
-    async def _update_progress(
-        self, job: Job, percent: float, message: str
-    ) -> None:
+    async def _update_progress(self, job: Job, percent: float, message: str) -> None:
         """Update job progress and notify callbacks."""
         job.progress = percent
         job.progress_message = message
@@ -496,7 +494,7 @@ class JobQueue:
             else:
                 raise Exception(result.error or "Job failed")
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             job.error = f"Job timed out after {handler.constraints.timeout_seconds}s"
             await self._handle_failure(job, handler)
         except Exception as e:
@@ -521,7 +519,10 @@ class JobQueue:
             self._stats["total_retried"] += 1
             logger.warning(
                 "Job %s failed, scheduling retry %d/%d in %.1fs",
-                job.id, job.retry_count, retry_config.max_retries, delay
+                job.id,
+                job.retry_count,
+                retry_config.max_retries,
+                delay,
             )
         else:
             job.status = JobStatus.DEAD
@@ -593,6 +594,7 @@ class JobQueue:
 # Example handlers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class EmbeddingGenerationHandler(JobHandler):
     """Handler for batch embedding generation."""
 
@@ -611,13 +613,13 @@ class EmbeddingGenerationHandler(JobHandler):
     async def execute(
         self,
         job: Job,
-        progress_callback: Optional[Callable[[float, str], None]] = None,
+        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
     ) -> JobResult:
         texts = job.payload.get("texts", [])
         total = len(texts)
         embeddings = []
 
-        for i, text in enumerate(texts):
+        for i, _text in enumerate(texts):
             # Simulate embedding generation
             await asyncio.sleep(0.1)
             embeddings.append([0.1] * 768)  # Mock embedding
@@ -647,7 +649,7 @@ class IndexBuildHandler(JobHandler):
     async def execute(
         self,
         job: Job,
-        progress_callback: Optional[Callable[[float, str], None]] = None,
+        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
     ) -> JobResult:
         index_name = job.payload.get("index_name", "default")
 
@@ -663,17 +665,14 @@ class IndexBuildHandler(JobHandler):
             await progress_callback(90, "Saving index")
         await asyncio.sleep(0.2)
 
-        return JobResult(
-            success=True,
-            data={"index_name": index_name, "document_count": 1000}
-        )
+        return JobResult(success=True, data={"index_name": index_name, "document_count": 1000})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Factory and singleton
 # ─────────────────────────────────────────────────────────────────────────────
 
-_queue: Optional[JobQueue] = None
+_queue: JobQueue | None = None
 
 
 def get_job_queue() -> JobQueue:
@@ -682,6 +681,7 @@ def get_job_queue() -> JobQueue:
     if _queue is None:
         # Use Redis store in production, in-memory for development
         redis_url = os.getenv("REDIS_URL")
+        store: JobStore
         if redis_url:
             store = RedisJobStore(redis_url)
         else:

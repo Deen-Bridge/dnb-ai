@@ -1,18 +1,20 @@
 """Tests for queue system (#215)."""
 
 import asyncio
+
 import pytest
+
 from queue_system import (
-    Job,
-    JobStatus,
-    JobPriority,
-    JobResult,
-    JobProgress,
-    RetryConfig,
-    ResourceConstraints,
-    JobHandler,
-    JobQueue,
     InMemoryJobStore,
+    Job,
+    JobHandler,
+    JobPriority,
+    JobProgress,
+    JobQueue,
+    JobResult,
+    JobStatus,
+    ResourceConstraints,
+    RetryConfig,
 )
 
 
@@ -261,11 +263,13 @@ class TestJobQueue:
 
     @pytest.mark.asyncio
     async def test_submit_batch(self, queue):
-        jobs = await queue.submit_batch([
-            {"job_type": "mock_job", "payload": {"i": 1}},
-            {"job_type": "mock_job", "payload": {"i": 2}},
-            {"job_type": "mock_job", "payload": {"i": 3}},
-        ])
+        jobs = await queue.submit_batch(
+            [
+                {"job_type": "mock_job", "payload": {"i": 1}},
+                {"job_type": "mock_job", "payload": {"i": 2}},
+                {"job_type": "mock_job", "payload": {"i": 3}},
+            ]
+        )
         assert len(jobs) == 3
         assert all(j.status == JobStatus.PENDING for j in jobs)
 

@@ -1,15 +1,15 @@
 """Tests for thematic Quran retrieval system (#144)."""
 
 import pytest
+
 from thematic_quran import (
-    Theme,
-    VerseThemeMapping,
-    ThematicTaxonomy,
-    ThemeVerseStore,
-    ThematicRetriever,
-    RevelationPeriod,
     MAIN_THEMES,
-    SUB_THEMES,
+    RevelationPeriod,
+    ThematicRetriever,
+    ThematicTaxonomy,
+    Theme,
+    ThemeVerseStore,
+    VerseThemeMapping,
 )
 
 
@@ -139,15 +139,9 @@ class TestThemeVerseStore:
 
     def test_filter_by_relevance(self):
         store = ThemeVerseStore(data_file="/tmp/test_verses2.json")
-        store.add_mapping(VerseThemeMapping(
-            surah=1, ayah=1, theme_id="tawhid", relevance_score=1.0
-        ))
-        store.add_mapping(VerseThemeMapping(
-            surah=1, ayah=2, theme_id="tawhid", relevance_score=0.5
-        ))
-        store.add_mapping(VerseThemeMapping(
-            surah=1, ayah=3, theme_id="tawhid", relevance_score=0.3
-        ))
+        store.add_mapping(VerseThemeMapping(surah=1, ayah=1, theme_id="tawhid", relevance_score=1.0))
+        store.add_mapping(VerseThemeMapping(surah=1, ayah=2, theme_id="tawhid", relevance_score=0.5))
+        store.add_mapping(VerseThemeMapping(surah=1, ayah=3, theme_id="tawhid", relevance_score=0.3))
 
         # High relevance only
         high = store.get_verses_for_theme("tawhid", min_relevance=0.8)
@@ -159,12 +153,8 @@ class TestThemeVerseStore:
 
     def test_filter_by_context_type(self):
         store = ThemeVerseStore(data_file="/tmp/test_verses3.json")
-        store.add_mapping(VerseThemeMapping(
-            surah=1, ayah=1, theme_id="tawhid", context_type="primary"
-        ))
-        store.add_mapping(VerseThemeMapping(
-            surah=1, ayah=2, theme_id="tawhid", context_type="secondary"
-        ))
+        store.add_mapping(VerseThemeMapping(surah=1, ayah=1, theme_id="tawhid", context_type="primary"))
+        store.add_mapping(VerseThemeMapping(surah=1, ayah=2, theme_id="tawhid", context_type="secondary"))
 
         primary = store.get_verses_for_theme("tawhid", context_type="primary")
         assert len(primary) == 1
@@ -179,17 +169,25 @@ class TestThematicRetriever:
         taxonomy = ThematicTaxonomy()
         store = ThemeVerseStore(data_file="/tmp/test_retriever.json")
         # Add some test mappings
-        store.add_mapping(VerseThemeMapping(
-            surah=2, ayah=255, theme_id="tawhid", relevance_score=1.0,
-            annotation="Ayat al-Kursi - supreme verse about Allah's attributes"
-        ))
-        store.add_mapping(VerseThemeMapping(
-            surah=112, ayah=1, theme_id="tawhid", relevance_score=1.0,
-            annotation="Surah Al-Ikhlas - pure monotheism"
-        ))
-        store.add_mapping(VerseThemeMapping(
-            surah=2, ayah=255, theme_id="tawhid-asma-sifat", relevance_score=0.9
-        ))
+        store.add_mapping(
+            VerseThemeMapping(
+                surah=2,
+                ayah=255,
+                theme_id="tawhid",
+                relevance_score=1.0,
+                annotation="Ayat al-Kursi - supreme verse about Allah's attributes",
+            )
+        )
+        store.add_mapping(
+            VerseThemeMapping(
+                surah=112,
+                ayah=1,
+                theme_id="tawhid",
+                relevance_score=1.0,
+                annotation="Surah Al-Ikhlas - pure monotheism",
+            )
+        )
+        store.add_mapping(VerseThemeMapping(surah=2, ayah=255, theme_id="tawhid-asma-sifat", relevance_score=0.9))
         return ThematicRetriever(taxonomy, store)
 
     def test_get_theme_hierarchy(self, retriever):
@@ -197,9 +195,7 @@ class TestThematicRetriever:
         assert "main_themes" in hierarchy
         assert len(hierarchy["main_themes"]) == len(MAIN_THEMES)
         # Check that children are included
-        tawhid = next(
-            t for t in hierarchy["main_themes"] if t["id"] == "tawhid"
-        )
+        tawhid = next(t for t in hierarchy["main_themes"] if t["id"] == "tawhid")
         assert "children" in tawhid
         assert len(tawhid["children"]) > 0
 
