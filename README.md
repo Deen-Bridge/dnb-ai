@@ -69,6 +69,114 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/feedback/stats` | Aggregate answer-quality metrics (admin token) |
 | `GET` | `/feedback/records` | Browse flagged records, filterable (admin token) |
 
+## 🔐 Authentication & Rate Limiting
+
+### Authentication
+
+Protected endpoints (including `/chat` and `/chat/stream`) require an
+`X-API-Key` request header whose value matches the server's `SERVICE_API_KEY`.
+Requests with a missing or invalid key are rejected with `401`. For local
+development you can bypass authentication entirely by setting
+`AUTH_DISABLED=true` (never do this in production — `SERVICE_API_KEY` is
+mandatory when `ENVIRONMENT=production`).
+
+### Rate Limiting
+
+The service enforces three independent limits. All of them are **in-process**
+(non-persistent) and therefore reset on restart and are scoped to a single
+instance — a shared Redis backend would be required for multi-instance
+deployments.
+
+| Limit | Applies to | Default | Env vars |
+|-------|-----------|---------|----------|
+| Request rate (slowapi) | `POST /chat`, `POST /chat/stream` | **60 requests / 60 seconds** per client | `CHAT_RATE_LIMIT_MAX` (`60`), `CHAT_RATE_LIMIT_WINDOW_SECONDS` (`60`) |
+| Hourly token quota | `POST /chat` (per turn) | **100 000 tokens / hour** per user | `CHAT_TOKEN_QUOTA_PER_HOUR` (`100000`) |
+| Feedback submissions | `POST /feedback` | **20 requests / 60 seconds** per IP | `FEEDBACK_RATE_LIMIT_MAX` (`20`), `FEEDBACK_RATE_LIMIT_WINDOW` (`60`) |
+
+**How a client is identified for the request-rate limit.** The slowapi limiter
+keys each caller by, in order of preference: the `X-API-Key` header (so limits
+are enforced **per API key** when authenticated), otherwise the first address in
+`X-Forwarded-For` (the app runs behind a proxy on Render), otherwise the direct
+remote address. The hourly token quota is keyed by the request's `user_id` when
+one is supplied, falling back to the same client key.
+
+#### Response headers — no `X-RateLimit-*`
+
+> **Note:** This service does **not** emit `X-RateLimit-Limit`,
+> `X-RateLimit-Remaining`, or `X-RateLimit-Reset` headers. The slowapi limiter
+> is created as `Limiter(key_func=...)` **without** `headers_enabled=True`, so
+> those informational headers are never added. Do not build clients that depend
+> on them.
+
+The only rate-limit header you can rely on is **`Retry-After`** (an integer
+number of seconds), which is set on:
+
+- `429` responses from `/chat` and `/chat/stream` (request-rate limit), and
+- the `429` returned by the `/chat` hourly token-quota check.
+
+The `/feedback` `429` does **not** include a `Retry-After` header; its
+60-second window is described in the JSON `hint` field instead.
+
+#### 429 response shape
+
+All three limits return HTTP `429` with a JSON body containing a `detail`
+message and a human-readable `hint`, for example:
+
+```jsonc
+// POST /chat or /chat/stream — request-rate limit exceeded
+// (also carries a `Retry-After: <seconds>` header)
+{
+  "detail": "Rate limit exceeded: 60 per 1 minute",
+  "hint": "Too many requests sent. Please wait 60 seconds before retrying."
+}
+```
+
+```jsonc
+// POST /chat — hourly token quota exceeded
+// (also carries a `Retry-After: <seconds>` header)
+{
+  "detail": "Token quota exceeded. Please try again later.",
+  "hint": "Hourly token quota limit reached. Please wait N seconds before sending further messages, or reduce message length."
+}
+```
+
+#### Handling `429` with exponential backoff
+
+Honour `Retry-After` when it is present, and fall back to exponential backoff
+(with jitter) otherwise:
+
+```python
+import random
+import time
+
+import requests
+
+API_URL = "http://localhost:8000/chat"
+HEADERS = {"X-API-Key": "your-service-api-key"}
+
+
+def post_chat(payload: dict, max_retries: int = 5) -> requests.Response:
+    """POST to /chat, retrying on 429 with Retry-After + exponential backoff."""
+    for attempt in range(max_retries):
+        response = requests.post(API_URL, json=payload, headers=HEADERS, timeout=60)
+
+        if response.status_code != 429:
+            response.raise_for_status()
+            return response
+
+        # Prefer the server's Retry-After hint; otherwise back off exponentially.
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is not None:
+            delay = float(retry_after)
+        else:
+            delay = 2 ** attempt  # 1s, 2s, 4s, 8s, ...
+
+        delay += random.uniform(0, 1)  # jitter to avoid thundering herd
+        time.sleep(delay)
+
+    raise RuntimeError(f"Still rate-limited after {max_retries} retries")
+```
+
 ## 🚀 Getting Started
 
 ### Prerequisites
