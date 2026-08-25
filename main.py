@@ -38,7 +38,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
+from calligraphy import router as calligraphy_router
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
@@ -73,6 +75,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from hadith_context import router as hadith_context_router
+from history import router as history_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -81,13 +84,11 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
-from arabic_ocr import router as arabic_ocr_router
-from calligraphy import router as calligraphy_router
+from model_router import router as model_routing_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
-from model_router import router as model_routing_router
-from reformulation import router as reformulation_router
 from reasoning_chains import router as reasoning_router
+from reformulation import router as reformulation_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -115,7 +116,6 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
-from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
@@ -126,6 +126,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from vocabulary import router as vocabulary_router
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +279,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Quranic vocabulary analysis: root extraction, frequency stats, search, and verse examples
+app.include_router(vocabulary_router)
 
 # Configure CORS
 app.add_middleware(
