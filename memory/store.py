@@ -14,7 +14,7 @@ import logging
 import os
 import time
 
-from memory.models import ChatSummary, UserProfile
+from memory.models import ChatSummary, PersonalContextBundle, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,10 @@ def _summary_key(chat_id: str) -> str:
     return f"memory:summary:{chat_id}"
 
 
+def _personal_context_key(user_id: str) -> str:
+    return f"personal:context:{user_id}"
+
+
 class MemoryStore(abc.ABC):
     @abc.abstractmethod
     async def get_profile(self, user_id: str) -> UserProfile | None: ...
@@ -56,11 +60,21 @@ class MemoryStore(abc.ABC):
     @abc.abstractmethod
     async def delete_chat_summary(self, chat_id: str) -> bool: ...
 
+    @abc.abstractmethod
+    async def get_personal_context(self, user_id: str) -> PersonalContextBundle | None: ...
+
+    @abc.abstractmethod
+    async def save_personal_context(self, user_id: str, bundle: PersonalContextBundle) -> None: ...
+
+    @abc.abstractmethod
+    async def delete_personal_context(self, user_id: str) -> bool: ...
+
 
 class InMemoryMemoryStore(MemoryStore):
     def __init__(self) -> None:
         self._profiles: dict[str, tuple[float, UserProfile]] = {}
         self._summaries: dict[str, tuple[float, ChatSummary]] = {}
+        self._personal: dict[str, tuple[float, PersonalContextBundle]] = {}
 
     async def get_profile(self, user_id: str) -> UserProfile | None:
         entry = self._profiles.get(user_id)
@@ -93,6 +107,22 @@ class InMemoryMemoryStore(MemoryStore):
 
     async def delete_chat_summary(self, chat_id: str) -> bool:
         return self._summaries.pop(chat_id, None) is not None
+
+    async def get_personal_context(self, user_id: str) -> PersonalContextBundle | None:
+        entry = self._personal.get(user_id)
+        if entry is None:
+            return None
+        expires_at, bundle = entry
+        if time.monotonic() > expires_at:
+            del self._personal[user_id]
+            return None
+        return bundle
+
+    async def save_personal_context(self, user_id: str, bundle: PersonalContextBundle) -> None:
+        self._personal[user_id] = (time.monotonic() + MEMORY_TTL_SECONDS, bundle)
+
+    async def delete_personal_context(self, user_id: str) -> bool:
+        return self._personal.pop(user_id, None) is not None
 
 
 class RedisMemoryStore(MemoryStore):
@@ -141,4 +171,25 @@ class RedisMemoryStore(MemoryStore):
 
     async def delete_chat_summary(self, chat_id: str) -> bool:
         deleted = await self._redis.delete(_summary_key(chat_id))
+        return deleted > 0
+
+    async def get_personal_context(self, user_id: str) -> PersonalContextBundle | None:
+        raw = await self._redis.get(_personal_context_key(user_id))
+        if raw is None:
+            return None
+        try:
+            return PersonalContextBundle.model_validate(json.loads(raw))
+        except (json.JSONDecodeError, Exception):
+            logger.warning("Corrupt personal context for user %s", user_id)
+            return None
+
+    async def save_personal_context(self, user_id: str, bundle: PersonalContextBundle) -> None:
+        await self._redis.setex(
+            _personal_context_key(user_id),
+            MEMORY_TTL_SECONDS,
+            bundle.model_dump_json(),
+        )
+
+    async def delete_personal_context(self, user_id: str) -> bool:
+        deleted = await self._redis.delete(_personal_context_key(user_id))
         return deleted > 0
