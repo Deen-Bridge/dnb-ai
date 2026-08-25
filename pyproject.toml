@@ -19,7 +19,6 @@ select = [
 ignore = [
     "B008", # FastAPI dependency defaults are function calls by design
     "E501", # line length is enforced by the formatter, not the linter
-    "UP042", # StrEnum requires Python 3.11+, project targets 3.10 for compatibility
 ]
 
 [tool.ruff.lint.isort]
@@ -29,6 +28,11 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests routinely rebind fixtures and assert on broad exception shapes.
 "tests/**" = ["B011"]
+# main.py calls load_dotenv() before importing modules that read env at import
+# time, so module-level imports intentionally follow that setup call.
+"main.py" = ["E402"]
+# conftest.py adjusts sys.path before importing test dependencies.
+"tests/conftest.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -57,11 +61,6 @@ exclude = [
 module = "main"
 disallow_untyped_defs = true
 
-# store.py has pre-existing type errors unrelated to cache implementation
-[[tool.mypy.overrides]]
-module = "store"
-ignore_errors = true
-
 # google-generativeai and its api_core siblings ship incomplete stubs.
 [[tool.mypy.overrides]]
 module = [
@@ -69,6 +68,15 @@ module = [
     "stellar_sdk.*",
     "redis.*",
     "yaml.*",
+    "firebase_admin",
     "firebase_admin.*",
+    "locust",
+    "locust.*",
+    "prometheus_fastapi_instrumentator",
+    "prometheus_fastapi_instrumentator.*",
+    "prometheus_client",
+    "prometheus_client.*",
+    "PIL",
+    "PIL.*",
 ]
 ignore_missing_imports = true
