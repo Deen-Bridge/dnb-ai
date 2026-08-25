@@ -158,9 +158,7 @@ class InMemoryKeywordBackend:
         scores: list[tuple[float, int]] = []
         for idx, tf in enumerate(self._term_freqs):
             length_norm = (
-                self._k1 * (1 - self._b + self._b * self._lengths[idx] / self._avg_len)
-                if self._avg_len
-                else self._k1
+                self._k1 * (1 - self._b + self._b * self._lengths[idx] / self._avg_len) if self._avg_len else self._k1
             )
             score = 0.0
             for term in terms:
@@ -173,7 +171,7 @@ class InMemoryKeywordBackend:
             if score > 0.0:
                 scores.append((score, idx))
         scores.sort(key=lambda pair: (-pair[0], self._passages[pair[1]].id))
-        return [replace(self._passages[idx], score=score) for score, idx in scores[:max(k, 0)]]
+        return [replace(self._passages[idx], score=score) for score, idx in scores[: max(k, 0)]]
 
 
 class HashingVectorBackend:
@@ -216,12 +214,8 @@ class HashingVectorBackend:
             range(len(self._passages)),
             key=lambda i: (-similarities[i], self._passages[i].id),
         )
-        results = [
-            replace(self._passages[i], score=float(similarities[i]))
-            for i in order
-            if similarities[i] > 0.0
-        ]
-        return results[:max(k, 0)]
+        results = [replace(self._passages[i], score=float(similarities[i])) for i in order if similarities[i] > 0.0]
+        return results[: max(k, 0)]
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +244,7 @@ _KEYWORD_MARKERS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         "hadith_reference",
     ),
-    (re.compile("\u201c[^\u201d]+\u201d|\u00ab[^\u00bb]+\u00bb|\"[^\"]{2,}\""), "quoted_text"),
+    (re.compile('\u201c[^\u201d]+\u201d|\u00ab[^\u00bb]+\u00bb|"[^"]{2,}"'), "quoted_text"),
 )
 
 # Abstract/thematic phrasing benefits from semantic neighborhoods.
