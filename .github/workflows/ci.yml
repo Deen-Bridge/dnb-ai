@@ -69,8 +69,8 @@ jobs:
       - name: Run structured citation tests
         run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 
-      - name: Run confidence and abstention tests
-        run: pytest -q tests/test_confidence.py
+      - name: Run confidence, uncertainty, and abstention tests
+        run: pytest -q tests/test_confidence.py tests/test_uncertainty.py
 
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
@@ -135,10 +135,27 @@ jobs:
 
       - name: Verify container starts and /ping returns 200
         run: |
-          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
-          sleep 5
-          curl -sf http://localhost:8000/ping
+          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy -e AUTH_DISABLED=true deenbridge-ai:ci
+          success=0
+          for attempt in $(seq 1 30); do
+            if curl -sf http://localhost:8000/ping; then
+              echo "Container healthcheck passed on attempt $attempt"
+              success=1
+              break
+            fi
+            echo "Waiting for container to start (attempt $attempt/30)..."
+            sleep 1
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Container failed /ping healthcheck. Container logs:"
+            docker logs test-ai
+            docker stop test-ai || true
+            docker rm test-ai || true
+            exit 1
+          fi
+          docker logs test-ai
           docker stop test-ai
+          docker rm test-ai
 
   perf:
     name: Performance Budget
@@ -154,7 +171,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install locust==2.42.2
+          pip install locust>=2.42.2
       - name: Start mock service
         env:
           MOCK_UPSTREAMS: '1'
@@ -162,10 +179,24 @@ jobs:
           MOCK_HORIZON_LATENCY_MS: '25'
           SAFETY_PIPELINE_ENABLED: 'false'
           AUTH_DISABLED: 'true'
+          RATE_LIMIT_ENABLED: 'false'
           GEMINI_API_KEY: ''
         run: |
           uvicorn main:app --host 127.0.0.1 --port 8000 > /tmp/deenbridge-ai.log 2>&1 &
-          for attempt in $(seq 1 30); do curl -sf http://127.0.0.1:8000/ping && break || sleep 1; done
+          success=0
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/ping; then
+              echo "Mock service started successfully on attempt $attempt"
+              success=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Mock service failed to start. Logs:"
+            cat /tmp/deenbridge-ai.log
+            exit 1
+          fi
       - name: Run load test
         run: |
           locust -f loadtest/locustfile.py --headless -H http://127.0.0.1:8000 -u 10 -r 2 -t 45s --csv=/tmp/locust --only-summary

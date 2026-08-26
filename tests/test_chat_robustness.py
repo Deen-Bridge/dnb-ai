@@ -310,20 +310,24 @@ async def test_quota_exceeded_returns_429_with_retry_after(monkeypatch):
 
     # Set a very low quota for testing
     quota_tracker = get_token_quota_tracker()
-    quota_tracker._quota = 100
+    orig_quota = quota_tracker._quota
+    quota_tracker._quota = 3
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # First request should use up the quota
-        await client.post("/chat", json={"prompt": "test"})
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # First request should use up the quota
+            await client.post("/chat", json={"prompt": "test"})
 
-        # Second request should be rate limited
-        res2 = await client.post("/chat", json={"prompt": "test"})
+            # Second request should be rate limited
+            res2 = await client.post("/chat", json={"prompt": "test"})
 
-    assert res2.status_code == 429
-    assert "Retry-After" in res2.headers
-    retry_after = int(res2.headers["Retry-After"])
-    assert retry_after > 0
+        assert res2.status_code == 429
+        assert "Retry-After" in res2.headers
+        retry_after = int(res2.headers["Retry-After"])
+        assert retry_after > 0
+    finally:
+        quota_tracker._quota = orig_quota
 
 
 @pytest.mark.asyncio
