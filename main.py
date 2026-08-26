@@ -41,7 +41,6 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-import metrics
 import telemetry
 from adhkar import corpus as adhkar_corpus
 from arabic_ocr import router as arabic_ocr_router
@@ -115,15 +114,10 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from narrator_biography import router as narrator_router
 from model_router import router as model_routing_router
+from prompts import ExperimentConfig, ExperimentHarness, Variant, get_registry, register_defaults
 from page_analysis import router as page_analysis_router
-from prompts import (
-    ExperimentConfig,
-    ExperimentHarness,
-    Variant,
-    get_registry,
-    register_defaults,
-)
 from query_optimizer import router as query_optimizer_router
 from reasoning_chains import router as reasoning_router
 from recitation_quality import router as recitation_router
@@ -155,6 +149,7 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from tafsir import (
@@ -334,6 +329,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Narrator biography: rijal lookup, isnad resolution, and network graphs
+app.include_router(narrator_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
 app.include_router(recitation_router)
 
@@ -345,12 +342,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Added last, so it is the outermost layer: every response — including CORS
-# preflights and anything an exception handler produces — leaves with an
-# X-Request-ID, and every log record emitted while serving it carries the same
-# id. Must stay outside CORSMiddleware for that to hold.
-app.add_middleware(RequestContextMiddleware)
 
 
 # Response Models
@@ -365,24 +356,9 @@ class CitationVerificationResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    prompt: str = Field(
-        ...,
-        min_length=1,
-        max_length=CHAT_PROMPT_MAX_LENGTH,
-        description="User question after leading and trailing whitespace is removed.",
-        examples=["What are the five pillars of Islam?"],
-    )
-    chat_id: uuid.UUID | None = Field(
-        default=None,
-        description="Existing chat session UUID. Omit it to start a new session.",
-        examples=["550e8400-e29b-41d4-a716-446655440000"],
-    )
-    context: str | None = Field(
-        default=None,
-        max_length=CHAT_CONTEXT_MAX_LENGTH,
-        description="Optional supporting context appended to the model prompt.",
-        examples=["The user is asking about a general educational scenario."],
-    )
+    prompt: str = Field(..., max_length=CHAT_PROMPT_MAX_LENGTH)
+    chat_id: str | None = None
+    context: str | None = Field(None, max_length=CHAT_CONTEXT_MAX_LENGTH)  # Additional context for specific queries
     madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
     language: str | None = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
     user_id: str | None = Field(default=None, max_length=128)  # Opaque user identifier for personalization
@@ -392,11 +368,6 @@ class ChatRequest(BaseModel):
     # pass the user's JWT so this service can fetch history from dnb-backend.
     transactions: list[PurchaseTransaction] | None = None
     auth_token: str | None = None
-
-    @field_validator("prompt", mode="before")
-    @classmethod
-    def strip_prompt_whitespace(cls, value: Any) -> Any:
-        return value.strip() if isinstance(value, str) else value
 
 
 class Message(BaseModel):
@@ -544,29 +515,6 @@ async def purchase_retriever(
         return await build_chat_purchase_context(prompt, transactions=transactions, auth_token=auth_token)
     except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
         logger.warning("Purchase lookup failed; answering without it: %s", exc)
-        return None
-
-
-async def personal_context_retriever(
-    prompt: str,
-    user_id: str | None,
-    auth_token: str | None,
-) -> PersonalContext | None:
-    """Retrieve this user's most-relevant platform records; never fail the turn.
-
-    Deny-by-default lives in ``build_personal_context``: an unauthenticated turn
-    (no ``user_id``/``auth_token``) returns None and touches no network. Any
-    retrieval error degrades to None so the answer is produced without it.
-    """
-    try:
-        return await build_personal_context(
-            prompt,
-            user_id=user_id,
-            auth_token=auth_token,
-            store=memory_store,
-        )
-    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
-        logger.warning("Personal context retrieval failed; answering without it: %s", exc)
         return None
 
 
@@ -1077,8 +1025,6 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
-            if personal_context is not None:
-                system_context += personal_context.prompt_block
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
@@ -1544,8 +1490,6 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     system_context += zakat_context.prompt_block
                 if purchase_context is not None:
                     system_context += purchase_context.prompt_block
-                if personal_context is not None:
-                    system_context += personal_context.prompt_block
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
@@ -1852,27 +1796,29 @@ async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
-    chat_id_str = str(chat_id)
+async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str]:
     try:
-        existed = chat_id_str in active_chats
-        active_chats.pop(chat_id_str, None)
+        existed = chat_id in active_chats
+        active_chats.pop(chat_id, None)
         # Drop this session's feedback bookkeeping too, so the message-id list
         # and answer snapshots do not outlive the conversation they describe.
-        for message_id in chat_message_ids.pop(chat_id_str, []):
-            answer_snapshots.pop((chat_id_str, message_id), None)
+        for message_id in chat_message_ids.pop(chat_id, []):
+            answer_snapshots.pop((chat_id, message_id), None)
         # Remove from persistent store
-        persisted = await session_store.delete_session(chat_id_str)
+        await session_store.delete_session(chat_id)
         if user_id:
-            await session_store.remove_user_chat(user_id, chat_id_str)
+            await session_store.remove_user_chat(user_id, chat_id)
+        if existed:
+            logger.info(f"Deleted chat session: {chat_id}")
+            return {"message": "Chat session deleted successfully"}
+        return {"message": "Chat session not found"}
     except Exception as e:
-        logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
-        raise HTTPException(status_code=500, detail="Internal server error") from e
-
-    if not (existed or persisted):
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    logger.info("chat session deleted", extra={"chat_id": chat_id_str})
-    return {"message": "Chat session deleted successfully"}
+        logger.error("Error deleting chat", exc_info=True)
+        raise APIException(
+            status_code=500,
+            detail="Internal server error",
+            hint="Failed to delete chat session. Please retry.",
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -1959,8 +1905,10 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         ) from exc
 
     logger.info(
-        "feedback stored",
-        extra={"chat_id": body.chat_id, "message_id": body.message_id, "rating": body.rating},
+        "Feedback stored: chat_id=%s message_id=%s rating=%s",
+        body.chat_id,
+        body.message_id,
+        body.rating,
     )
     return {"status": "ok", "feedback_id": record.feedback_id}
 
@@ -2096,37 +2044,25 @@ async def cache_stats() -> dict[str, Any]:
 
 
 @app.get("/metrics")
-async def prometheus_metrics(
-    request: Request,
-    format: str | None = None,
-) -> Response:
-    """Prometheus exposition metrics endpoint for monitoring and observability (#116).
+async def metrics() -> dict[str, Any]:
+    """Lightweight LLM observability surface: token, cost, and latency
+    aggregates plus error rate. Contains only counts, durations, costs, model
+    names, and trace-derived aggregates - never prompt or answer content.
 
-    Exposes standard HTTP request metrics along with custom telemetry for model calls,
-    latencies, tokens, cache hits/misses, confidence scores, and scholar queue depth.
-    Access can be restricted via METRICS_TOKEN and/or METRICS_IP_ALLOWLIST.
+    Cache hit-rate is sourced from the semantic cache's own precise counters
+    (#27) rather than re-derived here, so the numbers stay consistent with
+    /cache/stats. #9 (auth/rate limiting) can consume the cost/token totals
+    below without this endpoint enforcing anything itself.
     """
-    metrics.verify_metrics_access(request)
-    await metrics.refresh_scholar_queue_depth()
-
-    accept_header = request.headers.get("accept", "")
-    if format == "json" or "application/json" in accept_header:
-        snapshot = telemetry.registry.snapshot()
-        snapshot["semantic_cache"] = semantic_cache.get_stats()
-        return JSONResponse(content=snapshot)
-
-    return Response(
-        content=metrics.generate_prometheus_metrics(),
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-    )
-
-
-@app.get("/metrics/json")
-async def metrics_json(request: Request) -> dict[str, Any]:
-    """Return JSON telemetry snapshot for internal consumers."""
-    metrics.verify_metrics_access(request)
+    exact_cache = get_chat_exact_cache()
     snapshot = telemetry.registry.snapshot()
     snapshot["semantic_cache"] = semantic_cache.get_stats()
+    snapshot["exact_cache"] = exact_cache.get_stats()
+    snapshot["combined_cache"] = {
+        "total_hits": semantic_cache.hits + exact_cache.hits,
+        "total_misses": semantic_cache.misses + exact_cache.misses,
+        "total_tokens_saved": semantic_cache.tokens_saved + exact_cache.tokens_saved,
+    }
     return snapshot
 
 
@@ -2342,7 +2278,6 @@ async def resume_experiment(experiment_id: str) -> dict[str, Any]:
 async def delete_experiment(experiment_id: str) -> dict[str, str]:
     experiment_harness.unregister_experiment(experiment_id)
     return {"status": "ok", "experiment_id": experiment_id}
-
 
 if __name__ == "__main__":
     import uvicorn

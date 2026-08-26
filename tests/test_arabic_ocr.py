@@ -28,6 +28,7 @@ from arabic_ocr import (
 )
 from main import app
 
+
 client = TestClient(app)
 
 
