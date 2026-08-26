@@ -88,6 +88,7 @@ def reset_cache():
 
     # Reset token quota tracker
     quota_tracker = get_token_quota_tracker()
+    quota_tracker._window_seconds = 3600.0
     quota_tracker.reset()
 
     patcher = patch("semantic_cache.SEMANTIC_CACHE_ENABLED", True)

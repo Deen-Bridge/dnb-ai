@@ -7,7 +7,7 @@
 [![CI](https://github.com/Deen-Bridge/dnb-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Deen-Bridge/dnb-ai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue.svg)](CONTRIBUTING.md)
-[![Python](https://img.shields.io/badge/Python-3.11-3776ab.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12-3776ab.svg)](https://www.python.org/)
 
 [Live API](https://dnb-ai.onrender.com) · [Web App](https://dnb-frontend.vercel.app) · [Report a Bug](https://github.com/Deen-Bridge/dnb-ai/issues) · [Contribute](CONTRIBUTING.md)
 
@@ -40,6 +40,7 @@ The platform is composed of three services:
 - 🎚️ **Confidence-aware answers** — abstains or hedges instead of guessing, and routes doubtful religious answers to a scholar
 - 🧠 **Per-user long-term memory** — user profiles (knowledge level, madhhab, topics studied, remembered facts) extracted from conversations and injected across sessions; privacy controls with GET/DELETE endpoints and `remember` opt-out per request
 - 📋 **Conversation summarization** — compaction API ready for token-budget-triggered eviction; merges and recompresses summaries when history exceeds budget
+- 🗺️ **Personalized learning paths** — an ordered, justified "what to study next" drawn strictly from a caller-supplied course catalog, with grounding enforced in code so the model can never recommend a non-catalog or already-completed course
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
 - 📚 **Structured citations** — Quran and Hadith references returned as validated, typed objects on every answer, bounds-checked against the 114-surah index
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
@@ -57,11 +58,14 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
+| `GET` | `/metrics` | Prometheus format metrics for monitoring & alerting (see [Observability](docs/observability.md)) |
+| `GET` | `/metrics/json` | JSON telemetry snapshot (model calls, latency, tokens, cache) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
+| `POST` | `/learning-path` | Personalized, catalog-grounded study path from a learner profile + progress (see [Learning-path contract](#learning-path-contract-for-dnb-backend)) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
-| `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
+| `GET` | `/uncertainty/taxonomy` | Islamic epistemology taxonomy and uncertainty quantification categories |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
 | `GET` | `/review/{id}` | A single review item (reviewer token) |
@@ -70,113 +74,58 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/feedback/stats` | Aggregate answer-quality metrics (admin token) |
 | `GET` | `/feedback/records` | Browse flagged records, filterable (admin token) |
 
-## 🔐 Authentication & Rate Limiting
+### Learning-path contract (for `dnb-backend`)
 
-### Authentication
+`POST /learning-path` returns a personalized, ordered study path for a learner.
+It is a companion to `/study/generate`: same structured-output machinery
+(Gemini JSON mode, schema-validated, bounded retry-to-`502`), plus **deterministic
+grounding guardrails** on top.
 
-Protected endpoints (including `/chat` and `/chat/stream`) require an
-`X-API-Key` request header whose value matches the server's `SERVICE_API_KEY`.
-Requests with a missing or invalid key are rejected with `401`. For local
-development you can bypass authentication entirely by setting
-`AUTH_DISABLED=true` (never do this in production — `SERVICE_API_KEY` is
-mandatory when `ENVIRONMENT=production`).
+**This service is stateless about the catalog.** Course and book data lives in
+[`dnb-backend`](https://github.com/Deen-Bridge/dnb-backend), not here — this AI
+service only ever sees purchase *metadata* and holds no catalog or database. So
+**the caller (`dnb-backend`) supplies the candidate courses in the request body**,
+and that `catalog` is the single source of truth for what may be recommended. The
+service **never invents course ids** and never recommends a course absent from the
+submitted catalog.
 
-### Rate Limiting
+Request body:
 
-The service enforces three independent limits. All of them are **in-process**
-(non-persistent) and therefore reset on restart and are scoped to a single
-instance — a shared Redis backend would be required for multi-instance
-deployments.
+| Field | Type | Notes |
+|-------|------|-------|
+| `profile.level` | `beginner \| intermediate \| advanced` | required |
+| `profile.goals` | `[goal]` | required, 1–10; enum: `quran_reading`, `tajweed`, `memorization`, `arabic`, `fiqh_basics`, `aqeedah`, `seerah`, `hadith`, `tafsir` |
+| `profile.time_per_week_hours` | `float` | optional, `0 < h ≤ 168` |
+| `profile.notes` | `string` | optional, ≤ 1000 chars |
+| `progress[]` | `{course_id, title, category, level, completion_pct, quiz_scores?}` | what the learner has studied (`completion_pct` 0–100) |
+| `catalog[]` | `{course_id, title, category, level, prerequisites[], description}` | **required, 1–200 items, unique ids** — the courses the learner may be recommended |
 
-| Limit | Applies to | Default | Env vars |
-|-------|-----------|---------|----------|
-| Request rate (slowapi) | `POST /chat`, `POST /chat/stream` | **60 requests / 60 seconds** per client | `CHAT_RATE_LIMIT_MAX` (`60`), `CHAT_RATE_LIMIT_WINDOW_SECONDS` (`60`) |
-| Hourly token quota | `POST /chat` (per turn) | **100 000 tokens / hour** per user | `CHAT_TOKEN_QUOTA_PER_HOUR` (`100000`) |
-| Feedback submissions | `POST /feedback` | **20 requests / 60 seconds** per IP | `FEEDBACK_RATE_LIMIT_MAX` (`20`), `FEEDBACK_RATE_LIMIT_WINDOW` (`60`) |
+Response (`LearningPath`): ordered `steps[]`, each
+`{course_id, title, order, reason, prerequisites_satisfied, estimated_weeks}`,
+plus a path-level `summary` and a `scholarly_note`.
 
-**How a client is identified for the request-rate limit.** The slowapi limiter
-keys each caller by, in order of preference: the `X-API-Key` header (so limits
-are enforced **per API key** when authenticated), otherwise the first address in
-`X-Forwarded-For` (the app runs behind a proxy on Render), otherwise the direct
-remote address. The hourly token quota is keyed by the request's `user_id` when
-one is supplied, falling back to the same client key.
+**Grounding is enforced in code, not just the prompt.** After the model responds,
+any step is dropped when its `course_id` is not in `catalog`, when the course is
+already completed (`completion_pct ≥ 90`), or when its prerequisites are not yet
+satisfied; survivors are renumbered contiguously from 1. If nothing grounded
+survives, the request is retried with the violations fed back, and exhaustion
+returns `502`. Empty catalog and oversized inputs return `422` **before** any
+model call.
 
-#### Response headers — no `X-RateLimit-*`
-
-> **Note:** This service does **not** emit `X-RateLimit-Limit`,
-> `X-RateLimit-Remaining`, or `X-RateLimit-Reset` headers. The slowapi limiter
-> is created as `Limiter(key_func=...)` **without** `headers_enabled=True`, so
-> those informational headers are never added. Do not build clients that depend
-> on them.
-
-The only rate-limit header you can rely on is **`Retry-After`** (an integer
-number of seconds), which is set on:
-
-- `429` responses from `/chat` and `/chat/stream` (request-rate limit), and
-- the `429` returned by the `/chat` hourly token-quota check.
-
-The `/feedback` `429` does **not** include a `Retry-After` header; its
-60-second window is described in the JSON `hint` field instead.
-
-#### 429 response shape
-
-All three limits return HTTP `429` with a JSON body containing a `detail`
-message and a human-readable `hint`, for example:
-
-```jsonc
-// POST /chat or /chat/stream — request-rate limit exceeded
-// (also carries a `Retry-After: <seconds>` header)
-{
-  "detail": "Rate limit exceeded: 60 per 1 minute",
-  "hint": "Too many requests sent. Please wait 60 seconds before retrying."
-}
+```bash
+curl -s -X POST "http://localhost:8000/learning-path" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "profile": {"level": "beginner", "goals": ["quran_reading", "tajweed"], "time_per_week_hours": 5},
+        "progress": [{"course_id": "arabic-101", "title": "Arabic Alphabet", "category": "arabic", "level": "beginner", "completion_pct": 100}],
+        "catalog": [
+          {"course_id": "quran-101", "title": "Quran Reading Basics", "category": "quran", "level": "beginner", "prerequisites": ["arabic-101"], "description": "Read from the mushaf."},
+          {"course_id": "tajweed-201", "title": "Introduction to Tajweed", "category": "quran", "level": "intermediate", "prerequisites": ["quran-101"], "description": "Rules of recitation."}
+        ]
+      }'
 ```
 
-```jsonc
-// POST /chat — hourly token quota exceeded
-// (also carries a `Retry-After: <seconds>` header)
-{
-  "detail": "Token quota exceeded. Please try again later.",
-  "hint": "Hourly token quota limit reached. Please wait N seconds before sending further messages, or reduce message length."
-}
-```
-
-#### Handling `429` with exponential backoff
-
-Honour `Retry-After` when it is present, and fall back to exponential backoff
-(with jitter) otherwise:
-
-```python
-import random
-import time
-
-import requests
-
-API_URL = "http://localhost:8000/chat"
-HEADERS = {"X-API-Key": "your-service-api-key"}
-
-
-def post_chat(payload: dict, max_retries: int = 5) -> requests.Response:
-    """POST to /chat, retrying on 429 with Retry-After + exponential backoff."""
-    for attempt in range(max_retries):
-        response = requests.post(API_URL, json=payload, headers=HEADERS, timeout=60)
-
-        if response.status_code != 429:
-            response.raise_for_status()
-            return response
-
-        # Prefer the server's Retry-After hint; otherwise back off exponentially.
-        retry_after = response.headers.get("Retry-After")
-        if retry_after is not None:
-            delay = float(retry_after)
-        else:
-            delay = 2 ** attempt  # 1s, 2s, 4s, 8s, ...
-
-        delay += random.uniform(0, 1)  # jitter to avoid thundering herd
-        time.sleep(delay)
-
-    raise RuntimeError(f"Still rate-limited after {max_retries} retries")
-```
+Offline demo (no API key, model mocked): `pytest -q tests/test_learning.py`.
 
 ## 🚀 Getting Started
 
@@ -237,8 +186,8 @@ services:
         sync: false
 ```
 
-> **Note:** this PR does **not** flip production to Docker — that is a
-> deliberate post-merge step for the team.
+> **Note:** Production currently runs on the Python buildpack. To deploy the
+> Docker image instead, set `runtime: docker` in `render.yaml` as shown above.
 
 ### Environment Variables
 
@@ -247,7 +196,7 @@ services:
 | `GEMINI_API_KEY` | Google Gemini API key | — |
 | `SERVICE_API_KEY` | Shared secret for API-key auth; required in production. Clients must send `X-API-Key` header. | — |
 | `AUTH_DISABLED` | Set to `true` to skip API-key auth (local development only) | `false` |
-| `MODEL_NAME` | Gemini model used by the application | gemini-1.5-flash |
+| `MODEL_NAME` | Gemini model used by the application | gemini-2.5-flash |
 | `TEMPERATURE` | Model temperature | 0.7 |
 | `TOP_P` | Nucleus sampling value | 0.8 |
 | `TOP_K` | Top-K sampling value | 40 |
@@ -257,6 +206,7 @@ services:
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
 | `SEMANTIC_CACHE_MAX_ENTRIES` | Maximum cache entries (LRU eviction) | `1000` |
+| `RETRIEVAL_INDEX_PATH` | SQLite path for the persistent retrieval vector index; unset uses the in-memory fallback | — (in-memory) |
 | `SAFETY_PIPELINE_ENABLED` | Layered policy enforcement; defaults to `true` | `true` |
 | `CONFIDENCE_LOW_THRESHOLD` | Below this score the service abstains | `0.40` |
 | `CONFIDENCE_HIGH_THRESHOLD` | At or above this score it answers with no caveat | `0.70` |
@@ -282,6 +232,9 @@ services:
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+| `METRICS_TOKEN` | Bearer token / secret header for `/metrics` endpoint protection | — (unprotected) |
+| `METRICS_IP_ALLOWLIST` | Comma-separated allowed IPs/CIDRs for `/metrics` | — (unprotected) |
+| `ENABLE_METRICS` | Toggle HTTP metrics instrumentation | `true` |
 
 ### Multilingual support (language field)
 
@@ -607,33 +560,6 @@ curl -X POST http://localhost:8000/tafsir \
   response cache, sharing its TTL and eviction settings rather than adding a
   second cache system.
 
-### Batch tafsir lookup
-
-`POST /tafsir/batch` retrieves tafsir for multiple references in one request.
-References are fetched concurrently and each result is keyed by the exact
-reference submitted. Invalid references or individual retrieval failures do not
-discard successful results; they appear under `errors` instead.
-
-```bash
-curl -X POST http://localhost:8000/tafsir/batch \
-  -H 'Content-Type: application/json' \
-  -d '{"references": ["2:255", "103:1-3", "112:1-4"], "tafsirs": ["ibn-kathir"], "language": "en"}'
-```
-
-```jsonc
-{
-  "results": {
-    "2:255": {"ayat": [], "language": "en"},
-    "103:1-3": {"ayat": [], "language": "en"},
-    "112:1-4": {"ayat": [], "language": "en"}
-  },
-  "errors": {}
-}
-```
-
-The request accepts at most 10 references and 20 total ayat. Exceeding either
-limit rejects the batch before retrieval begins.
-
 In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
 "explain 2:255") is detected offline and answered from the same retrieved
 passages, with the model instructed to attribute each claim to a named mufassir
@@ -763,6 +689,83 @@ python scripts/export_eval_candidates.py --db feedback.db --output candidates.js
 Near-duplicate prompts are deduplicated; approved candidates feed the harness
 and, via #56, the semantic cache.
 
+### Retrieval infrastructure (chunking, embedding & vector index)
+
+The [`retrieval/`](retrieval/) package is the shared foundation the RAG epic
+builds on — a document **chunking** strategy, an **embedding** step, a
+**persistent vector store**, and an **incremental reindex + backfill** pipeline
+that keeps the index in sync as content changes. It ships the pipeline only; the
+product layers on top (personal-context #1, public-knowledge #2, access-scoped
+retrieval #3, hybrid + reranking #5) build against it.
+
+- **Chunking** ([`retrieval/chunking.py`](retrieval/chunking.py)) is
+  deterministic and content-type-aware: ayah and hadith records stay **atomic**,
+  while long prose is windowed by a token budget with overlap. Every chunk
+  carries stable `source` / `source_id` / `content_hash` metadata plus the
+  `scope` / `published` fields access-scoped retrieval (#3) filters on.
+- **Embedding** reuses the existing `text-embedding-004` seam
+  (`semantic_cache.embed_text`, offline-swappable via `set_fake_embedding`) and
+  **dedupes by `content_hash`**, so unchanged content is never re-embedded.
+- **Vector store** ([`retrieval/index.py`](retrieval/index.py)) is chosen by
+  `create_vector_store()` the way `create_session_store` picks its backend: a
+  durable **SQLite** store when `RETRIEVAL_INDEX_PATH` is set, or an in-memory
+  fallback that keeps local dev and CI offline and restart-free.
+- **Incremental sync** upserts changed chunks and deletes removed `source_id`s;
+  the **semantic cache now runs on this shared store** (its former linear scan is
+  retired).
+
+Rebuild the full index from the bundled corpora — idempotent, so re-running
+re-embeds nothing:
+
+```bash
+# Durable SQLite index (real embeddings via text-embedding-004):
+RETRIEVAL_INDEX_PATH=data/retrieval_index.db python scripts/build_index.py
+
+# Offline demo / CI — deterministic fake embeddings, no network or API key:
+python scripts/build_index.py --index-path /tmp/idx.db --fake-embeddings
+```
+
+The full schema and design notes live in [`docs/retrieval.md`](docs/retrieval.md).
+
+### Structured logging & request correlation
+
+Logs are **newline-delimited JSON on stdout** ([`logging_config.py`](logging_config.py)),
+so Render's log search — or any aggregator added later — can filter by field
+instead of grepping prose. Every record carries `timestamp`, `level`, `logger`,
+`message` and `request_id`, plus whatever fields the call site attached:
+
+```json
+{"timestamp":"2026-08-19T14:02:11.418+00:00","level":"INFO","logger":"main","message":"chat request received","request_id":"2d0f8912b04748c9bc0203d4756f9084","chat_id":"431b0bee-f63a-40c8-a963-1a38d719cdce","new_session":true,"prompt_chars":57,"context_chars":0}
+{"timestamp":"2026-08-19T14:02:11.421+00:00","level":"INFO","logger":"telemetry","message":"model call completed","request_id":"2d0f8912b04748c9bc0203d4756f9084","stage":"generation","model":"gemini-2.5-flash","total_tokens":812,"cost_usd":0.00019,"latency_ms":1843.2}
+{"timestamp":"2026-08-19T14:02:11.423+00:00","level":"INFO","logger":"request","message":"request completed","request_id":"2d0f8912b04748c9bc0203d4756f9084","http_method":"POST","path":"/chat","status_code":200,"duration_ms":1906.4}
+```
+
+**One id per request, everywhere.** A `contextvars`-backed filter stamps the id
+onto every record emitted while a request is served — including from modules
+that know nothing about HTTP — and the same value goes back on the
+**`X-Request-ID`** response header. An inbound `X-Request-ID` is honoured (after
+validation, since it is echoed into a header and into logs), so a trace started
+in `dnb-backend` continues here. It is also the telemetry trace id, so
+`X-Trace-Id` and `X-Request-ID` are the same value: one id links a log search, a
+response header and a `/metrics` trace.
+
+**Prompt content is never logged by default.** These are religious questions —
+sensitive personal content. Log records carry `prompt_chars` and `chat_id`, not
+the prompt. Raw text requires an explicit `LOG_PROMPTS=true` opt-in.
+
+**Failures carry their stack trace.** Exception handlers use `logger.exception`,
+so a production 500 lands as one JSON record with a nested `exception` object
+holding the type, message and full traceback.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `LOG_LEVEL` | `INFO` | Root log level |
+| `LOG_JSON` | `true` | `false` prints plain text, friendlier on a local console |
+| `LOG_PROMPTS` | `false` | `true` includes raw prompt text — sensitive, keep off |
+| `LOG_ACCESS` | `false` | `true` restores uvicorn's access log (otherwise the `request completed` record replaces it, avoiding double-logging) |
+
+Offline demo (no API key, model mocked): `pytest -q tests/test_structured_logging.py`.
+
 ### Content-safety testing
 
 The versioned policy lives in [`safety/policy.yaml`](safety/policy.yaml), with
@@ -780,7 +783,7 @@ This repository is hoping to  participates in the  **[Stellar Drips Wave](https:
 
 - All pull requests target the **`dev`** branch (`main` is releases only)
 - CI must pass before review
-- One contributor per issue — comment to claim it first
+- One contributor per issue — request it through the campaign (Drips Wave / GrantFox OSS); the maintainer assigns it. Please don't open a PR for an issue you haven't been assigned.
 
 Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full workflow, coding standards, and Wave rules.
 
@@ -793,3 +796,6 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 - 🌐 Website: [dnb-frontend.vercel.app](https://dnb-frontend.vercel.app)
 - 🐦 X/Twitter: [@deen_bridge](https://x.com/deen_bridge)
 - 🏢 Organization: [github.com/Deen-Bridge](https://github.com/Deen-Bridge)
+# Provider routing
+
+Gemini remains the default provider. To enable fallback routing, set `LLM_FALLBACKS=openai-compatible` together with `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`, and `OPENAI_COMPATIBLE_MODEL`. The router opens a provider circuit after three consecutive failures and probes it again after 60 seconds. `GET /providers/status` reports provider health without exposing credentials.

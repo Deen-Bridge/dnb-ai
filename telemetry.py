@@ -10,8 +10,10 @@ here takes counts, durations, model names, and trace IDs. Prompt and answer
 text never enter this module, so it is impossible for content to leak into a
 metric label or the spans logged from here. Related work:
 
-* #11 owns structured logging + request/trace IDs; until it lands we mint a
-  uuid4 per request (see ``new_trace_id``) and note #11 should own the scheme.
+* #11 owns structured logging + request/trace IDs, and now supplies them: a
+  trace minted inside a request reuses that request's id (see
+  ``new_trace_id``), so ``X-Trace-Id``, ``X-Request-ID`` and every log line
+  carry one value instead of two.
 * #13 owns token counting for prompt-budget purposes; we only read the actual
   ``usage_metadata`` the Gemini SDK already returns, so we do not duplicate it.
 * #9 (auth/rate limiting) and #13 can consume ``estimate_cost`` /
@@ -31,6 +33,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
+
+from logging_config import get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -208,8 +212,8 @@ class Trace:
         rounded = round(duration_ms, 2)
         self.spans.append(Span(name=name, duration_ms=rounded))
         logger.info(
-            "span=%s",
-            {"trace_id": self.trace_id, "stage": name, "duration_ms": rounded},
+            "stage completed",
+            extra={"trace_id": self.trace_id, "stage": name, "duration_ms": rounded},
         )
 
     @contextmanager
@@ -228,8 +232,14 @@ class Trace:
 
 
 def new_trace_id() -> str:
-    """Per-request trace id. #11 should eventually own the id scheme."""
-    return uuid.uuid4().hex
+    """Per-request trace id, unified with the request id from #11.
+
+    Inside a request this is the same value that every log record carries and
+    that goes back on the ``X-Request-ID`` header, so a log search and a
+    response header lead to the same trace. Outside a request — a background
+    task, a direct unit test — it falls back to a fresh uuid4.
+    """
+    return get_request_id() or uuid.uuid4().hex
 
 
 # ---------------------------------------------------------------------------
@@ -371,5 +381,18 @@ def record_model_call(
     if trace is not None:
         trace.calls.append(call)
     registry.record_call(call)
-    logger.info("llm=%s", call.as_labels())
+    try:
+        import metrics
+
+        metrics.record_model_call_metrics(
+            model=call.model,
+            stage=call.stage,
+            latency_ms=call.latency_ms,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to record Prometheus model metrics: %s", exc)
+
+    logger.info("model call completed", extra=call.as_labels())
     return call
