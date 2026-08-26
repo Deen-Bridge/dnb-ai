@@ -118,6 +118,7 @@ from stellar import (
 )
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
+from misinformation_api import router as misinformation_router
 from swahili import (
     analyze_swahili,
     router as swahili_router,
@@ -285,6 +286,8 @@ app.include_router(model_routing_router)
 app.include_router(arabic_ocr_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
+# Religious misinformation flagging: detection, correction, and blocking of misinformation
+app.include_router(misinformation_router)
 
 from adhkar import corpus as adhkar_corpus
 
