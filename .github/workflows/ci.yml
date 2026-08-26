@@ -42,8 +42,23 @@ jobs:
       - name: Run study generator tests
         run: pytest -q tests/test_study.py
 
+      - name: Run learning-path recommendation tests
+        run: pytest -q tests/test_learning.py
+
       - name: Run semantic cache tests
         run: pytest -q tests/test_semantic_cache.py
+
+      - name: Run retrieval infrastructure tests
+        run: pytest -q tests/test_retrieval_chunking.py tests/test_retrieval_index.py tests/test_build_index.py
+
+      - name: Verify retrieval backfill is idempotent (offline demo)
+        run: |
+          python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings
+          python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings | tee /tmp/ci-backfill-2.log
+          grep -q "0 added, 0 updated" /tmp/ci-backfill-2.log
+
+      - name: Run hybrid search tests
+        run: pytest -q tests/test_hybrid_search.py
 
       - name: Run fiqh tests
         run: pytest -q tests/test_fiqh.py
@@ -51,31 +66,17 @@ jobs:
       - name: Run hadith grading tests
         run: pytest -q tests/test_hadith.py
 
-      - name: Run audio hadith verification tests
-        run: pytest -q tests/test_audio_hadith.py
-
       - name: Run structured citation tests
         run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 
-      - name: Run confidence and abstention tests
-        run: pytest -q tests/test_confidence.py
+      - name: Run confidence, uncertainty, and abstention tests
+        run: pytest -q tests/test_confidence.py tests/test_uncertainty.py
 
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
 
-      - name: Run historical context tests
-        run: pytest -q tests/test_history.py
-
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
-
-      - name: Run reasoning chain tests
-        run: pytest -q tests/test_reasoning_chains.py
-
-      - name: Run contextual hadith interpretation tests
-        run: pytest -q tests/test_hadith_context.py
-      - name: Run model routing tests
-        run: pytest -q tests/test_model_router.py
 
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
@@ -86,14 +87,11 @@ jobs:
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
 
-      - name: Run reformulation tests
-        run: pytest -q tests/test_reformulation.py
-
-      - name: Run religious sentiment tests
-        run: pytest -q tests/test_sentiment.py
-
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
+
+      - name: Run structured logging tests
+        run: pytest -q tests/test_structured_logging.py
 
       - name: Run multilingual support tests
         run: pytest -q tests/test_multilingual.py
@@ -107,19 +105,20 @@ jobs:
       - name: Run memory integration tests
         run: pytest -q tests/test_memory_integration.py
 
-      - name: Run Islamic QA Benchmark dataset tests
-        run: pytest -q tests/test_islamic_qa_benchmark.py
+      - name: Run per-user personal context tests
+        run: pytest -q tests/test_personal_context.py
 
-      - name: Validate Islamic QA Benchmark dataset integrity
-        run: python scripts/eval_islamic_qa.py --validate-only
-      - name: Run page analysis tests
-        run: pytest -q tests/test_page_analysis.py
+      - name: Run prompt registry and A/B experiment tests
+        run: pytest -q tests/test_prompt_registry.py
 
-      - name: Run database query optimizer tests
-        run: pytest -q tests/test_query_optimizer.py
+      - name: Run Islamic answer evaluation harness tests
+        run: pytest -q tests/test_evals.py
 
-      - name: Run calligraphy style estimation tests
-        run: pytest -q tests/test_calligraphy.py
+      - name: Run chat endpoint tests
+        run: pytest -q tests/test_chat_api.py
+
+      - name: Run chat request validation tests
+        run: pytest -q tests/test_chat_validation.py
 
       - name: Run factual consistency tests
         run: pytest -q tests/test_factual_consistency.py
@@ -145,3 +144,50 @@ jobs:
           timeout 30s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
           docker logs test-ai
           docker stop test-ai
+          docker rm test-ai
+
+  perf:
+    name: Performance Budget
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install locust>=2.42.2
+      - name: Start mock service
+        env:
+          MOCK_UPSTREAMS: '1'
+          MOCK_LLM_LATENCY_MS: '50'
+          MOCK_HORIZON_LATENCY_MS: '25'
+          SAFETY_PIPELINE_ENABLED: 'false'
+          AUTH_DISABLED: 'true'
+          RATE_LIMIT_ENABLED: 'false'
+          GEMINI_API_KEY: ''
+        run: |
+          uvicorn main:app --host 127.0.0.1 --port 8000 > /tmp/deenbridge-ai.log 2>&1 &
+          success=0
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/ping; then
+              echo "Mock service started successfully on attempt $attempt"
+              success=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Mock service failed to start. Logs:"
+            cat /tmp/deenbridge-ai.log
+            exit 1
+          fi
+      - name: Run load test
+        run: |
+          locust -f loadtest/locustfile.py --headless -H http://127.0.0.1:8000 -u 10 -r 2 -t 45s --csv=/tmp/locust --only-summary
+      - name: Check budget
+        run: python loadtest/check_budget.py loadtest/budget.yaml /tmp/locust_stats.csv

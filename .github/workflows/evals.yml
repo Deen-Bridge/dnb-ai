@@ -1,0 +1,72 @@
+name: Islamic Answer Evaluations
+
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: Number of samples per dataset case
+        required: false
+        default: "1"
+        type: string
+      judge:
+        description: Run the optional second Gemini judge
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  evaluate:
+    name: Evaluate live chat answers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      AUTH_DISABLED: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start service
+        run: |
+          uvicorn main:app --host 127.0.0.1 --port 8000 > /tmp/dnb-ai-evals.log 2>&1 &
+          echo $! > /tmp/dnb-ai-evals.pid
+
+      - name: Wait for service
+        run: |
+          timeout 60 bash -c 'until curl --fail --silent http://127.0.0.1:8000/ping; do sleep 2; done'
+
+      - name: Run evaluation harness
+        run: |
+          if [ "${{ inputs.judge }}" = "true" ]; then
+            judge="--judge"
+          else
+            judge=""
+          fi
+          python evals/run.py \
+            --url http://127.0.0.1:8000 \
+            --samples "${{ inputs.samples }}" \
+            --output "evals/reports/run-${{ github.run_id }}.json" \
+            ${judge}
+
+      - name: Show service log on failure
+        if: failure()
+        run: cat /tmp/dnb-ai-evals.log
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: islamic-answer-evaluation-${{ github.run_id }}
+          path: evals/reports/run-${{ github.run_id }}.json
+          if-no-files-found: warn

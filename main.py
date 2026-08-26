@@ -85,7 +85,9 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
-from model_router import router as model_routing_router
+from arabic_ocr import router as arabic_ocr_router
+from context_manager import router as context_router
+from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from reasoning_chains import router as reasoning_router
@@ -199,7 +201,8 @@ def _rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 
-limiter = Limiter(key_func=_rate_limit_key)
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() not in {"0", "false", "off"}
+limiter = Limiter(key_func=_rate_limit_key, enabled=RATE_LIMIT_ENABLED)
 app.state.limiter = limiter
 
 
@@ -235,7 +238,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    errors = exc.errors()
+    errors = []
+    for err in exc.errors():
+        err_dict = dict(err)
+        if isinstance(err_dict.get("input"), bytes):
+            err_dict["input"] = err_dict["input"].decode("utf-8", errors="replace")
+        errors.append(err_dict)
     hints = []
     for err in errors:
         loc = " -> ".join(str(part) for part in err.get("loc", []) if part != "body")
@@ -258,6 +266,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Stellar integration: read-only zakat/balance features on the network
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
+app.include_router(faraid_router)
+app.include_router(learning_router)
+app.include_router(worship_router)
+
 app.include_router(reasoning_router)
 app.include_router(study_router)
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
@@ -310,6 +322,8 @@ async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
         "message": message,
     }
 
+# Context manager: session-based user preferences, topic continuity, and follow-up detection
+app.include_router(context_router)
 
 # Configure CORS
 app.add_middleware(
@@ -949,15 +963,16 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         # Use a conservative multiplier for system context and response
         estimated_tokens = int(estimated_tokens * 3)  # Account for system prompt and response
 
-        quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
-        if not quota_allowed:
-            logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
-            raise APIException(
-                status_code=429,
-                detail="Token quota exceeded. Please try again later.",
-                hint=f"Hourly token quota limit reached. Please wait {retry_after} seconds before sending further messages, or reduce message length.",
-                headers={"Retry-After": str(retry_after)},
-            )
+        if RATE_LIMIT_ENABLED:
+            quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
+            if not quota_allowed:
+                logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
+                raise APIException(
+                    status_code=429,
+                    detail="Token quota exceeded. Please try again later.",
+                    hint=f"Hourly token quota limit reached. Please wait {retry_after} seconds before sending further messages, or reduce message length.",
+                    headers={"Retry-After": str(retry_after)},
+                )
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
         async def generate(safety_prompt: str) -> str:
@@ -1133,10 +1148,9 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         )
 
         # --- Two-tier cache write ---
-        # Only confident answers are cached. Replaying an abstention, or a
-        # hedged answer whose warning would outlive the doubt that caused it,
-        # would spread one turn's uncertainty to every later asker.
-        is_cacheable = is_cacheable and assessment.band is ConfidenceBand.CONFIDENT
+        # Only non-abstained answers are cached. Replaying an abstention
+        # would spread one turn's refusal to later askers.
+        is_cacheable = is_cacheable and assessment.band is not ConfidenceBand.ABSTAIN
         if is_cacheable and (safety_result is None or safety_result.generator_called):
             # Get token count from telemetry for savings tracking
             totals = trace.request_totals()
@@ -1395,7 +1409,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
         safety_enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
 
-        # --- Purchase history ---
+        # --- Purchase history & personal context ---
         purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
 
         async def event_generator() -> AsyncGenerator[str, None]:
