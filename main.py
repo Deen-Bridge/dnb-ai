@@ -132,6 +132,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from vocabulary import router as vocabulary_router
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Quranic vocabulary analysis: root extraction, frequency stats, search, and verse examples
+app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
 # Religious misinformation flagging: detection, correction, and blocking of misinformation
@@ -309,7 +312,6 @@ async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
         "matches": matches,
         "message": message,
     }
-
 
 # Configure CORS
 app.add_middleware(
