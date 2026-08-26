@@ -34,7 +34,6 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-import metrics
 import telemetry
 from calligraphy_ocr import (
     CalligraphyAnalysis,
@@ -83,7 +82,6 @@ from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_ha
 from history import trim_history
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from learning import router as learning_router
-from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
 from manuscript_ocr import (
     ManuscriptAnalysis,
     PoorQualityError,
@@ -157,31 +155,20 @@ from tafsir import (
 from worship import router as worship_router
 from latency_profiler import router as latency_profiler_router
 
-# Install JSON logging before any module-level code emits a record, and
-# independently of uvicorn's own loggers (uvicorn configures logging while
-# importing this module, so this call runs after and deliberately wins).
-configure_logging()
-
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
 GEMINI_API_KEY = settings.gemini_api_key
 
-CHAT_PROMPT_MAX_LENGTH = 4000
-CHAT_CONTEXT_MAX_LENGTH = 8000
-
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
 
-# --- Prometheus instrumentation ---
 metrics.setup_metrics(app)
 
-# --- Prompt template registry and A/B experimentation ---
-register_defaults()
 prompt_registry = get_registry()
+register_defaults()
 experiment_harness = ExperimentHarness(prompt_registry)
 
 # --- Service API-key authentication ---
@@ -233,7 +220,8 @@ def _rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 
-limiter = Limiter(key_func=_rate_limit_key)
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() not in {"0", "false", "off"}
+limiter = Limiter(key_func=_rate_limit_key, enabled=RATE_LIMIT_ENABLED)
 app.state.limiter = limiter
 
 
@@ -270,12 +258,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Added last, so it is the outermost layer: every response — including CORS
-# preflights and anything an exception handler produces — leaves with an
-# X-Request-ID, and every log record emitted while serving it carries the same
-# id. Must stay outside CORSMiddleware for that to hold.
-app.add_middleware(RequestContextMiddleware)
 
 
 # Response Models
@@ -318,11 +300,6 @@ class ChatRequest(BaseModel):
     transactions: list[PurchaseTransaction] | None = None
     auth_token: str | None = None
 
-    @field_validator("prompt", mode="before")
-    @classmethod
-    def strip_prompt_whitespace(cls, value: Any) -> Any:
-        return value.strip() if isinstance(value, str) else value
-
 
 class Message(BaseModel):
     role: str
@@ -341,7 +318,6 @@ class ChatResponse(BaseModel):
     chat_id: str
     message_id: str | None = None  # stable id of the answer just returned
     history: list[Message] = []
-    truncated: bool = False  # True when oldest turn-pairs were dropped for the token budget
     moderation: Moderation | None = None
     fiqh: FiqhInfo | None = None
     hadith_references: list[HadithReference] | None = None
@@ -353,8 +329,6 @@ class ChatResponse(BaseModel):
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
-    # A/B experiment assignment (None when no experiment is active).
-    experiment: ExperimentAssignment | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -474,29 +448,6 @@ async def purchase_retriever(
         return None
 
 
-async def personal_context_retriever(
-    prompt: str,
-    user_id: str | None,
-    auth_token: str | None,
-) -> PersonalContext | None:
-    """Retrieve this user's most-relevant platform records; never fail the turn.
-
-    Deny-by-default lives in ``build_personal_context``: an unauthenticated turn
-    (no ``user_id``/``auth_token``) returns None and touches no network. Any
-    retrieval error degrades to None so the answer is produced without it.
-    """
-    try:
-        return await build_personal_context(
-            prompt,
-            user_id=user_id,
-            auth_token=auth_token,
-            store=memory_store,
-        )
-    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
-        logger.warning("Personal context retrieval failed; answering without it: %s", exc)
-        return None
-
-
 def get_safety_settings() -> list[dict[str, str]]:
     return [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -509,54 +460,6 @@ def get_safety_settings() -> list[dict[str, str]]:
 # In-memory session store for demo purposes
 sessions: dict[str, Any] = {}
 active_chats: dict[str, Any] = {}
-provider_router: ProviderRouter | None = None
-
-
-class _ProviderMessage:
-    def __init__(self, role: str, content: str) -> None:
-        self.role = role
-        self.parts = [type("Part", (), {"text": content})()]
-
-
-class _ProviderChatSession:
-    def __init__(self, history: list[ProviderMessage]) -> None:
-        self.history = [_ProviderMessage(message.role, message.content) for message in history]
-
-    def append(self, role: str, content: str) -> None:
-        self.history.append(_ProviderMessage(role, content))
-
-
-def _build_provider_router() -> ProviderRouter | None:
-    primary_name = os.getenv("LLM_PRIMARY", "gemini").strip().lower()
-    fallback_names = [name.strip().lower() for name in os.getenv("LLM_FALLBACKS", "").split(",") if name.strip()]
-    if not fallback_names:
-        return None
-    provider_names = [primary_name, *fallback_names]
-    providers: list[Any] = []
-    for name in provider_names:
-        if name == "gemini" and GEMINI_API_KEY:
-            providers.append(GeminiProvider(GEMINI_API_KEY, settings.model_name))
-            continue
-        if name in {"openai", "openai-compatible", "openrouter", "groq"}:
-            api_key = os.getenv(f"{name.upper().replace('-', '_')}_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-            base_url = (
-                os.getenv(f"{name.upper().replace('-', '_')}_BASE_URL")
-                or os.getenv("OPENAI_BASE_URL")
-                or "https://api.openai.com/v1"
-            )
-            model = os.getenv(f"{name.upper().replace('-', '_')}_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
-            if api_key:
-                providers.append(OpenAICompatProvider(name, api_key, base_url, model))
-    if not providers:
-        return None
-    return ProviderRouter(
-        providers,
-        failure_threshold=int(os.getenv("LLM_CIRCUIT_FAILURE_THRESHOLD", "3")),
-        cooldown_seconds=float(os.getenv("LLM_CIRCUIT_COOLDOWN_SECONDS", "60")),
-    )
-
-
-provider_router = _build_provider_router()
 
 # --- Feedback support ------------------------------------------------------
 # The generation config captured into a feedback record so a flagged answer is
@@ -626,9 +529,15 @@ async def require_admin(token: str | None = Depends(_admin_header)) -> None:
         raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
 
 
-_islamic_ctx_tpl = prompt_registry.get("islamic_context")
-assert _islamic_ctx_tpl is not None, "islamic_context template not registered"
-ISLAMIC_CONTEXT = _islamic_ctx_tpl.render()
+ISLAMIC_CONTEXT = (
+    "You are an AI assistant for Deen Bridge, a platform for authentic Islamic education. "
+    "Provide respectful, accurate, and context-aware responses grounded in authentic Islamic knowledge.\n\n"
+    "POLICY ON CITATIONS:\n"
+    "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
+    "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
+    "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
+    "general knowledge—do NOT fabricate references.\n"
+)
 
 SUPPORTED_LANGUAGES = {
     "ar": "Arabic",
@@ -645,9 +554,18 @@ SUPPORTED_LANGUAGES = {
     "tl": "Tagalog",
 }
 
-_lang_instr_tpl = prompt_registry.get("language_instructions")
-assert _lang_instr_tpl is not None, "language_instructions template not registered"
-LANGUAGE_INSTRUCTIONS = _lang_instr_tpl.render(response_language="auto")
+LANGUAGE_INSTRUCTIONS = (
+    "\n\nLANGUAGE POLICY:\n"
+    "- When a response_language code is provided, respond entirely in that language.\n"
+    "- When no response_language is provided (auto mode), respond in the same language as the user's question.\n"
+    "- ALWAYS quote Quran in the original Arabic script (e.g. بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ) "
+    "followed by a translation in the response language, with the surah:ayah reference.\n"
+    "- Use standard transliteration for core Islamic terms (e.g. salat, zakat, hajj, shahada) "
+    "when writing in Latin-script languages.\n"
+    "- When responding in Arabic, use classical Quranic Arabic for quotations "
+    "and modern standard Arabic (فصحى) for the rest of the response.\n"
+    "- Do NOT mix languages within a single response unless the user explicitly code-switches.\n"
+)
 
 
 def normalize_language(lang: str | None) -> str | None:
@@ -667,19 +585,6 @@ def normalize_language(lang: str | None) -> str | None:
         return base
     logger.warning("Unrecognized language code %r; falling back to auto-detection", lang)
     return None
-
-
-def get_model() -> genai.GenerativeModel:
-    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
-        return _MockModel()  # type: ignore[return-value]
-    return genai.GenerativeModel(
-        model_name=settings.model_name,
-        system_instruction=ISLAMIC_CONTEXT,
-        safety_settings=get_safety_settings(),
-    )
-
-
-GEMINI_TIMEOUT = settings.gemini_timeout
 
 
 class _MockResponse:
@@ -703,7 +608,8 @@ class _MockChatSession:
 
     async def send_message_async(self, message: str, **_kwargs: Any) -> _MockResponse:
         latency_ms = int(os.getenv("MOCK_LLM_LATENCY_MS", "50"))
-        await asyncio.sleep(max(0, latency_ms) / 1000)
+        if latency_ms > 0:
+            await asyncio.sleep(latency_ms / 1000)
         self.history.extend([_MockContent("user", message), _MockContent("model", _MockResponse.text)])
         return _MockResponse()
 
@@ -711,6 +617,19 @@ class _MockChatSession:
 class _MockModel:
     def start_chat(self, history: list[Any] | None = None) -> _MockChatSession:
         return _MockChatSession(history)
+
+
+def get_model() -> genai.GenerativeModel:
+    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
+        return _MockModel()  # type: ignore[return-value]
+    return genai.GenerativeModel(
+        model_name=settings.model_name,
+        system_instruction=ISLAMIC_CONTEXT,
+        safety_settings=get_safety_settings(),
+    )
+
+
+GEMINI_TIMEOUT = settings.gemini_timeout
 
 
 def extract_text_safely(response: Any) -> str | None:
@@ -861,8 +780,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 "new_session": is_new_chat,
                 "prompt_chars": len(prompt),
                 "context_chars": len(extra_context) if extra_context else 0,
-                "language": request.language,
-                "has_user_id": bool(request.user_id),
+                "language": body.language,
+                "has_user_id": bool(body.user_id),
                 **prompt_debug_fields(prompt),
             },
         )
@@ -926,7 +845,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
 
             # Per-user retrieval: only this user's most-relevant records (deny by
             # default without user_id/auth_token; ownership re-checked post-fetch).
-            personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
+            personal_context = await personal_context_retriever(body.prompt, body.user_id, body.auth_token)
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
@@ -970,10 +889,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     ]
                 )
                 active_chats[chat_id] = chat_session
-                logger.info(
-                    "semantic cache hit",
-                    extra={"chat_id": chat_id, "prompt_chars": len(prompt), **prompt_debug_fields(prompt)},
-                )
+                logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
                 _finalize()
                 _succeeded = True
@@ -990,42 +906,14 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             semantic_cache.bypasses += 1
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
-        truncated = False
-
         async def generate(safety_prompt: str) -> str:
-            if provider_router is not None:
-                persisted = await session_store.load_history(chat_id)
-                provider_history = [
-                    ProviderMessage(item.get("role", "user"), item.get("text", ""))
-                    for item in persisted
-                    if item.get("text")
-                ]
-                system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
-                if is_fiqh:
-                    system_context += FIQH_IKHTILAF_CONTEXT
-                context = f"Additional context: {extra_context}\n\n" if extra_context else ""
-                full_prompt = f"{context}User question: {safety_prompt}"
-                reply = await provider_router.generate(
-                    provider_history + [ProviderMessage("user", full_prompt)],
-                    system=system_context,
-                    config=ProviderGenerationConfig(**GENERATION_CONFIG),
-                )
-                chat_session = active_chats.setdefault(chat_id, _ProviderChatSession(provider_history))
-                chat_session.append("user", full_prompt)
-                chat_session.append("model", reply.text)
-                return reply.text
             if chat_id not in active_chats:
-                logger.info("chat session created", extra={"chat_id": chat_id})
+                logger.info(f"Creating new chat session: {chat_id}")
                 model = get_model()
                 # Load persisted history if available
                 persisted = await session_store.load_history(chat_id)
                 history = dicts_to_contents(persisted) if persisted else []
                 active_chats[chat_id] = model.start_chat(history=history)
-
-            # Enforce the conversation-history token/turn budget before sending,
-            # dropping oldest turn-pairs so the prompt can't grow unbounded (#13).
-            nonlocal truncated
-            truncated = trim_history(active_chats[chat_id])
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
             if is_fiqh:
@@ -1038,14 +926,12 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
-            if personal_context is not None:
-                system_context += personal_context.prompt_block
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
-            logger.info("sending message to model", extra={"chat_id": chat_id})
+            logger.info("Sending message to chat...")
             _t0 = time.perf_counter()
             response = await send_message_with_retry(
                 active_chats[chat_id],
@@ -1078,9 +964,8 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _pp_start = time.perf_counter()
 
         logger.info(
-            "safety evaluated",
-            extra={
-                "chat_id": chat_id,
+            "safety=%s",
+            {
                 "policy_id": safety_result.category_id if safety_result else None,
                 "action": safety_result.action if safety_result else "disabled",
                 "stages_fired": safety_result.stages_fired if safety_result else [],
@@ -1154,16 +1039,15 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
                     chat_id=chat_id,
                 )
                 assessment.review_id = item.id
-            except Exception:  # noqa: BLE001 - the answer still matters
-                logger.exception("could not queue answer for scholar review", extra={"chat_id": chat_id})
+            except Exception as exc:  # noqa: BLE001 - the answer still matters
+                logger.error("Could not queue answer for scholar review: %s", exc)
                 assessment.queued = False
 
         response_text = apply_policy(response_text, assessment)
 
         logger.info(
-            "confidence assessed",
-            extra={
-                "chat_id": chat_id,
+            "confidence=%s",
+            {
                 "score": assessment.score,
                 "band": assessment.band.value,
                 "signals": assessment.signals_used,
@@ -1199,10 +1083,7 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
         _tag_history_with_message_ids(chat_id, history)
 
         trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
-        logger.info(
-            "chat answer generated",
-            extra={"chat_id": chat_id, "message_id": message_id, "answer_chars": len(response_text)},
-        )
+        logger.info("Chat response generated successfully")
         # Build the response before finalizing, so a construction/validation
         # failure is handled only by the error path and the request is not
         # counted as both a success (here) and an error (except block).
@@ -1211,7 +1092,6 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             chat_id=chat_id,
             message_id=message_id,
             history=history,
-            truncated=truncated,
             moderation=Moderation(
                 category_id=safety_result.category_id,
                 action=safety_result.action,
@@ -1226,7 +1106,6 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             purchases=purchase_info,
             language=effective_language,
             citations=citation_extraction.citations,
-            experiment=_current_experiment,
         )
         _finalize()
         _succeeded = True
@@ -1389,8 +1268,10 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 "chat_id": chat_id,
                 "prompt_chars": len(prompt),
                 "context_chars": len(extra_context) if extra_context else 0,
-                "language": request.language,
-                "has_user_id": bool(request.user_id),
+                "language": body.language,
+                "madhhab": body.madhhab,
+                "user_id_prefix": body.user_id[:8] if body.user_id else None,
+                "remember": body.remember,
                 **prompt_debug_fields(prompt),
             },
         )
@@ -1469,7 +1350,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
                 # --- Create or get chat session ---
                 if chat_id not in active_chats:
-                    logger.info("streaming chat session created", extra={"chat_id": chat_id})
+                    logger.info("Creating new streaming chat session: %s", chat_id)
                     # Resume from persisted history so a returning user (or a
                     # request that arrived after a restart) keeps the context.
                     persisted = await session_store.load_history(chat_id)
@@ -1482,13 +1363,11 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # --- Build system context + prompt ---
                 system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
                 if effective_language:
-                    _lang_tpl = prompt_registry.get("language_instructions")
-                    assert _lang_tpl is not None
-                    system_context += _lang_tpl.render(
-                        response_language=effective_language,
-                    )
+                    system_context += LANGUAGE_INSTRUCTIONS
+                    system_context += f"\nresponse_language: {effective_language}"
                 else:
                     system_context += LANGUAGE_INSTRUCTIONS
+                    system_context += "\nresponse_language: auto (respond in the user's language)"
                 if is_fiqh:
                     system_context += FIQH_IKHTILAF_CONTEXT
                     if madhhab:
@@ -1499,15 +1378,13 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                     system_context += zakat_context.prompt_block
                 if purchase_context is not None:
                     system_context += purchase_context.prompt_block
-                if personal_context is not None:
-                    system_context += personal_context.prompt_block
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
 
                 # --- Async streaming generation ---
                 with trace.span("generation"):
-                    logger.info("streaming response started", extra={"chat_id": chat_id})
+                    logger.info("Starting async streaming response...")
                     _t0 = time.perf_counter()
 
                     stream_response = await active_chats[chat_id].send_message_async(
@@ -1595,16 +1472,15 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                             chat_id=chat_id,
                         )
                         assessment.review_id = item.id
-                    except Exception:  # noqa: BLE001
-                        logger.exception("could not queue streaming answer for review", extra={"chat_id": chat_id})
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error("Could not queue streaming answer for review: %s", exc)
                         assessment.queued = False
 
                 combined_text = apply_policy(combined_text, assessment)
 
                 logger.info(
-                    "confidence assessed",
-                    extra={
-                        "chat_id": chat_id,
+                    "confidence=%s",
+                    {
                         "score": assessment.score,
                         "band": assessment.band.value,
                         "signals": assessment.signals_used,
@@ -1650,21 +1526,12 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
-                        "experiment": (
-                            {
-                                "experiment_id": _current_experiment.experiment_id,
-                                "variant_name": _current_experiment.variant_name,
-                                "kill_switch_active": _current_experiment.kill_switch_active,
-                            }
-                            if _current_experiment
-                            else None
-                        ),
                     },
                     ensure_ascii=False,
                 )
                 yield f"data: {done}\n\n"
 
-                logger.info("streaming chat response completed", extra={"chat_id": chat_id})
+                logger.info("Streaming chat response completed for %s", chat_id)
 
                 # --- Persist chat history ---
                 # Awaited (not fire-and-forget) so a client that immediately
@@ -1676,7 +1543,7 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                 # Client disconnected mid-stream. Consume remaining chunks
                 # (if any) so the Gemini SDK finalises chat.history and a
                 # follow-up message in this session isn't left broken.
-                logger.info("client disconnected from streaming chat", extra={"chat_id": chat_id})
+                logger.info("Client disconnected from streaming chat %s", chat_id)
                 if stream_response is not None:
                     try:
                         await stream_response.resolve()
@@ -1684,8 +1551,8 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
                         pass
                 raise
 
-            except Exception:
-                logger.exception("streaming chat failed", extra={"chat_id": chat_id})
+            except Exception as exc:
+                logger.error("Streaming error for %s: %s", chat_id, exc)
                 err = json.dumps(
                     {
                         "type": "error",
@@ -1710,8 +1577,9 @@ async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingR
 
     except Exception as exc:
         logger.exception(
-            "unexpected error initialising streaming chat",
-            extra={"chat_id": str(getattr(request, "chat_id", None) or "")},
+            "Unexpected error initialising streaming chat %s: %s",
+            getattr(request, "chat_id", None),
+            exc,
         )
         raise HTTPException(
             status_code=500,
@@ -1758,7 +1626,7 @@ async def get_user_chats(user_id: str) -> dict[str, Any]:
     """List all chat IDs for a user."""
     try:
         chat_ids = await session_store.get_user_chats(user_id)
-        chats: list[dict[str, Any]] = []
+        chats = []
         for cid in chat_ids:
             history = await session_store.load_history(cid)
             # Strip system context from stored user messages
@@ -1810,16 +1678,20 @@ async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
 async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
     chat_id_str = str(chat_id)
     try:
-        existed = chat_id_str in active_chats
-        active_chats.pop(chat_id_str, None)
+        existed = chat_id in active_chats
+        active_chats.pop(chat_id, None)
         # Drop this session's feedback bookkeeping too, so the message-id list
         # and answer snapshots do not outlive the conversation they describe.
-        for message_id in chat_message_ids.pop(chat_id_str, []):
-            answer_snapshots.pop((chat_id_str, message_id), None)
+        for message_id in chat_message_ids.pop(chat_id, []):
+            answer_snapshots.pop((chat_id, message_id), None)
         # Remove from persistent store
-        persisted = await session_store.delete_session(chat_id_str)
+        await session_store.delete_session(chat_id)
         if user_id:
-            await session_store.remove_user_chat(user_id, chat_id_str)
+            await session_store.remove_user_chat(user_id, chat_id)
+        if existed:
+            logger.info(f"Deleted chat session: {chat_id}")
+            return {"message": "Chat session deleted successfully"}
+        return {"message": "Chat session not found"}
     except Exception as e:
         logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -1905,35 +1777,12 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         raise HTTPException(status_code=500, detail="Failed to store feedback.") from exc
 
     logger.info(
-        "feedback stored",
-        extra={"chat_id": body.chat_id, "message_id": body.message_id, "rating": body.rating},
+        "Feedback stored: chat_id=%s message_id=%s rating=%s",
+        body.chat_id,
+        body.message_id,
+        body.rating,
     )
     return {"status": "ok", "feedback_id": record.feedback_id}
-
-
-@app.post("/manuscripts/analyze", response_model=ManuscriptAnalysis)
-async def analyze_manuscript(request: Request, file: UploadFile = File(...)) -> ManuscriptAnalysis:
-    """Analyze an uploaded Islamic manuscript page (#233): OCR the Arabic text
-    and classify the work.
-
-    Multipart field 'file'; JPEG/PNG/PDF. Rate-limited per client like /feedback.
-    Errors: 413 over the upload cap, 415 unsupported/mismatched format,
-    422 nothing readable extracted, 429 throttled.
-    """
-    if not manuscript_rate_limiter.is_allowed(_client_ip(request)):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many manuscript analyses. Please wait and try again.",
-        )
-    data = await file.read()
-    try:
-        return await analyze_manuscript_bytes(file.filename or "", data)
-    except UploadTooLargeError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
-    except UnsupportedFormatError as exc:
-        raise HTTPException(status_code=415, detail=str(exc)) from exc
-    except PoorQualityError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/feedback/stats", dependencies=[Depends(require_admin)])
@@ -2063,11 +1912,6 @@ async def ping() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/providers/status")
-async def providers_status() -> dict[str, Any]:
-    return {"providers": provider_router.status() if provider_router else []}
-
-
 @app.get("/memory/{user_id}")
 async def get_memory(user_id: str) -> dict[str, Any]:
     """Retrieve the stored user profile for transparency.
@@ -2122,15 +1966,15 @@ async def cache_stats() -> dict[str, Any]:
 
 
 @app.get("/metrics")
-async def prometheus_metrics(
-    request: Request,
-    format: str | None = None,
-) -> Response:
-    """Prometheus exposition metrics endpoint for monitoring and observability (#116).
+async def metrics() -> dict[str, Any]:
+    """Lightweight LLM observability surface: token, cost, and latency
+    aggregates plus error rate. Contains only counts, durations, costs, model
+    names, and trace-derived aggregates - never prompt or answer content.
 
-    Exposes standard HTTP request metrics along with custom telemetry for model calls,
-    latencies, tokens, cache hits/misses, confidence scores, and scholar queue depth.
-    Access can be restricted via METRICS_TOKEN and/or METRICS_IP_ALLOWLIST.
+    Cache hit-rate is sourced from the semantic cache's own precise counters
+    (#27) rather than re-derived here, so the numbers stay consistent with
+    /cache/stats. #9 (auth/rate limiting) can consume the cost/token totals
+    below without this endpoint enforcing anything itself.
     """
     metrics.verify_metrics_access(request)
     await metrics.refresh_scholar_queue_depth()
@@ -2165,20 +2009,127 @@ async def confidence_policy() -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Prompt registry & experiment management
-# ---------------------------------------------------------------------------
+class AdhkarRecommendRequest(BaseModel):
+    category: str | None = None
+    query: str | None = None
+
+
+@app.post("/adhkar/recommend")
+async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
+    matches = adhkar_corpus.search(category=body.category, query=body.query)
+    message = (
+        "Found authenticated supplications."
+        if matches
+        else "No authenticated supplication found for the given criteria."
+    )
+    return {"matches": matches, "message": message}
+
+
+@app.post("/manuscripts/analyze", response_model=ManuscriptAnalysis)
+async def analyze_manuscript(request: Request, file: UploadFile = File(...)) -> ManuscriptAnalysis:
+    if not manuscript_rate_limiter.is_allowed(_client_ip(request)):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many manuscript analyses. Please wait and try again.",
+        )
+    data = await file.read()
+    try:
+        return await analyze_manuscript_bytes(file.filename or "", data)
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except UnsupportedFormatError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except PoorQualityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/search/hybrid", response_model=HybridSearchResponse)
+async def search_hybrid(body: HybridSearchRequest) -> HybridSearchResponse:
+    if not settings.hybrid_enabled:
+        raise HTTPException(status_code=503, detail="Hybrid search is disabled.")
+    return await run_in_threadpool(handle_hybrid_search, body)
+
+
+@app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
+async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
+    return await crosslingual_search(body.query, body.k, body.lang_pref)
+
+
+@app.post("/calligraphy/analyze", response_model=CalligraphyAnalysis)
+@limiter.limit("10/minute")
+async def analyze_calligraphy(request: Request, file: UploadFile = File(...)) -> CalligraphyAnalysis:
+    """Recognize text in an Arabic calligraphy image and classify its style.
+
+    Accepts a single multipart JPEG or PNG (validated by magic bytes, capped at
+    ``calligraphy_max_image_bytes``). Heavy lifting lives in calligraphy_ocr;
+    this handler only enforces transport rules and picks the provider.
+
+    Errors: 413 oversize, 415 unsupported format, 422 no legible calligraphy,
+    502 engine failure, 503 provider unavailable. Rate-limited per API key/IP.
+    """
+    max_bytes = settings.calligraphy_max_image_bytes
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {max_bytes // (1024 * 1024)}MB size limit.",
+        )
+
+    mime = sniff_image_mime(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported.")
+
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    if settings.calligraphy_provider == "stub":
+        if environment == "production":
+            raise HTTPException(status_code=503, detail="The stub calligraphy provider is disabled in production.")
+        engine: GeminiCalligraphyEngine | StubCalligraphyEngine = StubCalligraphyEngine(
+            min_confidence=settings.calligraphy_min_confidence
+        )
+    elif settings.calligraphy_provider == "gemini":
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+        engine = GeminiCalligraphyEngine(
+            timeout=settings.gemini_timeout, min_confidence=settings.calligraphy_min_confidence
+        )
+    else:
+        raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+
+    try:
+        analysis = await run_in_threadpool(engine.analyze, data, mime)
+    except Exception as exc:
+        logger.error("Calligraphy analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Calligraphy analysis failed upstream.") from exc
+
+    if not analysis.extracted_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No legible Arabic calligraphy was detected in the image.",
+        )
+    return analysis
+
+
+@app.get("/uncertainty/taxonomy")
+async def uncertainty_taxonomy() -> dict[str, Any]:
+    """Islamic epistemology and uncertainty quantification taxonomy (#199)."""
+    from uncertainty import EpistemicCertainty, EvidenceStrength, PositionType, UncertaintyFactor
+
+    return {
+        "epistemic_certainty": [e.value for e in EpistemicCertainty],
+        "position_types": [p.value for p in PositionType],
+        "evidence_strengths": [s.value for s in EvidenceStrength],
+        "uncertainty_factors": [f.value for f in UncertaintyFactor],
+        "description": "Taxonomy defining ruling certainty (Qat'i vs Dhanni), juristic positions, and evidence levels.",
+    }
 
 
 @app.get("/prompts")
 async def list_prompt_templates() -> dict[str, str]:
-    """List all registered prompt templates and their latest versions."""
     return prompt_registry.list_templates()
 
 
 @app.get("/prompts/{name}")
 async def get_prompt_template(name: str, version: str | None = None) -> dict[str, Any]:
-    """Retrieve a prompt template by name (and optional version)."""
     template = prompt_registry.get(name, version)
     if template is None:
         raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
@@ -2193,7 +2144,6 @@ async def get_prompt_template(name: str, version: str | None = None) -> dict[str
 
 @app.get("/experiments")
 async def list_experiments() -> dict[str, Any]:
-    """List registered experiments and their status."""
     experiments = {}
     for eid, cfg in experiment_harness._experiments.items():
         all_variants = [cfg.control] + cfg.variants
@@ -2215,10 +2165,6 @@ class ExperimentCreateRequest(BaseModel):
 
 @app.post("/experiments", dependencies=[Depends(require_admin)])
 async def create_experiment(body: ExperimentCreateRequest) -> dict[str, Any]:
-    """Create or update an A/B experiment (admin only).
-
-    Variants are a list of ``{"name": ..., "template_name": ..., "weight": ...}``.
-    """
     control = Variant(
         name="control",
         template_name=body.control_template,
@@ -2246,7 +2192,6 @@ async def create_experiment(body: ExperimentCreateRequest) -> dict[str, Any]:
 
 @app.post("/experiments/{experiment_id}/kill", dependencies=[Depends(require_admin)])
 async def kill_experiment(experiment_id: str) -> dict[str, Any]:
-    """Activate the kill switch for an experiment (admin only)."""
     cfg = experiment_harness._experiments.get(experiment_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
@@ -2256,7 +2201,6 @@ async def kill_experiment(experiment_id: str) -> dict[str, Any]:
 
 @app.post("/experiments/{experiment_id}/resume", dependencies=[Depends(require_admin)])
 async def resume_experiment(experiment_id: str) -> dict[str, Any]:
-    """Deactivate the kill switch for an experiment (admin only)."""
     cfg = experiment_harness._experiments.get(experiment_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
@@ -2266,13 +2210,11 @@ async def resume_experiment(experiment_id: str) -> dict[str, Any]:
 
 @app.delete("/experiments/{experiment_id}", dependencies=[Depends(require_admin)])
 async def delete_experiment(experiment_id: str) -> dict[str, str]:
-    """Remove an experiment (admin only)."""
     experiment_harness.unregister_experiment(experiment_id)
     return {"status": "ok", "experiment_id": experiment_id}
-
 
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("starting server", extra={"port": settings.port})
+    logger.info("Starting server...")
     uvicorn.run(app, host="0.0.0.0", port=settings.port)
