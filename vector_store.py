@@ -21,18 +21,18 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class IndexType(str, Enum):
     """Vector index types."""
+
     FLAT = "flat"  # Brute force, exact
     HNSW = "hnsw"  # Hierarchical Navigable Small World
     IVF = "ivf"  # Inverted File Index
@@ -41,6 +41,7 @@ class IndexType(str, Enum):
 
 class DistanceMetric(str, Enum):
     """Distance metrics for similarity search."""
+
     COSINE = "cosine"
     EUCLIDEAN = "euclidean"
     DOT_PRODUCT = "dot_product"
@@ -49,6 +50,7 @@ class DistanceMetric(str, Enum):
 @dataclass
 class IndexConfig:
     """Configuration for vector index."""
+
     index_type: IndexType = IndexType.HNSW
     distance_metric: DistanceMetric = DistanceMetric.COSINE
     dimension: int = 768
@@ -81,15 +83,17 @@ class IndexConfig:
 @dataclass
 class SearchResult:
     """Single search result."""
+
     id: str
     score: float
     metadata: dict[str, Any] = field(default_factory=dict)
-    vector: Optional[list[float]] = None
+    vector: list[float] | None = None
 
 
 @dataclass
 class SearchResponse:
     """Response from a vector search."""
+
     results: list[SearchResult]
     query_time_ms: float
     total_candidates: int = 0
@@ -99,6 +103,7 @@ class SearchResponse:
 @dataclass
 class BenchmarkResult:
     """Result of a benchmark run."""
+
     name: str
     queries: int
     avg_latency_ms: float
@@ -126,7 +131,7 @@ class VectorStore(ABC):
         self,
         query_vector: list[float],
         top_k: int = 10,
-        filter: Optional[dict[str, Any]] = None,
+        filter: dict[str, Any] | None = None,
     ) -> SearchResponse:
         """Search for similar vectors."""
         pass
@@ -145,28 +150,26 @@ class VectorStore(ABC):
 class InMemoryVectorStore(VectorStore):
     """In-memory vector store for development/testing."""
 
-    def __init__(self, config: Optional[IndexConfig] = None) -> None:
+    def __init__(self, config: IndexConfig | None = None) -> None:
         self._config = config or IndexConfig()
         self._vectors: dict[str, tuple[list[float], dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
 
-    def _compute_similarity(
-        self, query: list[float], vector: list[float]
-    ) -> float:
+    def _compute_similarity(self, query: list[float], vector: list[float]) -> float:
         """Compute similarity between query and vector."""
         import math
 
         if self._config.distance_metric == DistanceMetric.COSINE:
-            dot = sum(q * v for q, v in zip(query, vector))
+            dot = sum(q * v for q, v in zip(query, vector, strict=False))
             norm_q = math.sqrt(sum(q * q for q in query))
             norm_v = math.sqrt(sum(v * v for v in vector))
             if norm_q == 0 or norm_v == 0:
                 return 0.0
             return dot / (norm_q * norm_v)
         elif self._config.distance_metric == DistanceMetric.DOT_PRODUCT:
-            return sum(q * v for q, v in zip(query, vector))
+            return sum(q * v for q, v in zip(query, vector, strict=False))
         else:  # EUCLIDEAN
-            dist = math.sqrt(sum((q - v) ** 2 for q, v in zip(query, vector)))
+            dist = math.sqrt(sum((q - v) ** 2 for q, v in zip(query, vector, strict=False)))
             return 1.0 / (1.0 + dist)
 
     async def upsert(
@@ -182,7 +185,7 @@ class InMemoryVectorStore(VectorStore):
         self,
         query_vector: list[float],
         top_k: int = 10,
-        filter: Optional[dict[str, Any]] = None,
+        filter: dict[str, Any] | None = None,
     ) -> SearchResponse:
         start = time.time()
 
@@ -191,9 +194,7 @@ class InMemoryVectorStore(VectorStore):
         for id_, (vec, meta) in self._vectors.items():
             # Apply filter
             if filter:
-                match = all(
-                    meta.get(k) == v for k, v in filter.items()
-                )
+                match = all(meta.get(k) == v for k, v in filter.items())
                 if not match:
                     continue
             score = self._compute_similarity(query_vector, vec)
@@ -203,10 +204,7 @@ class InMemoryVectorStore(VectorStore):
         scores.sort(key=lambda x: -x[1])
         top_results = scores[:top_k]
 
-        results = [
-            SearchResult(id=id_, score=score, metadata=meta)
-            for id_, score, meta in top_results
-        ]
+        results = [SearchResult(id=id_, score=score, metadata=meta) for id_, score, meta in top_results]
 
         return SearchResponse(
             results=results,
@@ -249,7 +247,7 @@ class QueryCache:
         self,
         query_vector: list[float],
         top_k: int,
-        filter: Optional[dict[str, Any]],
+        filter: dict[str, Any] | None,
     ) -> str:
         """Generate cache key from query parameters."""
         key_data = {
@@ -257,16 +255,14 @@ class QueryCache:
             "top_k": top_k,
             "filter": filter,
         }
-        return hashlib.sha256(
-            json.dumps(key_data, sort_keys=True).encode()
-        ).hexdigest()
+        return hashlib.sha256(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
 
     def get(
         self,
         query_vector: list[float],
         top_k: int,
-        filter: Optional[dict[str, Any]] = None,
-    ) -> Optional[SearchResponse]:
+        filter: dict[str, Any] | None = None,
+    ) -> SearchResponse | None:
         """Get cached result if available."""
         key = self._hash_query(query_vector, top_k, filter)
         if key in self._cache:
@@ -289,7 +285,7 @@ class QueryCache:
         self,
         query_vector: list[float],
         top_k: int,
-        filter: Optional[dict[str, Any]],
+        filter: dict[str, Any] | None,
         response: SearchResponse,
     ) -> None:
         """Cache a query result."""
@@ -340,9 +336,7 @@ class HybridRetriever:
             term_freq[term] = term_freq.get(term, 0) + 1
 
         # Store TF scores
-        self._bm25_index[doc_id] = {
-            term: count / len(terms) for term, count in term_freq.items()
-        }
+        self._bm25_index[doc_id] = {term: count / len(terms) for term, count in term_freq.items()}
 
         # Update IDF (simplified)
         for term in term_freq:
@@ -376,15 +370,13 @@ class HybridRetriever:
         query_text: str,
         query_vector: list[float],
         top_k: int = 10,
-        filter: Optional[dict[str, Any]] = None,
+        filter: dict[str, Any] | None = None,
     ) -> SearchResponse:
         """Hybrid search combining dense and sparse retrieval."""
         start = time.time()
 
         # Dense search
-        dense_response = await self._vector_store.search(
-            query_vector, top_k * 2, filter
-        )
+        dense_response = await self._vector_store.search(query_vector, top_k * 2, filter)
         dense_scores = {r.id: r.score for r in dense_response.results}
 
         # Sparse search
@@ -402,9 +394,7 @@ class HybridRetriever:
         for id_ in all_ids:
             dense = dense_scores.get(id_, 0.0) / max_dense if max_dense else 0
             sparse = sparse_scores.get(id_, 0.0) / max_sparse if max_sparse else 0
-            combined_scores[id_] = (
-                self._dense_weight * dense + self._sparse_weight * sparse
-            )
+            combined_scores[id_] = self._dense_weight * dense + self._sparse_weight * sparse
 
         # Sort and take top_k
         sorted_ids = sorted(combined_scores.items(), key=lambda x: -x[1])[:top_k]
@@ -414,11 +404,13 @@ class HybridRetriever:
         results = []
         for id_, score in sorted_ids:
             if id_ in dense_results_map:
-                results.append(SearchResult(
-                    id=id_,
-                    score=score,
-                    metadata=dense_results_map[id_].metadata,
-                ))
+                results.append(
+                    SearchResult(
+                        id=id_,
+                        score=score,
+                        metadata=dense_results_map[id_].metadata,
+                    )
+                )
             else:
                 results.append(SearchResult(id=id_, score=score))
 
@@ -467,18 +459,19 @@ class VectorStoreBenchmark:
         self,
         query_vectors: list[list[float]],
         ground_truth: list[list[str]],  # Expected top results for each query
-        k_values: list[int] = [1, 5, 10, 20],
+        k_values: list[int] | None = None,
     ) -> BenchmarkResult:
         """Run recall benchmark against ground truth."""
-        recalls: dict[int, list[float]] = {k: [] for k in k_values}
+        actual_k_values = k_values if k_values is not None else [1, 5, 10, 20]
+        recalls: dict[int, list[float]] = {k: [] for k in actual_k_values}
         latencies: list[float] = []
 
-        for query, expected in zip(query_vectors, ground_truth):
-            response = await self._store.search(query, max(k_values))
+        for query, expected in zip(query_vectors, ground_truth, strict=False):
+            response = await self._store.search(query, max(actual_k_values))
             latencies.append(response.query_time_ms)
             result_ids = [r.id for r in response.results]
 
-            for k in k_values:
+            for k in actual_k_values:
                 top_k_results = set(result_ids[:k])
                 top_k_expected = set(expected[:k])
                 if top_k_expected:
@@ -553,7 +546,7 @@ class ABTestFramework:
         self,
         name: str,
         variants: dict[str, IndexConfig],
-        traffic_split: Optional[dict[str, float]] = None,
+        traffic_split: dict[str, float] | None = None,
     ) -> str:
         """Create a new A/B experiment."""
         if traffic_split is None:
@@ -601,15 +594,15 @@ class ABTestFramework:
         if experiment_name not in self._results:
             self._results[experiment_name] = []
 
-        self._results[experiment_name].append({
-            "variant": variant_name,
-            "metrics": metrics,
-            "timestamp": time.time(),
-        })
+        self._results[experiment_name].append(
+            {
+                "variant": variant_name,
+                "metrics": metrics,
+                "timestamp": time.time(),
+            }
+        )
 
-    def get_experiment_results(
-        self, experiment_name: str
-    ) -> dict[str, dict[str, float]]:
+    def get_experiment_results(self, experiment_name: str) -> dict[str, dict[str, float]]:
         """Get aggregated results for an experiment."""
         if experiment_name not in self._results:
             return {}
@@ -633,9 +626,7 @@ class ABTestFramework:
                         all_metrics[k] = []
                     all_metrics[k].append(v)
 
-            aggregated[variant] = {
-                k: sum(v) / len(v) for k, v in all_metrics.items()
-            }
+            aggregated[variant] = {k: sum(v) / len(v) for k, v in all_metrics.items()}
 
         return aggregated
 
@@ -644,11 +635,11 @@ class ABTestFramework:
 # Factory functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-_store: Optional[VectorStore] = None
-_cache: Optional[QueryCache] = None
+_store: VectorStore | None = None
+_cache: QueryCache | None = None
 
 
-def get_vector_store(config: Optional[IndexConfig] = None) -> VectorStore:
+def get_vector_store(config: IndexConfig | None = None) -> VectorStore:
     """Get or create the vector store instance."""
     global _store
     if _store is None:
@@ -668,7 +659,7 @@ def get_query_cache() -> QueryCache:
 async def search_with_cache(
     query_vector: list[float],
     top_k: int = 10,
-    filter: Optional[dict[str, Any]] = None,
+    filter: dict[str, Any] | None = None,
 ) -> SearchResponse:
     """Search with caching layer."""
     cache = get_query_cache()

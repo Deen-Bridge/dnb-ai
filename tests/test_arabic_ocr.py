@@ -1,35 +1,32 @@
 """Tests for Arabic OCR module (#214)."""
 
 import base64
+
 import pytest
 from fastapi.testclient import TestClient
 
 from arabic_ocr import (
+    CalligraphyDetection,
     CalligraphyStyle,
+    CharacterResult,
+    LineResult,
+    OCREngine,
+    OCREngineConfig,
     PreprocessingConfig,
     PreprocessingProfile,
-    OCREngineConfig,
-    OCREngine,
-    BoundingBox,
-    CharacterResult,
     WordResult,
-    LineResult,
-    CalligraphyDetection,
-    OCRConfidenceMetrics,
-    is_arabic_diacritic,
-    strip_diacritics,
-    count_diacritics,
-    normalize_arabic,
-    calculate_word_confidence,
-    detect_calligraphy_style,
-    preprocess_manuscript_image,
     apply_post_processing,
     calculate_confidence_metrics,
+    calculate_word_confidence,
+    count_diacritics,
+    detect_calligraphy_style,
+    is_arabic_diacritic,
+    normalize_arabic,
+    preprocess_manuscript_image,
     process_manuscript_page,
-    router,
+    strip_diacritics,
 )
 from main import app
-
 
 client = TestClient(app)
 
@@ -44,7 +41,7 @@ class TestDiacriticHandling:
 
     def test_is_arabic_diacritic_fatha(self):
         """Fatha (short a) should be recognized as diacritic."""
-        assert is_arabic_diacritic("\u064E") is True
+        assert is_arabic_diacritic("\u064e") is True
 
     def test_is_arabic_diacritic_kasra(self):
         """Kasra (short i) should be recognized as diacritic."""
@@ -52,7 +49,7 @@ class TestDiacriticHandling:
 
     def test_is_arabic_diacritic_damma(self):
         """Damma (short u) should be recognized as diacritic."""
-        assert is_arabic_diacritic("\u064F") is True
+        assert is_arabic_diacritic("\u064f") is True
 
     def test_is_arabic_diacritic_shadda(self):
         """Shadda (gemination) should be recognized as diacritic."""
@@ -72,7 +69,7 @@ class TestDiacriticHandling:
         text = "بِسْمِ اللَّهِ"
         result = strip_diacritics(text)
         assert result == "بسم الله"
-        assert "\u064E" not in result  # No fatha
+        assert "\u064e" not in result  # No fatha
         assert "\u0652" not in result  # No sukun
 
     def test_strip_diacritics_empty(self):
@@ -156,7 +153,7 @@ class TestCalligraphyDetection:
     def test_detect_with_quranic_markers(self):
         """Quranic markers should boost Naskh probability."""
         image_data = b"test"
-        text_sample = "الله\u06DD"  # End of ayah marker
+        text_sample = "الله\u06dd"  # End of ayah marker
         result = detect_calligraphy_style(image_data, text_sample)
         assert result.features_detected.get("quranic_markers") is True
 

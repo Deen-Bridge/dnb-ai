@@ -141,6 +141,11 @@ from stellar import (
 )
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
+from swahili import (
+    analyze_swahili,
+    router as swahili_router,
+    swahili_response_enhancer,
+)
 from tafsir import (
     TafsirContext,
     TafsirInfo,
@@ -878,6 +883,30 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(request.language)
 
+            # --- Swahili analysis ---
+            is_swahili = effective_language == "sw"
+            swahili_analysis = None
+            if is_swahili or any(
+                w in prompt.lower()
+                for w in [
+                    "je,",
+                    "habari",
+                    "swala",
+                    "udhu",
+                    "saumu",
+                    "zaka",
+                    "hija",
+                    "kadhi",
+                    "bakwata",
+                    "maulidi",
+                    "kufunga",
+                ]
+            ):
+                swahili_analysis = analyze_swahili(prompt)
+                if not is_swahili and len(swahili_analysis.detected_terms) >= 2:
+                    is_swahili = True
+                    effective_language = "sw"
+
         # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
             # Tafsir detection is offline (regex + the bundled surah index),
@@ -1158,6 +1187,10 @@ async def chat(request: ChatRequest, http_request: Request, fastapi_response: Re
             )
 
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
+        if swahili_analysis:
+            fastapi_response.headers["X-Swahili-Dialect"] = swahili_analysis.dialect.primary_dialect.value
+            fastapi_response.headers["X-Swahili-Terms-Detected"] = str(len(swahili_analysis.detected_terms))
+            fastapi_response.headers["X-Swahili-Code-Switching"] = swahili_analysis.code_switch.switch_type.value
 
         # Assign this answer a stable id and snapshot the displayed text, so a
         # later /feedback call can reference exactly this turn and store what
