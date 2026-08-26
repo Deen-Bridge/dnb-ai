@@ -1,10 +1,7 @@
 """Tests for the isnad chain analysis module — all offline, no network."""
 
-import pytest
-
 from isnad import (
     ChainStrength,
-    Gap,
     IsnadChain,
     Narrator,
     NarratorEra,
@@ -13,7 +10,6 @@ from isnad import (
     parse_isnad,
     visualize_chain,
 )
-
 
 # ---------------------------------------------------------------------------
 # Narrator normalization
@@ -179,9 +175,7 @@ class TestVisualizeChain:
 
 class TestEndToEnd:
     def test_full_pipeline(self):
-        chain = parse_isnad(
-            "Narrated Abu Hurairah -> Sa'id ibn al-Musayyib -> Al-Zuhri -> Malik"
-        )
+        chain = parse_isnad("Narrated Abu Hurairah -> Sa'id ibn al-Musayyib -> Al-Zuhri -> Malik")
         assert len(chain.narrators) >= 2
         assert chain.strength in ChainStrength
         viz = visualize_chain(chain)

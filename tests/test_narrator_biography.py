@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from narrator_biography import (
     NarratorDatabase,
-    NarratorProfile,
     router,
 )
 
@@ -112,6 +111,7 @@ def test_profile_404() -> None:
     db = NarratorDatabase()
     import pytest
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as exc_info:
         db.get_narrator("does-not-exist")
     assert exc_info.value.status_code == 404
@@ -180,6 +180,7 @@ def test_network_404() -> None:
     db = NarratorDatabase()
     import pytest
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as exc_info:
         db.get_network("zzznonexistent")
     assert exc_info.value.status_code == 404
@@ -258,7 +259,15 @@ def test_profile_schema() -> None:
     resp = _client().get("/narrators/abu-hanifa")
     assert resp.status_code == 200
     body = resp.json()
-    expected_fields = {"id", "name", "kunyah", "birth_year", "death_year",
-                       "reliability_assessment", "teachers", "students",
-                       "biography_summary"}
+    expected_fields = {
+        "id",
+        "name",
+        "kunyah",
+        "birth_year",
+        "death_year",
+        "reliability_assessment",
+        "teachers",
+        "students",
+        "biography_summary",
+    }
     assert expected_fields.issubset(set(body.keys()))

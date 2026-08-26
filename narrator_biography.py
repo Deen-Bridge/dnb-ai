@@ -145,8 +145,7 @@ class NarratorDatabase:
     @staticmethod
     def _to_profile(record: dict[str, Any]) -> NarratorProfile:
         assessments = [
-            ReliabilityAssessment(scholar=s, rating=r)
-            for s, r in record.get("reliability_assessment", {}).items()
+            ReliabilityAssessment(scholar=s, rating=r) for s, r in record.get("reliability_assessment", {}).items()
         ]
         return NarratorProfile(
             id=record["id"],
@@ -216,9 +215,7 @@ class NarratorDatabase:
         rec = self._by_id.get(narrator_id)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"Narrator '{narrator_id}' not found")
-        nodes: list[NetworkNode] = [
-            NetworkNode(id=rec["id"], name=rec["name"], relation="self")
-        ]
+        nodes: list[NetworkNode] = [NetworkNode(id=rec["id"], name=rec["name"], relation="self")]
         visited: set[str] = {rec["id"]}
         frontier = {rec["id"]}
         for _ in range(depth):
