@@ -38,7 +38,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
+from calligraphy import router as calligraphy_router
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
@@ -73,6 +75,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from hadith_context import router as hadith_context_router
+from history import router as history_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -86,9 +89,8 @@ from context_manager import router as context_router
 from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
-from model_router import router as model_routing_router
-from reformulation import router as reformulation_router
 from reasoning_chains import router as reasoning_router
+from reformulation import router as reformulation_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -116,9 +118,13 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
-from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
+from swahili import (
+    analyze_swahili,
+    router as swahili_router,
+    swahili_response_enhancer,
+)
 from tafsir import (
     TafsirContext,
     TafsirInfo,
@@ -587,6 +593,9 @@ LANGUAGE_INSTRUCTIONS = (
     "when writing in Latin-script languages.\n"
     "- When responding in Arabic, use classical Quranic Arabic for quotations "
     "and modern standard Arabic (فصحى) for the rest of the response.\n"
+    "- When responding in Swahili (Kiswahili), use standard respectful Swahili (Kiswahili Sanifu) "
+    "with proper Islamic honorifics (k.m. 'Mwenyezi Mungu (Subhanahu wa Ta'ala)', 'Mtume Muhammad (Swalla Allahu Alayhi wa Sallam / ﷺ)', "
+    "'Maswahaba (Radhi Allahu Anhum)') and standard Swahili Islamic terminology (Swala, Udhu, Saumu, Zaka, Hija, Halali, Haramu, Kadhi).\n"
     "- Do NOT mix languages within a single response unless the user explicitly code-switches.\n"
 )
 
@@ -771,6 +780,30 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
+            # --- Swahili analysis ---
+            is_swahili = effective_language == "sw"
+            swahili_analysis = None
+            if is_swahili or any(
+                w in prompt.lower()
+                for w in [
+                    "je,",
+                    "habari",
+                    "swala",
+                    "udhu",
+                    "saumu",
+                    "zaka",
+                    "hija",
+                    "kadhi",
+                    "bakwata",
+                    "maulidi",
+                    "kufunga",
+                ]
+            ):
+                swahili_analysis = analyze_swahili(prompt)
+                if not is_swahili and len(swahili_analysis.detected_terms) >= 2:
+                    is_swahili = True
+                    effective_language = "sw"
+
         # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
             # Tafsir detection is offline (regex + the bundled surah index),
@@ -921,6 +954,12 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
+            if is_swahili and swahili_analysis:
+                sw_enhancement = swahili_response_enhancer.build_prompt_enhancement(safety_prompt)
+                if sw_enhancement.cultural_notes:
+                    system_context += "\n\nMuktadha wa Afrika Mashariki (East African Context):\n" + "\n".join(
+                        f"- {note}" for note in sw_enhancement.cultural_notes
+                    )
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
@@ -1089,6 +1128,10 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
 
         fastapi_response.headers["X-Cache-Tier"] = "miss"
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
+        if swahili_analysis:
+            fastapi_response.headers["X-Swahili-Dialect"] = swahili_analysis.dialect.primary_dialect.value
+            fastapi_response.headers["X-Swahili-Terms-Detected"] = str(len(swahili_analysis.detected_terms))
+            fastapi_response.headers["X-Swahili-Code-Switching"] = swahili_analysis.code_switch.switch_type.value
 
         # Assign this answer a stable id and snapshot the displayed text, so a
         # later /feedback call can reference exactly this turn and store what
