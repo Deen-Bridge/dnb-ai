@@ -500,7 +500,7 @@ class VectorStoreBenchmark:
         concurrency: int = 10,
     ) -> BenchmarkResult:
         """Run throughput benchmark with concurrent queries."""
-        import random
+        import secrets
 
         completed = 0
         latencies: list[float] = []
@@ -509,7 +509,7 @@ class VectorStoreBenchmark:
         async def worker() -> None:
             nonlocal completed
             while time.time() - start_time < duration_seconds:
-                query = random.choice(query_vectors)
+                query = secrets.choice(query_vectors)
                 response = await self._store.search(query, 10)
                 latencies.append(response.query_time_ms)
                 completed += 1
@@ -572,7 +572,7 @@ class ABTestFramework:
         traffic_split = exp["traffic_split"]
 
         # Deterministic assignment based on user_id hash
-        hash_val = int(hashlib.md5(user_id.encode()).hexdigest(), 16) % 100 / 100
+        hash_val = int(hashlib.sha256(user_id.encode()).hexdigest(), 16) % 100 / 100
 
         cumulative = 0.0
         for variant_name, split in traffic_split.items():
@@ -581,7 +581,7 @@ class ABTestFramework:
                 return variant_name, variants[variant_name]
 
         # Fallback to first variant
-        first_name = list(variants.keys())[0]
+        first_name = next(iter(variants))
         return first_name, variants[first_name]
 
     def record_result(

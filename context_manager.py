@@ -26,8 +26,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from fiqh import MADHHAB_MAP, VALID_MADHHABS
-
 # ---------------------------------------------------------------------------
 # Config defaults — read from Settings at call time via get_context_manager()
 # but exposed as module-level constants for callers that import them directly.
@@ -53,36 +51,114 @@ COMPLEXITY_MAP: dict[str, str] = {
 # Keyword → category, reused from fiqh.py / tafsir / hadith conventions.
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
     "fiqh": [
-        "wudu", "wudhu", "ghusl", "tayammum", "salah", "salat", "prayer",
-        "pray", "fasting", "zakat", "zakah", "hajj", "umrah", "halal",
-        "haram", "makruh", "riba", "usury", "marriage", "nikah", "divorce",
-        "talaq", "inheritance", "fatwa", "ruling", "permissible",
-        "prohibited", "madhhab", "fiqh", "taharah", "najis",
+        "wudu",
+        "wudhu",
+        "ghusl",
+        "tayammum",
+        "salah",
+        "salat",
+        "prayer",
+        "pray",
+        "fasting",
+        "zakat",
+        "zakah",
+        "hajj",
+        "umrah",
+        "halal",
+        "haram",
+        "makruh",
+        "riba",
+        "usury",
+        "marriage",
+        "nikah",
+        "divorce",
+        "talaq",
+        "inheritance",
+        "fatwa",
+        "ruling",
+        "permissible",
+        "prohibited",
+        "madhhab",
+        "fiqh",
+        "taharah",
+        "najis",
     ],
     "hadith": [
-        "hadith", "hadeeth", "narration", "sahih", "bukhari", "muslim",
-        "tirmidhi", "abu dawud", "nasa'i", "ibn majah", "musplics",
-        "sanad", "isnad", "matn",
+        "hadith",
+        "hadeeth",
+        "narration",
+        "sahih",
+        "bukhari",
+        "muslim",
+        "tirmidhi",
+        "abu dawud",
+        "nasa'i",
+        "ibn majah",
+        "musplics",
+        "sanad",
+        "isnad",
+        "matn",
     ],
     "quran": [
-        "quran", "qur'an", "koran", "ayah", "surah", "verse", "recitation",
-        "tilawah", "tajweed", "tafsir", "exegesis", "ibn kathir",
+        "quran",
+        "qur'an",
+        "koran",
+        "ayah",
+        "surah",
+        "verse",
+        "recitation",
+        "tilawah",
+        "tajweed",
+        "tafsir",
+        "exegesis",
+        "ibn kathir",
     ],
     "aqeedah": [
-        "aqeedah", "aqidah", "creed", "belief", "iman", "tawhid",
-        "shirk", "kufr", "munafiq",
+        "aqeedah",
+        "aqidah",
+        "creed",
+        "belief",
+        "iman",
+        "tawhid",
+        "shirk",
+        "kufr",
+        "munafiq",
     ],
     "seerah": [
-        "seerah", "sirah", "prophet", "muhammad", "companions", "sahaba",
-        "hijra", "mecca", "medina",
+        "seerah",
+        "sirah",
+        "prophet",
+        "muhammad",
+        "companions",
+        "sahaba",
+        "hijra",
+        "mecca",
+        "medina",
     ],
     "tasawwuf": [
-        "tasawwuf", "sufism", "spiritual", "dhikr", "adab", "ikhlas",
-        "tawakkul", "sabr", "shukr",
+        "tasawwuf",
+        "sufism",
+        "spiritual",
+        "dhikr",
+        "adab",
+        "ikhlas",
+        "tawakkul",
+        "sabr",
+        "shukr",
     ],
     "finance": [
-        "zakat", "zakah", "sadaqah", "waqf", "business", "trade",
-        "investment", "stock", "banking", "interest", "loan", "debt",
+        "zakat",
+        "zakah",
+        "sadaqah",
+        "waqf",
+        "business",
+        "trade",
+        "investment",
+        "stock",
+        "banking",
+        "interest",
+        "loan",
+        "debt",
     ],
 }
 
@@ -99,7 +175,10 @@ _IMPLICIT_PATTERNS: list[re.Pattern[str]] = [
 _FOLLOWUP_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(why|how come|explain|elaborate|clarify|expand)\b", re.IGNORECASE), "elaboration"),
     (re.compile(r"\b(what about|and (if|when|how)|also|additionally|furthermore)\b", re.IGNORECASE), "extension"),
-    (re.compile(r"\b(so (you're|you are)|does that mean|in that case|so essentially)\b", re.IGNORECASE), "confirmation"),
+    (
+        re.compile(r"\b(so (you're|you are)|does that mean|in that case|so essentially)\b", re.IGNORECASE),
+        "confirmation",
+    ),
     (re.compile(r"\b(can you (go deeper|be more specific|give more detail))\b", re.IGNORECASE), "deepening"),
 ]
 
@@ -228,11 +307,7 @@ def detect_follow_up(
                 implicit_refs.append(term)
 
     new_topic = extract_topic(new_query)
-    topic_continuation = (
-        new_topic is not None
-        and topic_history
-        and new_topic in topic_history[-3:]
-    )
+    topic_continuation = new_topic is not None and topic_history and new_topic in topic_history[-3:]
 
     intent: str | None = None
     for pattern, label in _FOLLOWUP_PATTERNS:
@@ -443,8 +518,10 @@ def get_context_manager() -> ContextManager:
 # FastAPI routes
 # ---------------------------------------------------------------------------
 
-from fastapi import APIRouter, HTTPException  # noqa: E402
+from fastapi import APIRouter  # noqa: E402
+
 from config import get_settings  # noqa: E402
+from errors import APIException  # noqa: E402
 
 router = APIRouter(prefix="/context", tags=["context"])
 
@@ -458,7 +535,7 @@ class _ContextConfig:
 def _check_enabled() -> None:
     settings = get_settings()
     if not getattr(settings, "enable_context_manager", True):
-        raise HTTPException(
+        raise APIException(
             status_code=503,
             detail="Context manager is disabled.",
             hint="Set ENABLE_CONTEXT_MANAGER=true to enable this feature.",
@@ -511,7 +588,7 @@ async def add_turn_endpoint(body: AddTurnRequest) -> AddTurnResponse:
     mgr = get_context_manager()
     turn = mgr.add_turn(body.session_id, body.role, body.content)
     if turn is None:
-        raise HTTPException(
+        raise APIException(
             status_code=404,
             detail=f"Session '{body.session_id}' not found or expired.",
             hint="Create a new session via POST /context/session first.",
@@ -526,7 +603,7 @@ async def get_context_endpoint(session_id: str) -> ContextSnapshot:
     mgr = get_context_manager()
     snapshot = mgr.get_context(session_id)
     if snapshot is None:
-        raise HTTPException(
+        raise APIException(
             status_code=404,
             detail=f"Session '{session_id}' not found or expired.",
             hint="Create a new session via POST /context/session first.",

@@ -27,7 +27,7 @@ import os
 import time
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -203,7 +203,7 @@ class JobHandler(ABC):
     async def execute(
         self,
         job: Job,
-        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
+        progress_callback: Callable[[float, str], Any] | None = None,
     ) -> JobResult:
         """Execute the job and return result."""
         pass
@@ -257,7 +257,7 @@ class InMemoryJobStore(JobStore):
         pending = [
             j
             for j in self._jobs.values()
-            if j.status == JobStatus.PENDING
+            if j.status in (JobStatus.PENDING, JobStatus.RETRYING)
             and (j.scheduled_at is None or j.scheduled_at <= now)
             and all(self._jobs.get(dep) and self._jobs[dep].status == JobStatus.COMPLETED for dep in j.depends_on)
         ]
@@ -613,7 +613,7 @@ class EmbeddingGenerationHandler(JobHandler):
     async def execute(
         self,
         job: Job,
-        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
+        progress_callback: Callable[[float, str], Any] | None = None,
     ) -> JobResult:
         texts = job.payload.get("texts", [])
         total = len(texts)
@@ -626,7 +626,9 @@ class EmbeddingGenerationHandler(JobHandler):
 
             if progress_callback:
                 percent = (i + 1) / total * 100
-                await progress_callback(percent, f"Processing {i + 1}/{total}")
+                res = progress_callback(percent, f"Processing {i + 1}/{total}")
+                if asyncio.iscoroutine(res):
+                    await res
 
         return JobResult(success=True, data={"embeddings": embeddings})
 
@@ -649,20 +651,26 @@ class IndexBuildHandler(JobHandler):
     async def execute(
         self,
         job: Job,
-        progress_callback: Callable[[float, str], Awaitable[None]] | None = None,
+        progress_callback: Callable[[float, str], Any] | None = None,
     ) -> JobResult:
         index_name = job.payload.get("index_name", "default")
 
         if progress_callback:
-            await progress_callback(10, "Loading data")
+            res1 = progress_callback(10, "Loading data")
+            if asyncio.iscoroutine(res1):
+                await res1
         await asyncio.sleep(0.5)
 
         if progress_callback:
-            await progress_callback(50, "Building index")
+            res2 = progress_callback(50, "Building index")
+            if asyncio.iscoroutine(res2):
+                await res2
         await asyncio.sleep(0.5)
 
         if progress_callback:
-            await progress_callback(90, "Saving index")
+            res3 = progress_callback(90, "Saving index")
+            if asyncio.iscoroutine(res3):
+                await res3
         await asyncio.sleep(0.2)
 
         return JobResult(success=True, data={"index_name": index_name, "document_count": 1000})

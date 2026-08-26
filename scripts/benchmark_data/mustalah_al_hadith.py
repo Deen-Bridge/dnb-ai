@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+WORK_MUQADDIMAH_IBN_AL_SALAH = "Muqaddimah Ibn al-Salah"
+AUTHOR_IBN_AL_SALAH = "Ibn al-Salah"
+WORK_NUKHBAT_AL_FIKAR = "Nukhbat al-Fikar"
+AUTHOR_IBN_HAJAR = "Ibn Hajar al-Asqalani"
+
 
 def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
     base_items = [
@@ -25,8 +30,8 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
                 "5. Free from Illah (hidden disparaging defects).",
             ],
             "citations": [
-                {"type": "scholarly", "work": "Muqaddimah Ibn al-Salah", "author": "Ibn al-Salah"},
-                {"type": "scholarly", "work": "Nukhbat al-Fikar", "author": "Ibn Hajar al-Asqalani"},
+                {"type": "scholarly", "work": WORK_MUQADDIMAH_IBN_AL_SALAH, "author": AUTHOR_IBN_AL_SALAH},
+                {"type": "scholarly", "work": WORK_NUKHBAT_AL_FIKAR, "author": AUTHOR_IBN_HAJAR},
                 {"type": "scholarly", "work": "Al-Ba'ith al-Hathith", "author": "Ahmad Shakir"},
             ],
             "has_ikhtilaf": False,
@@ -55,7 +60,7 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
                 "Authentic Ahad hadiths are legally binding for practice and creed according to majority scholars.",
             ],
             "citations": [
-                {"type": "scholarly", "work": "Nuzhat an-Nazar", "author": "Ibn Hajar al-Asqalani"},
+                {"type": "scholarly", "work": "Nuzhat an-Nazar", "author": AUTHOR_IBN_HAJAR},
                 {"type": "scholarly", "work": "Tadrib al-Rawi", "author": "Al-Suyuti"},
             ],
             "has_ikhtilaf": False,
@@ -84,7 +89,7 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
             ],
             "citations": [
                 {"type": "scholarly", "work": "Al-Manzumah al-Bayquniyyah", "author": "Al-Bayquni"},
-                {"type": "scholarly", "work": "Muqaddimah Ibn al-Salah", "author": "Ibn al-Salah"},
+                {"type": "scholarly", "work": WORK_MUQADDIMAH_IBN_AL_SALAH, "author": AUTHOR_IBN_AL_SALAH},
             ],
             "has_ikhtilaf": False,
             "ikhtilaf_details": None,
@@ -112,7 +117,7 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
                 "Personal or sectarian bias must be screened out (Mu'asarah).",
             ],
             "citations": [
-                {"type": "scholarly", "work": "Sharh Nukhbat al-Fikar", "author": "Ibn Hajar al-Asqalani"},
+                {"type": "scholarly", "work": "Sharh Nukhbat al-Fikar", "author": AUTHOR_IBN_HAJAR},
                 {"type": "scholarly", "work": "Mizan al-I'tidal", "author": "Al-Dhahabi"},
             ],
             "has_ikhtilaf": False,
@@ -169,7 +174,7 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
                 "Maqtu: Attributed to a Successor (Tabii).",
             ],
             [
-                {"type": "scholarly", "work": "Nukhbat al-Fikar", "author": "Ibn Hajar al-Asqalani"},
+                {"type": "scholarly", "work": WORK_NUKHBAT_AL_FIKAR, "author": AUTHOR_IBN_HAJAR},
                 {"type": "scholarly", "work": "Al-Manzumah al-Bayquniyyah", "author": "Al-Bayquni"},
             ],
             False,
@@ -191,8 +196,8 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
                 "Elevated to Sahih li-Ghayrihi with corroborating routes.",
             ],
             [
-                {"type": "scholarly", "work": "Muqaddimah Ibn al-Salah", "author": "Ibn al-Salah"},
-                {"type": "scholarly", "work": "Nuzhat an-Nazar", "author": "Ibn Hajar al-Asqalani"},
+                {"type": "scholarly", "work": WORK_MUQADDIMAH_IBN_AL_SALAH, "author": AUTHOR_IBN_AL_SALAH},
+                {"type": "scholarly", "work": "Nuzhat an-Nazar", "author": AUTHOR_IBN_HAJAR},
             ],
             False,
             None,
@@ -255,7 +260,7 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
             ],
             [
                 {"type": "scholarly", "work": "Muqaddimah Sahih Muslim", "author": "Imam Muslim"},
-                {"type": "scholarly", "work": "Hady al-Sari", "author": "Ibn Hajar al-Asqalani"},
+                {"type": "scholarly", "work": "Hady al-Sari", "author": AUTHOR_IBN_HAJAR},
             ],
             False,
             None,
@@ -273,8 +278,8 @@ def get_mustalah_al_hadith_items() -> list[dict[str, Any]]:
             f"في علوم الحديث النبوي ومصطلحه، تخضع مسألة {t_ar} لضوابط أئمة النقد والجرح والتعديل ومقتضاها {d_ar}.",
             [f"Hadith science rules for {t_en}.", "Application of isnad and matn evaluation."],
             [
-                {"type": "scholarly", "work": "Nukhbat al-Fikar", "author": "Ibn Hajar"},
-                {"type": "scholarly", "work": "Muqaddimah", "author": "Ibn al-Salah"},
+                {"type": "scholarly", "work": WORK_NUKHBAT_AL_FIKAR, "author": "Ibn Hajar"},
+                {"type": "scholarly", "work": "Muqaddimah", "author": AUTHOR_IBN_AL_SALAH},
             ],
             False,
             None,

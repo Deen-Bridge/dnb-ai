@@ -22,7 +22,6 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -101,6 +100,10 @@ def _normalize_name(name: str) -> str:
     return cleaned
 
 
+_KNOWN_SAHABA_NORMALIZED = {_normalize_name(n) for n in _KNOWN_SAHABA}
+_KNOWN_TABIN_NORMALIZED = {_normalize_name(n) for n in _KNOWN_TABIN}
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -119,6 +122,8 @@ class Narrator:
     def __post_init__(self) -> None:
         if not self.normalized_name:
             self.normalized_name = _normalize_name(self.name)
+        if self.era == NarratorEra.UNKNOWN and self.credibility_score == 0.5:
+            _classify_narrator(self)
 
 
 @dataclass(frozen=True)
@@ -159,9 +164,7 @@ def _looks_like_name(text: str) -> bool:
     t = text.strip()
     if not t:
         return False
-    # Must have at least two words or contain a known patronymic marker.
-    words = t.split()
-    return len(words) >= 2 or _IBN_PATTERN.search(t) or _ABU_PATTERN.search(t)
+    return any(c.isalpha() for c in t)
 
 
 def parse_isnad(text: str) -> IsnadChain:
@@ -190,7 +193,9 @@ def parse_isnad(text: str) -> IsnadChain:
     narrators: list[Narrator] = []
     for chunk in best_chunks:
         # Strip leading/trailing prepositions.
-        chunk = re.sub(r"^(?:Narrated|Reported|On the authority of|He said|She said)\s*", "", chunk, flags=re.IGNORECASE).strip()
+        chunk = re.sub(
+            r"^(?:Narrated|Reported|On the authority of|He said|She said)\s*", "", chunk, flags=re.IGNORECASE
+        ).strip()
         chunk = re.sub(r"\s*(?:said|says|narrated|reported).*$", "", chunk, flags=re.IGNORECASE).strip()
         if _looks_like_name(chunk):
             narrators.append(Narrator(name=chunk))
@@ -208,12 +213,12 @@ def parse_isnad(text: str) -> IsnadChain:
 def _classify_narrator(narrator: Narrator) -> None:
     """Set era and credibility_score based on known lists and heuristics."""
     norm = narrator.normalized_name
-    if norm in _KNOWN_SAHABA:
+    if norm in _KNOWN_SAHABA_NORMALIZED:
         narrator.era = NarratorEra.SAHABI
         narrator.credibility_score = 0.9
         narrator.notes.append("Companion of the Prophet (peace be upon him)")
         return
-    if norm in _KNOWN_TABIN:
+    if norm in _KNOWN_TABIN_NORMALIZED:
         narrator.era = NarratorEra.TABI
         narrator.credibility_score = 0.75
         narrator.notes.append("Known Successor (Tabi')")
@@ -255,23 +260,29 @@ def detect_gaps(chain: IsnadChain) -> list[Gap]:
         era_b = era_order.get(b.era, 4)
         # Backward or same-era jump suggests a problem.
         if era_b < era_a:
-            gaps.append(Gap(
-                between=(a.name, b.name),
-                description=f"{b.normalized_name} appears earlier in generation than {a.normalized_name}",
-            ))
+            gaps.append(
+                Gap(
+                    between=(a.name, b.name),
+                    description=f"{b.normalized_name} appears earlier in generation than {a.normalized_name}",
+                )
+            )
         elif era_b - era_a > 1:
-            gaps.append(Gap(
-                between=(a.name, b.name),
-                description=f"Possible missing link between {a.normalized_name} and {b.normalized_name} (era gap of {era_b - era_a})",
-            ))
+            gaps.append(
+                Gap(
+                    between=(a.name, b.name),
+                    description=f"Possible missing link between {a.normalized_name} and {b.normalized_name} (era gap of {era_b - era_a})",
+                )
+            )
 
     # Chain is too long for a sound isnad.
     known_eras = [n for n in narrators if n.era != NarratorEra.UNKNOWN]
     if len(known_eras) > _MAX_GENERATIONS:
-        gaps.append(Gap(
-            between=(narrators[0].name, narrators[-1].name),
-            description=f"Chain has {len(known_eras)} classified narrators, exceeding expected {_MAX_GENERATIONS}",
-        ))
+        gaps.append(
+            Gap(
+                between=(narrators[0].name, narrators[-1].name),
+                description=f"Chain has {len(known_eras)} classified narrators, exceeding expected {_MAX_GENERATIONS}",
+            )
+        )
 
     return gaps
 
@@ -302,6 +313,7 @@ def assess_chain(chain: IsnadChain) -> ChainStrength:
 # ---------------------------------------------------------------------------
 # Visualization
 # ---------------------------------------------------------------------------
+
 
 def visualize_chain(chain: IsnadChain) -> str:
     """Return a text-based tree visualization of the chain."""

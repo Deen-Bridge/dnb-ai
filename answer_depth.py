@@ -412,13 +412,6 @@ class DepthAdapter:
             "required_sections": required_sections,
             "prompt_additions": self.build_prompt_instructions(target_config),
         }
-
-        expansion_template: dict[str, Any] = {
-            "original_answer": brief_answer,
-            "target_level": target_level.value,
-            "required_sections": required_sections,
-            "prompt_additions": self.build_prompt_instructions(target_config),
-        }
         return expansion_template
 
 
@@ -527,6 +520,4 @@ def get_answer_config(
     else:
         level = DepthLevel.STANDARD
 
-    # Get config with user preferences applied
-    user_prefs: UserDepthPreferences | None = prefs_store.get(user_id) if user_id else None
     return adapter.get_effective_config(level, user_prefs)

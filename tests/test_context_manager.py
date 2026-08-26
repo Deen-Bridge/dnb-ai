@@ -9,11 +9,8 @@ import time
 import pytest
 
 from context_manager import (
-    CONTEXT_MAX_TURNS,
-    ComplexitySetting,
-    ConversationTurn,
     ContextManager,
-    ContextSnapshot,
+    ConversationTurn,
     FollowUpIntent,
     ResolvedContext,
     SessionContext,

@@ -9,29 +9,35 @@ from swahili.models import CodeSwitchResult, CodeSwitchSegment, CodeSwitchType
 
 logger = logging.getLogger(__name__)
 
+_INSHA_ALLAH_GLOSS = "Mwenyezi Mungu akipenda (Insha'Allah)"
+_MASHA_ALLAH_GLOSS = "Alivyopenda Mwenyezi Mungu (Masha'Allah)"
+_SUBHANALLAH_GLOSS = "Ametakasika Mwenyezi Mungu (Subhanallah)"
+_JAZAKALLAH_GLOSS = "Mwenyezi Mungu akulipe kheri (Jazakallahu Khayran)"
+_ASSALAMU_ALAYKUM_GLOSS = "Amani iwe juu yenu (Assalamu Alaykum)"
+
 # Common Islamic formulas and greetings in Arabic and transliteration
 ISLAMIC_FORMULAS: dict[str, str] = {
     "bismillah": "Kwa jina la Mwenyezi Mungu (Bismillah)",
     "bismillahi rahmani rahiim": "Kwa jina la Mwenyezi Mungu Mwingi wa Rehema Mwenye Kurehemu",
     "alhamdulillah": "Sifa zote njema ni za Mwenyezi Mungu (Alhamdulillah)",
-    "inshallah": "Mwenyezi Mungu akipenda (Insha'Allah)",
-    "insha allah": "Mwenyezi Mungu akipenda (Insha'Allah)",
-    "in sha allah": "Mwenyezi Mungu akipenda (Insha'Allah)",
-    "masha allah": "Alivyopenda Mwenyezi Mungu (Masha'Allah)",
-    "mashallah": "Alivyopenda Mwenyezi Mungu (Masha'Allah)",
-    "subhanallah": "Ametakasika Mwenyezi Mungu (Subhanallah)",
-    "subhan allah": "Ametakasika Mwenyezi Mungu (Subhanallah)",
+    "inshallah": _INSHA_ALLAH_GLOSS,
+    "insha allah": _INSHA_ALLAH_GLOSS,
+    "in sha allah": _INSHA_ALLAH_GLOSS,
+    "masha allah": _MASHA_ALLAH_GLOSS,
+    "mashallah": _MASHA_ALLAH_GLOSS,
+    "subhanallah": _SUBHANALLAH_GLOSS,
+    "subhan allah": _SUBHANALLAH_GLOSS,
     "allahu akbar": "Mwenyezi Mungu ni Mkubwa zaidi (Allahu Akbar)",
     "astaghfirullah": "Namwomba Mwenyezi Mungu msamaha (Astaghfirullah)",
     "astaghfirullah wa atubu ilayh": "Namwomba Mungu msamaha na kutubu Kwake",
-    "jazakallah khair": "Mwenyezi Mungu akulipe kheri (Jazakallahu Khayran)",
-    "jazakallahu khayran": "Mwenyezi Mungu akulipe kheri (Jazakallahu Khayran)",
-    "jazakillahu khayran": "Mwenyezi Mungu akulipe kheri (Jazakillahu Khayran)",
+    "jazakallah khair": _JAZAKALLAH_GLOSS,
+    "jazakallahu khayran": _JAZAKALLAH_GLOSS,
+    "jazakillahu khayran": _JAZAKALLAH_GLOSS,
     "jazakumullahu khayran": "Mwenyezi Mungu awalipeni kheri",
     "barakallahu feek": "Mwenyezi Mungu akubariki (Barakallahu Feek)",
     "barakallahu feekum": "Mwenyezi Mungu awabariki",
-    "assalamu alaykum": "Amani iwe juu yenu (Assalamu Alaykum)",
-    "as-salamu alaykum": "Amani iwe juu yenu (Assalamu Alaykum)",
+    "assalamu alaykum": _ASSALAMU_ALAYKUM_GLOSS,
+    "as-salamu alaykum": _ASSALAMU_ALAYKUM_GLOSS,
     "assalamu alaikum": "Amani iwe juu yenu",
     "wa alaykumussalam": "Na nanyi amani iwe juu yenu",
     "la ilaha illallah": "Hapana mungu wa haki ila Allah (La ilaha illallah)",
@@ -84,56 +90,98 @@ COMMON_ENGLISH_WORDS = frozenset(
 class CodeSwitchingProcessor:
     """Analyzes multi-lingual code-switching in Swahili Islamic queries."""
 
-    def analyze_code_switching(self, text: str) -> CodeSwitchResult:
-        """Segment and classify language distribution in text."""
-        segments = self.segment_languages(text)
+    def _collect_segment_stats(
+        self, segments: list[CodeSwitchSegment]
+    ) -> tuple[list[str], int, int, int, bool, bool, bool]:
         arabic_phrases: list[str] = []
-        has_arabic_script = bool(re.search(r"[\u0600-\u06FF]", text))
+        sw_tokens = 0
+        en_tokens = 0
+        ar_tokens = 0
+        has_arabic_formula = False
         has_english = False
         has_swahili = False
-        has_arabic_formula = False
-
-        swahili_token_count = 0
-        english_token_count = 0
-        arabic_token_count = 0
 
         for seg in segments:
+            tokens = len(seg.text.split())
             if seg.is_islamic_formula or seg.language == "ar":
                 arabic_phrases.append(seg.text)
-                arabic_token_count += len(seg.text.split())
+                ar_tokens += tokens
                 if seg.is_islamic_formula:
                     has_arabic_formula = True
             elif seg.language == "en":
                 has_english = True
-                english_token_count += len(seg.text.split())
+                en_tokens += tokens
             elif seg.language == "sw":
                 has_swahili = True
-                swahili_token_count += len(seg.text.split())
+                sw_tokens += tokens
 
-        # Classify switch type
+        return (
+            arabic_phrases,
+            sw_tokens,
+            en_tokens,
+            ar_tokens,
+            has_arabic_formula,
+            has_english,
+            has_swahili,
+        )
+
+    def _determine_switch_type(
+        self,
+        has_english: bool,
+        has_swahili: bool,
+        has_arabic_formula: bool,
+        has_arabic_script: bool,
+        sw_tokens: int,
+        en_tokens: int,
+        ar_tokens: int,
+    ) -> CodeSwitchType:
         if (has_english and has_swahili and (has_arabic_formula or has_arabic_script)) or (
-            english_token_count > 0 and swahili_token_count > 0 and arabic_token_count > 0
+            en_tokens > 0 and sw_tokens > 0 and ar_tokens > 0
         ):
-            switch_type = CodeSwitchType.TRILINGUAL_MIXED
-        elif has_english and (has_swahili or not has_arabic_script):
-            switch_type = CodeSwitchType.SWAHILI_ENGLISH_MIXED
-        elif has_arabic_formula or has_arabic_script or arabic_token_count > 0:
-            switch_type = CodeSwitchType.SWAHILI_ARABIC_MIXED
-        else:
-            switch_type = CodeSwitchType.MONOLINGUAL_SWAHILI
+            return CodeSwitchType.TRILINGUAL_MIXED
+        if has_english and (has_swahili or not has_arabic_script):
+            return CodeSwitchType.SWAHILI_ENGLISH_MIXED
+        if has_arabic_formula or has_arabic_script or ar_tokens > 0:
+            return CodeSwitchType.SWAHILI_ARABIC_MIXED
+        return CodeSwitchType.MONOLINGUAL_SWAHILI
 
-        # Determine dominant language
-        total_tokens = swahili_token_count + english_token_count + arabic_token_count
+    def _determine_dominant_language(self, sw_tokens: int, en_tokens: int, ar_tokens: int) -> str:
+        total_tokens = sw_tokens + en_tokens + ar_tokens
         if total_tokens == 0:
-            dominant = "sw"
-        elif english_token_count > swahili_token_count and english_token_count > arabic_token_count:
-            dominant = "en"
-        elif arabic_token_count > swahili_token_count and arabic_token_count > english_token_count:
-            dominant = "ar"
-        else:
-            dominant = "sw"
+            return "sw"
+        if en_tokens > sw_tokens and en_tokens > ar_tokens:
+            return "en"
+        if ar_tokens > sw_tokens and ar_tokens > en_tokens:
+            return "ar"
+        return "sw"
 
-        # Check for Quran or Hadith markers
+    def analyze_code_switching(self, text: str) -> CodeSwitchResult:
+        """Segment and classify language distribution in text."""
+        segments = self.segment_languages(text)
+        has_arabic_script = bool(re.search(r"[\u0600-\u06FF]", text))
+
+        (
+            arabic_phrases,
+            sw_tokens,
+            en_tokens,
+            ar_tokens,
+            has_arabic_formula,
+            has_english,
+            has_swahili,
+        ) = self._collect_segment_stats(segments)
+
+        switch_type = self._determine_switch_type(
+            has_english=has_english,
+            has_swahili=has_swahili,
+            has_arabic_formula=has_arabic_formula,
+            has_arabic_script=has_arabic_script,
+            sw_tokens=sw_tokens,
+            en_tokens=en_tokens,
+            ar_tokens=ar_tokens,
+        )
+
+        dominant = self._determine_dominant_language(sw_tokens, en_tokens, ar_tokens)
+
         contains_quran_or_hadith = bool(
             re.search(r"\b(surah?|ayah?|quran|kurani|hadith|hadithi|bukhari|muslim)\b", text, re.IGNORECASE)
             or has_arabic_script
@@ -149,12 +197,8 @@ class CodeSwitchingProcessor:
             contains_dua=contains_dua,
         )
 
-    def segment_languages(self, text: str) -> list[CodeSwitchSegment]:
-        """Split text into classified language segments."""
+    def _segment_formulas(self, text: str, lower_text: str) -> list[CodeSwitchSegment]:
         segments: list[CodeSwitchSegment] = []
-        lower_text = text.lower()
-
-        # 1. Identify Islamic formulas with glosses
         for formula, gloss in ISLAMIC_FORMULAS.items():
             pattern = r"\b" + re.escape(formula) + r"\b"
             for match in re.finditer(pattern, lower_text):
@@ -167,8 +211,10 @@ class CodeSwitchingProcessor:
                         gloss=gloss,
                     )
                 )
+        return segments
 
-        # 2. Identify Arabic script passages
+    def _segment_arabic_script(self, text: str) -> list[CodeSwitchSegment]:
+        segments: list[CodeSwitchSegment] = []
         arabic_script_matches = list(re.finditer(r"[\u0600-\u06FF\s]+", text))
         for m in arabic_script_matches:
             ar_text = m.group().strip()
@@ -181,11 +227,13 @@ class CodeSwitchingProcessor:
                         gloss="Arabic Script Quotation",
                     )
                 )
+        return segments
 
-        # 3. Identify English segments
+    def _segment_words(self, text: str) -> list[CodeSwitchSegment]:
+        segments: list[CodeSwitchSegment] = []
         words = text.split()
-        current_en_words: list[str] = []
-        current_sw_words: list[str] = []
+        current_en: list[str] = []
+        current_sw: list[str] = []
 
         for word in words:
             w_clean = re.sub(r"[^\w]", "", word).lower()
@@ -193,22 +241,27 @@ class CodeSwitchingProcessor:
                 continue
 
             if w_clean in COMMON_ENGLISH_WORDS:
-                if current_sw_words:
-                    segments.append(CodeSwitchSegment(text=" ".join(current_sw_words), language="sw"))
-                    current_sw_words = []
-                current_en_words.append(word)
+                if current_sw:
+                    segments.append(CodeSwitchSegment(text=" ".join(current_sw), language="sw"))
+                    current_sw = []
+                current_en.append(word)
             else:
-                if current_en_words:
-                    segments.append(CodeSwitchSegment(text=" ".join(current_en_words), language="en"))
-                    current_en_words = []
-                current_sw_words.append(word)
+                if current_en:
+                    segments.append(CodeSwitchSegment(text=" ".join(current_en), language="en"))
+                    current_en = []
+                current_sw.append(word)
 
-        if current_en_words:
-            segments.append(CodeSwitchSegment(text=" ".join(current_en_words), language="en"))
-        if current_sw_words:
-            segments.append(CodeSwitchSegment(text=" ".join(current_sw_words), language="sw"))
+        if current_en:
+            segments.append(CodeSwitchSegment(text=" ".join(current_en), language="en"))
+        if current_sw:
+            segments.append(CodeSwitchSegment(text=" ".join(current_sw), language="sw"))
 
         return segments
+
+    def segment_languages(self, text: str) -> list[CodeSwitchSegment]:
+        """Split text into classified language segments."""
+        lower_text = text.lower()
+        return self._segment_formulas(text, lower_text) + self._segment_arabic_script(text) + self._segment_words(text)
 
 
 # Global singleton instance
