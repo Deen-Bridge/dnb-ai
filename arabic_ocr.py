@@ -39,10 +39,9 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from io import BytesIO
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(prefix="/arabic-ocr", tags=["arabic-ocr"])
@@ -353,8 +352,8 @@ class OCRResult(BaseModel):
 
 # Unicode ranges for Arabic diacritics (tashkeel)
 ARABIC_DIACRITICS = set(
-    "\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652"  # Fathatan through Sukun
-    "\u0653\u0654\u0655\u0656\u0657\u0658\u0659\u065A\u065B\u065C\u065D\u065E\u065F"
+    "\u064b\u064c\u064d\u064e\u064f\u0650\u0651\u0652"  # Fathatan through Sukun
+    "\u0653\u0654\u0655\u0656\u0657\u0658\u0659\u065a\u065b\u065c\u065d\u065e\u065f"
     "\u0670"  # Dagger alif
 )
 
@@ -364,21 +363,21 @@ HAMZA_FORMS = {
     "\u0623": "\u0627\u0654",  # Alef with hamza above
     "\u0625": "\u0627\u0655",  # Alef with hamza below
     "\u0624": "\u0648\u0654",  # Waw with hamza
-    "\u0626": "\u064A\u0654",  # Yeh with hamza
+    "\u0626": "\u064a\u0654",  # Yeh with hamza
 }
 
 # Common OCR errors in Arabic manuscripts
 COMMON_OCR_ERRORS: list[tuple[str, str, str]] = [
     # (wrong, correct, description)
     ("\u0647\u0627", "\u0629", "Ha-Alef misread as Ta Marbuta"),
-    ("\u0628\u0646", "\u062A\u0646", "Ba-Nun vs Ta-Nun confusion"),
-    ("\u064A\u064A", "\u0649", "Double Ya vs Alef Maksura"),
+    ("\u0628\u0646", "\u062a\u0646", "Ba-Nun vs Ta-Nun confusion"),
+    ("\u064a\u064a", "\u0649", "Double Ya vs Alef Maksura"),
     ("\u0631\u0632", "\u0631\u0632", "Ra-Zay dot confusion"),
-    ("\u062F\u0630", "\u062F\u0630", "Dal-Dhal dot confusion"),
+    ("\u062f\u0630", "\u062f\u0630", "Dal-Dhal dot confusion"),
     ("\u0633\u0634", "\u0633\u0634", "Seen-Sheen dot confusion"),
     ("\u0635\u0636", "\u0635\u0636", "Sad-Dad dot confusion"),
     ("\u0637\u0638", "\u0637\u0638", "Tah-Zah dot confusion"),
-    ("\u0639\u063A", "\u0639\u063A", "Ain-Ghain dot confusion"),
+    ("\u0639\u063a", "\u0639\u063a", "Ain-Ghain dot confusion"),
     ("\u0641\u0642", "\u0641\u0642", "Fa-Qaf dot confusion"),
 ]
 
@@ -416,7 +415,7 @@ def normalize_arabic(text: str) -> str:
     text = text.replace("\u0671", "\u0627")  # Alef wasla
 
     # Normalize alef maksura to ya
-    text = text.replace("\u0649", "\u064A")
+    text = text.replace("\u0649", "\u064a")
 
     # Normalize ta marbuta to ha
     text = text.replace("\u0629", "\u0647")
@@ -440,11 +439,7 @@ def calculate_word_confidence(word: WordResult) -> float:
         return 0.5
 
     base_conf = sum(c.confidence for c in base_chars) / len(base_chars)
-    diacritic_conf = (
-        sum(c.confidence for c in diacritic_chars) / len(diacritic_chars)
-        if diacritic_chars
-        else 1.0
-    )
+    diacritic_conf = sum(c.confidence for c in diacritic_chars) / len(diacritic_chars) if diacritic_chars else 1.0
 
     # Base characters weighted 80%, diacritics 20%
     return base_conf * 0.8 + diacritic_conf * 0.2
@@ -487,7 +482,7 @@ def detect_calligraphy_style(
         CalligraphyDetection with primary style and alternatives.
     """
     # Compute image hash for caching
-    image_hash = hashlib.sha256(image_data).hexdigest()[:16]
+    _image_hash = hashlib.sha256(image_data).hexdigest()[:16]
 
     # In production: call ML model for style classification
     # For now, implement heuristic-based detection
@@ -501,7 +496,7 @@ def detect_calligraphy_style(
 
     if text_sample:
         # Check for Persian letters (indicates Nastaliq possibility)
-        persian_chars = set("\u067E\u0686\u0698\u06AF")  # Pe, Che, Zhe, Gaf
+        persian_chars = set("\u067e\u0686\u0698\u06af")  # Pe, Che, Zhe, Gaf
         if any(c in text_sample for c in persian_chars):
             style_scores[CalligraphyStyle.NASTALIQ] += 0.3
             features_detected["persian_letters"] = True
@@ -513,7 +508,7 @@ def detect_calligraphy_style(
             style_scores[CalligraphyStyle.NASKH] += 0.2
 
         # Check for Quranic markers (suggests Naskh or Thuluth)
-        quran_markers = ["\u06DD", "\u06DE", "\u06E9"]  # End of ayah, etc.
+        quran_markers = ["\u06dd", "\u06de", "\u06e9"]  # End of ayah, etc.
         if any(m in text_sample for m in quran_markers):
             style_scores[CalligraphyStyle.NASKH] += 0.2
             style_scores[CalligraphyStyle.THULUTH] += 0.1
@@ -531,9 +526,7 @@ def detect_calligraphy_style(
     primary_confidence = primary_score / total_score if total_score > 0 else 0.5
 
     secondary_styles = [
-        (style, score / total_score if total_score > 0 else 0.0)
-        for style, score in sorted_styles[1:3]
-        if score > 0
+        (style, score / total_score if total_score > 0 else 0.0) for style, score in sorted_styles[1:3] if score > 0
     ]
 
     return CalligraphyDetection(
@@ -574,8 +567,8 @@ def preprocess_manuscript_image(
     # In production: actual image processing
     # For now, return original with operation log
 
-    # Apply profile defaults
-    profile_settings = PROFILE_DEFAULTS.get(config.profile, {})
+    # Apply profile defaults (reserved for production pipeline)
+    _profile_settings = PROFILE_DEFAULTS.get(config.profile, {})
 
     if config.deskew:
         operations.append("deskew")
@@ -688,9 +681,9 @@ def apply_post_processing(
         corrected_text = corrected_text.replace("الله", "اللّه")
         corrections.append("allah_ligature_shadda")
 
-    # Normalize line-final ta marbuta
+    # Normalize line-final ta marbuta (heuristic placeholder)
     # Pattern: word ending in ة followed by space or end
-    ta_marbuta_pattern = re.compile(r"(\w)ه(\s|$)")
+    # ta_marbuta_pattern = re.compile(r"(\w)ه(\s|$)")
     # This is a simplified heuristic - in production use dictionary lookup
 
     return corrected_text, lines, corrections
@@ -795,9 +788,7 @@ async def process_manuscript_page(
     warnings: list[str] = []
 
     # Step 1: Preprocess
-    processed_image, preprocess_ops = preprocess_manuscript_image(
-        image_data, preprocessing_config
-    )
+    processed_image, preprocess_ops = preprocess_manuscript_image(image_data, preprocessing_config)
 
     # Step 2: Detect calligraphy style
     calligraphy: CalligraphyDetection | None = None
@@ -807,8 +798,7 @@ async def process_manuscript_page(
         style_hint = calligraphy.primary_style
         if calligraphy.confidence < 0.5:
             warnings.append(
-                f"Low confidence ({calligraphy.confidence:.0%}) in calligraphy "
-                f"style detection. Results may vary."
+                f"Low confidence ({calligraphy.confidence:.0%}) in calligraphy style detection. Results may vary."
             )
 
     # Step 3: Run OCR
@@ -824,10 +814,7 @@ async def process_manuscript_page(
     text_normalized = normalize_arabic(corrected_text)
 
     if confidence.overall < 0.7:
-        warnings.append(
-            f"Overall OCR confidence is low ({confidence.overall:.0%}). "
-            "Manual review recommended."
-        )
+        warnings.append(f"Overall OCR confidence is low ({confidence.overall:.0%}). Manual review recommended.")
 
     if confidence.diacritic_confidence < 0.6:
         warnings.append(
@@ -882,8 +869,8 @@ class OCRRequest(BaseModel):
             v = v.split(",", 1)[1]
         try:
             base64.b64decode(v)
-        except Exception:
-            raise ValueError("Invalid base64 encoding")
+        except Exception as err:
+            raise ValueError("Invalid base64 encoding") from err
         return v
 
 
@@ -995,10 +982,7 @@ async def preprocess(request: PreprocessingRequest) -> PreprocessingResponse:
 @router.get("/calligraphy-styles")
 async def list_calligraphy_styles() -> list[dict[str, str]]:
     """List all recognized calligraphy styles with descriptions."""
-    return [
-        {"style": style.value, "description": STYLE_DESCRIPTIONS[style]}
-        for style in CalligraphyStyle
-    ]
+    return [{"style": style.value, "description": STYLE_DESCRIPTIONS[style]} for style in CalligraphyStyle]
 
 
 @router.get("/preprocessing-profiles")
@@ -1016,7 +1000,4 @@ async def list_preprocessing_profiles() -> list[dict[str, Any]]:
 @router.get("/engines")
 async def list_ocr_engines() -> list[dict[str, str]]:
     """List supported OCR engines."""
-    return [
-        {"engine": engine.value, "description": f"{engine.value} OCR backend"}
-        for engine in OCREngine
-    ]
+    return [{"engine": engine.value, "description": f"{engine.value} OCR backend"} for engine in OCREngine]

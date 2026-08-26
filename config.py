@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # Narrator biography (rijal) database
     enable_narrator_db: bool = Field(default=True)
     narrator_db_path: str = Field(default="data/narrators.json")
+    # Recitation quality analysis
+    ENABLE_RECITATION_QUALITY: bool = Field(default=True)
+    QUALITY_PASSING_SCORE: float = Field(default=0.7, ge=0, le=1)
+    QUALITY_RHYTHM_WINDOW_MS: int = Field(default=200, ge=0)
 
     @field_validator("cors_origins", mode="before")
     @classmethod
