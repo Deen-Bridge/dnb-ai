@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/swahili", tags=["swahili"])
 
 
-@router.post("/analyze", response_model=SwahiliAnalysisResult)
+@router.post("/analyze")
 async def analyze_swahili_text(body: SwahiliAnalyzeRequest) -> SwahiliAnalysisResult:
     """Perform full linguistic, loanword, dialect, code-switching, and cultural analysis."""
     start_time = time.perf_counter()
@@ -60,7 +60,7 @@ async def analyze_swahili_text(body: SwahiliAnalyzeRequest) -> SwahiliAnalysisRe
     )
 
 
-@router.post("/normalize", response_model=SwahiliNormalizeResponse)
+@router.post("/normalize")
 async def normalize_swahili_text(body: SwahiliNormalizeRequest) -> SwahiliNormalizeResponse:
     """Normalize regional dialect terms and spelling variants into Standard Swahili (Kiswahili Sanifu)."""
     normalized_text, replaced = dialect_classifier.normalize_to_standard(body.text)
@@ -71,7 +71,7 @@ async def normalize_swahili_text(body: SwahiliNormalizeRequest) -> SwahiliNormal
     )
 
 
-@router.get("/terms", response_model=list[IslamicTerm])
+@router.get("/terms")
 async def search_islamic_terms(
     query: str | None = Query(None, description="Search term in Swahili, Arabic, or English"),
     category: IslamicDomain | None = Query(None, description="Islamic thematic domain"),
@@ -81,7 +81,7 @@ async def search_islamic_terms(
     return terminology_db.search_terms(query=query, category=category, limit=limit)
 
 
-@router.get("/terms/{term_id}", response_model=IslamicTerm)
+@router.get("/terms/{term_id}")
 async def get_term_by_id(term_id: str) -> IslamicTerm:
     """Retrieve details for a specific Islamic term by its ID."""
     term = terminology_db.get_term_by_id(term_id)
@@ -109,13 +109,13 @@ async def list_dialects() -> dict[str, Any]:
     }
 
 
-@router.post("/code-switch", response_model=CodeSwitchResult)
+@router.post("/code-switch")
 async def analyze_code_switching_endpoint(body: SwahiliCodeSwitchRequest) -> CodeSwitchResult:
     """Analyze multi-lingual code-switching segments and Islamic formulas in text."""
     return code_switch_processor.analyze_code_switching(body.text)
 
 
-@router.post("/enhance-prompt", response_model=SwahiliPromptEnhancement)
+@router.post("/enhance-prompt")
 async def enhance_swahili_prompt(body: SwahiliAnalyzeRequest) -> SwahiliPromptEnhancement:
     """Generate prompt enhancement with Islamic glossary and East African cultural notes."""
     return swahili_response_enhancer.build_prompt_enhancement(body.text)

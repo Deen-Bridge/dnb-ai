@@ -98,8 +98,8 @@ class SwahiliIslamicTerminology:
                     self._normalized_lookup[m_key] = term
 
             logger.info("Loaded %d Swahili Islamic terms from %s", len(self.terms), self.data_file)
-        except Exception as e:
-            logger.error("Failed to load Swahili terminology: %s", e)
+        except Exception:
+            logger.exception("Failed to load Swahili terminology")
 
     def get_term_by_id(self, term_id: str) -> IslamicTerm | None:
         """Retrieve term by its unique ID."""

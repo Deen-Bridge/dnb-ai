@@ -56,6 +56,23 @@ PHONOLOGICAL_MAPPINGS = [
 ]
 
 
+_KNOWN_DIRECT_STEMS: list[tuple[tuple[str, ...], str, str]] = [
+    (("kutawadha",), "udhu", "ku"),
+    (("kuswali", "kusala"), "swala", "ku"),
+    (("kufunga",), "saumu", "ku"),
+    (("kuhiji",), "hija", "ku"),
+    (("waislamu",), "uislamu", "wa"),
+    (("muislamu", "mwislamu"), "uislamu", "m"),
+    (("maswahaba",), "swahaba", "ma"),
+    (("ushirikina",), "shiriki", "u"),
+    (("washirikina",), "shiriki", "wa"),
+    (("mshirikina",), "shiriki", "m"),
+    (("madhehebu",), "madhehebu", "ma"),
+    (("maustadhi",), "ustaadh", "ma"),
+    (("masheikh", "mashehe"), "sheikh", "ma"),
+]
+
+
 class ArabicLoanwordAnalyzer:
     """Detects, normalizes, and extracts Arabic loanwords in Swahili text."""
 
@@ -76,30 +93,9 @@ class ArabicLoanwordAnalyzer:
         lower_word = word.strip().lower()
 
         # Direct known forms
-        if lower_word.startswith("kutawadha"):
-            return "udhu", "ku"
-        if lower_word.startswith("kuswali") or lower_word.startswith("kusala"):
-            return "swala", "ku"
-        if lower_word.startswith("kufunga"):
-            return "saumu", "ku"
-        if lower_word.startswith("kuhiji"):
-            return "hija", "ku"
-        if lower_word.startswith("waislamu") or lower_word.startswith("muislamu") or lower_word.startswith("mwislamu"):
-            return "uislamu", "wa" if lower_word.startswith("wa") else "m"
-        if lower_word.startswith("maswahaba"):
-            return "swahaba", "ma"
-        if (
-            lower_word.startswith("ushirikina")
-            or lower_word.startswith("washirikina")
-            or lower_word.startswith("mshirikina")
-        ):
-            return "shiriki", "u" if lower_word.startswith("u") else ("wa" if lower_word.startswith("wa") else "m")
-        if lower_word.startswith("madhehebu"):
-            return "madhehebu", "ma"
-        if lower_word.startswith("maustadhi"):
-            return "ustaadh", "ma"
-        if lower_word.startswith("masheikh") or lower_word.startswith("mashehe"):
-            return "sheikh", "ma"
+        for prefixes, stem, pfx in _KNOWN_DIRECT_STEMS:
+            if lower_word.startswith(prefixes):
+                return stem, pfx
 
         for prefix, replacement in BANTU_PREFIXES:
             if lower_word.startswith(prefix) and len(lower_word) - len(prefix) >= 3:
@@ -113,13 +109,7 @@ class ArabicLoanwordAnalyzer:
 
         return lower_word, None
 
-    def analyze_word(self, word: str) -> LoanwordMatch | None:
-        """Analyze a single word to determine if it is an Arabic loanword and map it."""
-        cleaned_word = word.strip().lower()
-        if len(cleaned_word) < 2:
-            return None
-
-        # 1. Direct dictionary match
+    def _check_direct_match(self, word: str, cleaned_word: str) -> LoanwordMatch | None:
         direct_match = self._term_db.lookup_term(cleaned_word)
         if direct_match:
             return LoanwordMatch(
@@ -132,8 +122,9 @@ class ArabicLoanwordAnalyzer:
                 phonological_rule_applied="direct_match",
                 morphological_prefix=None,
             )
+        return None
 
-        # 2. Match after stripping Bantu prefix
+    def _check_stem_match(self, word: str, cleaned_word: str) -> LoanwordMatch | None:
         stem, prefix = self.strip_bantu_prefix(cleaned_word)
         if prefix:
             stem_match = self._term_db.lookup_term(stem)
@@ -148,48 +139,53 @@ class ArabicLoanwordAnalyzer:
                     phonological_rule_applied=f"bantu_prefix_strip_{prefix}",
                     morphological_prefix=prefix,
                 )
+        return None
 
-        # 3. Phonological variation check
+    def _check_phonological_match(self, word: str, cleaned_word: str) -> LoanwordMatch | None:
         for pattern, repl, rule_name in PHONOLOGICAL_MAPPINGS:
             variant = re.sub(pattern, repl, cleaned_word)
-            if variant != cleaned_word:
-                var_match = self._term_db.lookup_term(variant)
-                if var_match:
+            if variant == cleaned_word:
+                continue
+
+            var_match = self._term_db.lookup_term(variant)
+            if var_match:
+                return LoanwordMatch(
+                    raw_word=word,
+                    matched_term=var_match.swahili_term,
+                    arabic_original=var_match.arabic_original,
+                    arabic_transliteration=var_match.arabic_transliteration,
+                    category=var_match.category.value,
+                    confidence=0.88,
+                    phonological_rule_applied=rule_name,
+                    morphological_prefix=None,
+                )
+
+            v_stem, v_prefix = self.strip_bantu_prefix(variant)
+            if v_prefix:
+                v_stem_match = self._term_db.lookup_term(v_stem)
+                if v_stem_match:
                     return LoanwordMatch(
                         raw_word=word,
-                        matched_term=var_match.swahili_term,
-                        arabic_original=var_match.arabic_original,
-                        arabic_transliteration=var_match.arabic_transliteration,
-                        category=var_match.category.value,
-                        confidence=0.88,
-                        phonological_rule_applied=rule_name,
-                        morphological_prefix=None,
+                        matched_term=v_stem_match.swahili_term,
+                        arabic_original=v_stem_match.arabic_original,
+                        arabic_transliteration=v_stem_match.arabic_transliteration,
+                        category=v_stem_match.category.value,
+                        confidence=0.85,
+                        phonological_rule_applied=f"{rule_name}_with_prefix_{v_prefix}",
+                        morphological_prefix=v_prefix,
                     )
+        return None
 
-                # Check with prefix stripping on variant
-                v_stem, v_prefix = self.strip_bantu_prefix(variant)
-                if v_prefix:
-                    v_stem_match = self._term_db.lookup_term(v_stem)
-                    if v_stem_match:
-                        return LoanwordMatch(
-                            raw_word=word,
-                            matched_term=v_stem_match.swahili_term,
-                            arabic_original=v_stem_match.arabic_original,
-                            arabic_transliteration=v_stem_match.arabic_transliteration,
-                            category=v_stem_match.category.value,
-                            confidence=0.85,
-                            phonological_rule_applied=f"{rule_name}_with_prefix_{v_prefix}",
-                            morphological_prefix=v_prefix,
-                        )
-
-        # 4. Levenshtein edit distance for minor spelling variations
+    def _check_fuzzy_match(self, word: str, cleaned_word: str) -> LoanwordMatch | None:
+        if len(cleaned_word) < 4:
+            return None
         for term in self._term_db.terms:
             candidates = [term.swahili_term, term.arabic_transliteration] + term.variants_sw
             for cand in candidates:
                 cand_lower = cand.lower()
                 if abs(len(cleaned_word) - len(cand_lower)) <= 2:
                     dist = self._levenshtein_distance(cleaned_word, cand_lower)
-                    if dist <= 1 and len(cleaned_word) >= 4:
+                    if dist <= 1:
                         return LoanwordMatch(
                             raw_word=word,
                             matched_term=term.swahili_term,
@@ -200,8 +196,20 @@ class ArabicLoanwordAnalyzer:
                             phonological_rule_applied="fuzzy_edit_distance_1",
                             morphological_prefix=None,
                         )
-
         return None
+
+    def analyze_word(self, word: str) -> LoanwordMatch | None:
+        """Analyze a single word to determine if it is an Arabic loanword and map it."""
+        cleaned_word = word.strip().lower()
+        if len(cleaned_word) < 2:
+            return None
+
+        return (
+            self._check_direct_match(word, cleaned_word)
+            or self._check_stem_match(word, cleaned_word)
+            or self._check_phonological_match(word, cleaned_word)
+            or self._check_fuzzy_match(word, cleaned_word)
+        )
 
     def tokenize_swahili(self, text: str) -> list[SwahiliToken]:
         """Tokenize Swahili text and enrich tokens with loanword and morphological tags."""

@@ -107,10 +107,8 @@ DIALECT_MARKERS: dict[SwahiliDialect, dict[str, Any]] = {
 class SwahiliDialectClassifier:
     """Classifies regional Swahili varieties and normalizes dialect-specific terms."""
 
-    def classify_dialect(self, text: str) -> DialectResult:
-        """Analyze text to detect regional dialect features and confidence."""
-        lower_text = text.lower()
-        scores: dict[SwahiliDialect, float] = {d: 0.0 for d in SwahiliDialect}
+    def _score_profiles(self, lower_text: str) -> tuple[dict[SwahiliDialect, float], list[str], dict[str, str]]:
+        scores: dict[SwahiliDialect, float] = dict.fromkeys(SwahiliDialect, 0.0)
         detected_markers: list[str] = []
         normalized_map: dict[str, str] = {}
 
@@ -134,6 +132,13 @@ class SwahiliDialectClassifier:
         if coastal_hits >= 2:
             scores[SwahiliDialect.PWANI_UNGUJA] += coastal_hits * 0.5
 
+        return scores, detected_markers, normalized_map
+
+    def classify_dialect(self, text: str) -> DialectResult:
+        """Analyze text to detect regional dialect features and confidence."""
+        lower_text = text.lower()
+        scores, detected_markers, normalized_map = self._score_profiles(lower_text)
+
         # Determine highest scoring dialect
         best_dialect = SwahiliDialect.SANIFU
         highest_score = 0.0
@@ -143,7 +148,7 @@ class SwahiliDialectClassifier:
                 highest_score = score
                 best_dialect = dialect
 
-        if highest_score == 0.0:
+        if highest_score <= 0.0:
             best_dialect = SwahiliDialect.SANIFU
             confidence = 0.90
             is_coastal = False
