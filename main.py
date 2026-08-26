@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import asyncio
 import json
 import logging
@@ -8,9 +7,10 @@ import time
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 # Must run before any module that reads os.getenv at import time (store,
@@ -18,15 +18,8 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
-from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
-
-configure_logging()
-
-import google.generativeai as genai
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
@@ -42,10 +35,6 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
-from adhkar import corpus as adhkar_corpus
-from arabic_ocr import router as arabic_ocr_router
-from audio_hadith import router as audio_hadith_router
-from calligraphy import router as calligraphy_router
 from calligraphy_ocr import (
     CalligraphyAnalysis,
     GeminiCalligraphyEngine,
@@ -68,8 +57,11 @@ from confidence import (
     thresholds as confidence_thresholds,
 )
 from config import get_settings
-from crosslingual import CrosslingualSearchRequest, CrosslingualSearchResponse, crosslingual_search
-from errors import APIException
+from crosslingual import (
+    CrosslingualSearchRequest,
+    CrosslingualSearchResponse,
+    crosslingual_search,
+)
 from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
@@ -87,8 +79,7 @@ from fiqh import (
     normalize_madhhab,
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
-from hadith_context import router as hadith_context_router
-from history import router as history_router
+from history import trim_history
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from learning import router as learning_router
 from manuscript_ocr import (
@@ -114,30 +105,27 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
-from narrator_biography import router as narrator_router
-from model_router import router as model_routing_router
-from prompts import ExperimentConfig, ExperimentHarness, Variant, get_registry, register_defaults
-from page_analysis import router as page_analysis_router
-from query_optimizer import router as query_optimizer_router
-from reasoning_chains import router as reasoning_router
-from recitation_quality import router as recitation_router
-from reformulation import router as reformulation_router
+from prompts import (
+    ExperimentAssignment,
+    ExperimentConfig,
+    ExperimentHarness,
+    Variant,
+    get_registry,
+    register_defaults,
+)
+from providers.gemini import GeminiProvider
+from providers.openai_compat import OpenAICompatProvider
+from providers.router import ProviderRouter
+from providers.types import GenerationConfig as ProviderGenerationConfig, Message as ProviderMessage
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 from semantic_cache import (
-    CHAT_CONTEXT_MAX_LENGTH,
-    CHAT_PROMPT_MAX_LENGTH,
-    CHAT_RATE_LIMIT_MAX,
-    CHAT_RATE_LIMIT_WINDOW_SECONDS,
     SEMANTIC_CACHE_ENABLED,
     embed_text,
     get_cache,
-    get_chat_exact_cache,
-    get_token_quota_tracker,
     normalize_text,
 )
-from sentiment import router as sentiment_router
 from stellar import (
     PurchaseContext,
     PurchaseInfo,
@@ -149,9 +137,13 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
-from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
+from swahili import (
+    analyze_swahili,
+    router as swahili_router,
+    swahili_response_enhancer,
+)
 from tafsir import (
     TafsirContext,
     TafsirInfo,
@@ -161,6 +153,7 @@ from tafsir import (
     tafsir_system_context,
 )
 from worship import router as worship_router
+from latency_profiler import router as latency_profiler_router
 
 logger = logging.getLogger(__name__)
 
@@ -205,14 +198,7 @@ async def verify_api_key(
     if AUTH_DISABLED:
         return ""
     if not api_key or not secrets.compare_digest(api_key, SERVICE_API_KEY):
-        raise APIException(
-            status_code=401,
-            detail="Missing or invalid X-API-Key",
-            hint=(
-                "Provide a valid service API key in the 'X-API-Key' header (e.g., 'X-API-Key: <your-key>'). "
-                "For local testing without authentication, set environment variable AUTH_DISABLED=true."
-            ),
-        )
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
     return api_key
 
 
@@ -244,55 +230,8 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     retry_after = getattr(exc, "retry_after", 60)
     return JSONResponse(
         status_code=429,
-        content={
-            "detail": f"Rate limit exceeded: {exc.detail}",
-            "hint": f"Too many requests sent. Please wait {retry_after} seconds before retrying.",
-        },
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
         headers={"Retry-After": str(retry_after)},
-    )
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    headers = getattr(exc, "headers", None) or {}
-    hint = getattr(exc, "hint", None)
-
-    if isinstance(exc.detail, dict):
-        content = dict(exc.detail)
-        if hint and "hint" not in content:
-            content["hint"] = hint
-    else:
-        content = {"detail": exc.detail}
-        if hint:
-            content["hint"] = hint
-
-    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(content), headers=headers)
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    errors = []
-    for err in exc.errors():
-        err_dict = dict(err)
-        if isinstance(err_dict.get("input"), bytes):
-            err_dict["input"] = err_dict["input"].decode("utf-8", errors="replace")
-        errors.append(err_dict)
-    hints = []
-    for err in errors:
-        loc = " -> ".join(str(part) for part in err.get("loc", []) if part != "body")
-        msg = err.get("msg", "Invalid value")
-        if loc:
-            hints.append(f"Field '{loc}': {msg}")
-        else:
-            hints.append(msg)
-    hint_str = "; ".join(hints) if hints else "Please check request parameters and schema."
-    content = {
-        "detail": errors,
-        "hint": f"Validation failed ({hint_str}). Please provide valid input according to the API schema.",
-    }
-    return JSONResponse(
-        status_code=422,
-        content=jsonable_encoder(content),
     )
 
 
@@ -300,39 +239,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # the rest of the Deen Bridge platform settles on
 app.include_router(stellar_router)
 app.include_router(faraid_router)
-app.include_router(learning_router)
-app.include_router(worship_router)
-
-app.include_router(reasoning_router)
 app.include_router(study_router)
-# Religious sentiment analysis: reads the emotional/spiritual tone of a question
-app.include_router(sentiment_router)
+# Personalized learning-path recommendations from a caller-supplied catalog
+app.include_router(learning_router)
+# Worship utilities: prayer times and Hijri/Gregorian date conversion
+app.include_router(worship_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
 app.include_router(tafsir_router)
-# Page analysis: layout understanding of scanned Islamic book pages
-app.include_router(page_analysis_router)
-# Calligraphy: deterministic style estimation for Arabic calligraphic hands
-app.include_router(calligraphy_router)
 # Scholar review: the human end of the abstention loop
 app.include_router(review_router)
-# Question reformulation: deterministic quality assessment + rewrite suggestions
-app.include_router(reformulation_router)
-# Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
-app.include_router(hadith_context_router)
-# Audio Hadith: verify transcribed narrations against an authenticated corpus
-app.include_router(audio_hadith_router)
-# Database query optimization: static anti-pattern analysis + runtime profiling
-app.include_router(query_optimizer_router)
-# Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
-app.include_router(history_router)
-# Model routing: pick the optimal model per query by complexity, latency and cost
-app.include_router(model_routing_router)
-# Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
-app.include_router(arabic_ocr_router)
-# Narrator biography: rijal lookup, isnad resolution, and network graphs
-app.include_router(narrator_router)
-# Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
-app.include_router(recitation_router)
+app.include_router(latency_profiler_router)
 
 # Configure CORS
 app.add_middleware(
@@ -356,9 +272,24 @@ class CitationVerificationResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    prompt: str = Field(..., max_length=CHAT_PROMPT_MAX_LENGTH)
-    chat_id: str | None = None
-    context: str | None = Field(None, max_length=CHAT_CONTEXT_MAX_LENGTH)  # Additional context for specific queries
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=CHAT_PROMPT_MAX_LENGTH,
+        description="User question after leading and trailing whitespace is removed.",
+        examples=["What are the five pillars of Islam?"],
+    )
+    chat_id: uuid.UUID | None = Field(
+        default=None,
+        description="Existing chat session UUID. Omit it to start a new session.",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    context: str | None = Field(
+        default=None,
+        max_length=CHAT_CONTEXT_MAX_LENGTH,
+        description="Optional supporting context appended to the model prompt.",
+        examples=["The user is asking about a general educational scenario."],
+    )
     madhhab: str | None = None  # User's madhhab: hanafi, maliki, shafii, hanbali
     language: str | None = None  # BCP-47 response language (ar, en, ur, etc.); auto-detect when omitted
     user_id: str | None = Field(default=None, max_length=128)  # Opaque user identifier for personalization
@@ -467,7 +398,6 @@ safety_pipeline = SafetyPipeline(InputGate(safety_policy, classify_for_safety), 
 
 # Semantic response cache
 semantic_cache = get_cache()
-token_quota_tracker = get_token_quota_tracker()
 
 # Durable queue for low-confidence religious answers awaiting a scholar
 review_store = get_review_store()
@@ -589,19 +519,14 @@ _admin_header = APIKeyHeader(name="X-Admin-Token", auto_error=False)
 async def require_admin(token: str | None = Depends(_admin_header)) -> None:
     """Gate admin endpoints on ADMIN_TOKEN; closed by default when unset."""
     if not ADMIN_TOKEN:
-        raise APIException(
+        raise HTTPException(
             status_code=503,
             detail="ADMIN_TOKEN is not configured on this server.",
-            hint="Set the ADMIN_TOKEN environment variable in server configuration to enable admin management routes.",
         )
     # Compare as bytes: secrets.compare_digest raises on non-ASCII str, which
     # would turn a crafted header into a 500 instead of a clean 403.
     if not token or not secrets.compare_digest(token.encode("utf-8"), ADMIN_TOKEN.encode("utf-8")):
-        raise APIException(
-            status_code=403,
-            detail="Invalid or missing admin token.",
-            hint="Include the configured admin secret in the 'X-Admin-Token' request header (e.g., 'X-Admin-Token: <admin_token>').",
-        )
+        raise HTTPException(status_code=403, detail="Invalid or missing admin token.")
 
 
 ISLAMIC_CONTEXT = (
@@ -821,8 +746,7 @@ async def run_strict_corrective_loop(
 
 
 @app.post("/chat", response_model=ChatResponse)
-@limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
-async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
+async def chat(request: ChatRequest, http_request: Request, fastapi_response: Response) -> ChatResponse:
     trace = telemetry.Trace()
     _ctx_token = telemetry.current_trace.set(trace)
     _handler_start = time.perf_counter()
@@ -839,16 +763,16 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        chat_id = str(body.chat_id) if body.chat_id is not None else str(uuid.uuid4())
+        chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
-        is_bypass = request.headers.get("X-Cache-Bypass") == "1"
+        is_bypass = http_request.headers.get("X-Cache-Bypass") == "1"
 
         # A user who pastes a Stellar secret key must not have it forwarded to
         # the model provider or written into stored history. Everything
         # downstream works from the redacted text; the zakat layer separately
         # detects that one was present and warns the user.
-        prompt = redact_secret_keys(body.prompt)
-        extra_context = redact_secret_keys(body.context)
+        prompt = redact_secret_keys(request.prompt)
+        extra_context = redact_secret_keys(request.context)
         logger.info(
             "chat request received",
             extra={
@@ -862,28 +786,61 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             },
         )
 
+        # --- A/B experiment assignment (populated if any experiment is active) ---
+        _current_experiment: ExperimentAssignment | None = None
+        for exp_id in experiment_harness.active_experiments():
+            try:
+                _current_experiment = experiment_harness.assign(exp_id, chat_id)
+                break
+            except Exception:  # noqa: BLE001 — experiments are best-effort
+                pass
+
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
-            madhhab = normalize_madhhab(body.madhhab)
+            madhhab = normalize_madhhab(request.madhhab)
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
-            effective_language = normalize_language(body.language)
+            effective_language = normalize_language(request.language)
+
+            # --- Swahili analysis ---
+            is_swahili = effective_language == "sw"
+            swahili_analysis = None
+            if is_swahili or any(
+                w in prompt.lower()
+                for w in [
+                    "je,",
+                    "habari",
+                    "swala",
+                    "udhu",
+                    "saumu",
+                    "zaka",
+                    "hija",
+                    "kadhi",
+                    "bakwata",
+                    "maulidi",
+                    "kufunga",
+                ]
+            ):
+                swahili_analysis = analyze_swahili(prompt)
+                if not is_swahili and len(swahili_analysis.detected_terms) >= 2:
+                    is_swahili = True
+                    effective_language = "sw"
 
         # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
             # Tafsir detection is offline (regex + the bundled surah index),
             # so a non-tafsir prompt costs nothing.
-            tafsir_context = await tafsir_retriever(prompt, body.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
 
             # Zakat detection is offline (keywords plus a key-shaped match), so
             # an ordinary prompt never touches Horizon or the gold-price API.
-            zakat_context = await zakat_retriever(body.prompt, body.context)
+            zakat_context = await zakat_retriever(request.prompt, request.context)
             zakat_info = zakat_context.info if zakat_context else None
 
             # Purchase detection is offline (keywords). History comes from an
             # inline summary or a best-effort JWT fetch — never other users'.
-            purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
+            purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
 
             # Per-user retrieval: only this user's most-relevant records (deny by
@@ -893,12 +850,9 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         # --- Memory lookup ---
         profile: UserProfile | None = None
         summary: ChatSummary | None = None
-        if body.user_id:
-            profile = await memory_store.get_profile(body.user_id)
-            summary = await memory_store.get_chat_summary(f"{body.user_id}:{chat_id}")
-
-        # Determine cache scope: public for anonymous, user:{user_id} for authenticated
-        cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
+        if request.user_id:
+            profile = await memory_store.get_profile(request.user_id)
+            summary = await memory_store.get_chat_summary(f"{request.user_id}:{chat_id}")
 
         # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
         # through the semantic response cache: the first is built from retrieved
@@ -906,57 +860,23 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         # user's real financial data, which must never be replayed to anyone else.
         is_cacheable = (
             is_new_chat
-            and body.context is None
+            and request.context is None
             and tafsir_context is None
             and zakat_context is None
             and purchase_context is None
             and personal_context is None
+            and request.user_id is None
             and SEMANTIC_CACHE_ENABLED
         )
 
-        # --- Two-tier cache lookup: exact-match first, then semantic ---
-        exact_cache = get_chat_exact_cache()
+        # --- Semantic cache lookup ---
         embedding: Any = None
         normalized: str | None = None
-
         if is_cacheable and not is_bypass:
-            # Exact-match cache lookup (tier 1)
-            exact_key = f"{cache_scope}:{normalize_text(prompt)}"
-            exact_cached = exact_cache.get(exact_key)
-            if exact_cached is not None:
-                fastapi_response.headers["X-Cache-Tier"] = "exact"
-                fastapi_response.headers["X-Semantic-Cache"] = "hit"
-                model = genai.GenerativeModel(
-                    telemetry.GEMINI_MODEL,
-                    safety_settings=get_safety_settings(),
-                )
-                chat_session = model.start_chat(
-                    history=[
-                        {"role": "user", "parts": [{"text": prompt}]},
-                        {"role": "model", "parts": [{"text": exact_cached["response"]}]},
-                    ]
-                )
-                active_chats[chat_id] = chat_session
-                logger.info("Exact cache HIT for prompt: %s", prompt[:80])
-                cached_message_id = _record_answer(chat_id, prompt, exact_cached["response"])
-                _finalize()
-                _succeeded = True
-                return ChatResponse(
-                    response=exact_cached["response"],
-                    chat_id=chat_id,
-                    message_id=cached_message_id,
-                    history=exact_cached["history"],
-                    fiqh=fiqh_info,
-                    hadith_references=annotate_hadith(exact_cached["response"]),
-                    language=effective_language,
-                )
-
-            # Semantic cache lookup (tier 2)
             normalized = normalize_text(prompt)
             embedding = embed_text(normalized)
-            cached = semantic_cache.get(embedding, scope=cache_scope)
+            cached = semantic_cache.get(embedding)
             if cached is not None:
-                fastapi_response.headers["X-Cache-Tier"] = "semantic"
                 fastapi_response.headers["X-Semantic-Cache"] = "hit"
                 model = genai.GenerativeModel(
                     telemetry.GEMINI_MODEL,
@@ -984,25 +904,6 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
-
-        # --- Token quota enforcement ---
-        # Check quota before making any LLM call (cache miss path)
-        quota_key = body.user_id if body.user_id else _rate_limit_key(request)
-        # Estimate token count for quota check (conservative estimate)
-        estimated_tokens = len(prompt.split()) + len(body.context.split()) if body.context else len(prompt.split())
-        # Use a conservative multiplier for system context and response
-        estimated_tokens = int(estimated_tokens * 3)  # Account for system prompt and response
-
-        if RATE_LIMIT_ENABLED:
-            quota_allowed, retry_after = token_quota_tracker.is_allowed(quota_key, estimated_tokens)
-            if not quota_allowed:
-                logger.warning("Token quota exceeded for key %s: retry_after=%d", quota_key, retry_after)
-                raise APIException(
-                    status_code=429,
-                    detail="Token quota exceeded. Please try again later.",
-                    hint=f"Hourly token quota limit reached. Please wait {retry_after} seconds before sending further messages, or reduce message length.",
-                    headers={"Retry-After": str(retry_after)},
-                )
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
         async def generate(safety_prompt: str) -> str:
@@ -1046,11 +947,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             )
             text = extract_text_safely(response)
             if not text:
-                raise APIException(
-                    status_code=500,
-                    detail="Empty response from AI model",
-                    hint="The upstream AI model returned an empty response. Try rephrasing your prompt or asking again in a few moments.",
-                )
+                raise HTTPException(status_code=500, detail="Empty response from AI model")
             return text
 
         enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
@@ -1089,8 +986,8 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 if message.role == "user":
                     content = _strip_system_context(content)
                 history.append(Message(role="user" if message.role == "user" else "model", content=content))
-            except Exception as e:
-                logger.warning(f"Error processing message in history: {str(e)}")
+            except Exception:  # noqa: BLE001 - one malformed turn must not fail the answer
+                logger.warning("error processing message in history", exc_info=True)
                 continue
 
         response_text = safety_result.text if safety_result else generated_text
@@ -1158,40 +1055,26 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             },
         )
 
-        # --- Two-tier cache write ---
-        # Only non-abstained answers are cached. Replaying an abstention
-        # would spread one turn's refusal to later askers.
-        is_cacheable = is_cacheable and assessment.band is not ConfidenceBand.ABSTAIN
+        # --- Semantic cache write ---
+        # Only confident answers are cached. Replaying an abstention, or a
+        # hedged answer whose warning would outlive the doubt that caused it,
+        # would spread one turn's uncertainty to every later asker.
+        is_cacheable = is_cacheable and assessment.band is ConfidenceBand.CONFIDENT
         if is_cacheable and (safety_result is None or safety_result.generator_called):
-            # Get token count from telemetry for savings tracking
-            totals = trace.request_totals()
-            token_count = totals.get("total_tokens", 0)
-
             if embedding is None:
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
-
-            # Write to exact-match cache (tier 1)
-            exact_key = f"{cache_scope}:{normalized}"
-            exact_cache.put(
-                exact_key,
-                {"response": response_text, "history": history},
-                token_count=token_count,
+            semantic_cache.put(embedding, response_text, chat_id, history)
+            logger.info(
+                "semantic cache write",
+                extra={"chat_id": chat_id, "prompt_chars": len(prompt), **prompt_debug_fields(prompt)},
             )
 
-            # Write to semantic cache (tier 2)
-            semantic_cache.put(
-                embedding,
-                response_text,
-                chat_id,
-                history,
-                scope=cache_scope,
-                token_count=token_count,
-            )
-            logger.info("Two-tier cache WRITE for prompt: %s (scope: %s)", prompt[:80], cache_scope)
-
-        fastapi_response.headers["X-Cache-Tier"] = "miss"
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
+        if swahili_analysis:
+            fastapi_response.headers["X-Swahili-Dialect"] = swahili_analysis.dialect.primary_dialect.value
+            fastapi_response.headers["X-Swahili-Terms-Detected"] = str(len(swahili_analysis.detected_terms))
+            fastapi_response.headers["X-Swahili-Code-Switching"] = swahili_analysis.code_switch.switch_type.value
 
         # Assign this answer a stable id and snapshot the displayed text, so a
         # later /feedback call can reference exactly this turn and store what
@@ -1228,14 +1111,14 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         _succeeded = True
 
         # --- Persist chat history ---
-        asyncio.create_task(_persist_chat_history(chat_id, body.user_id, chat_session))
+        asyncio.create_task(_persist_chat_history(chat_id, request.user_id, chat_session))
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
-        if body.user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
+        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
             asyncio.create_task(
                 _extract_and_update_memory(
-                    body.user_id,
+                    request.user_id,
                     prompt,
                     response_text,
                     chat_id,
@@ -1243,56 +1126,52 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                     memory_store,
                 )
             )
-            logger.info("Memory extraction scheduled for user %s", body.user_id[:8])
+            logger.info("Memory extraction scheduled for user %s", request.user_id[:8])
 
         # --- Summary eviction ---
         # After enough turns accumulate, summarize old history and persist.
-        if body.user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
+        if request.user_id and request.remember and MEMORY_EXTRACTION_ENABLED:
             chat_session = active_chats.get(chat_id)
             if chat_session and hasattr(chat_session, "history") and chat_session.history:
                 if len(chat_session.history) >= MAX_CHAT_HISTORY_TURNS:
                     asyncio.create_task(
                         _summarize_history(
-                            f"{body.user_id}:{chat_id}",
+                            f"{request.user_id}:{chat_id}",
                             chat_session.history,
                             summary,
                             memory_store,
                         )
                     )
-                    logger.info("History summarization triggered for %s", body.user_id[:8])
+                    logger.info("History summarization triggered for %s", request.user_id[:8])
 
         return response_obj
 
     except ResourceExhausted as exc:
         logger.warning("Gemini rate limit exceeded for chat %s: %s", chat_id, exc)
-        raise APIException(
+        raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Please try again later.",
-            hint="Upstream Gemini API rate limit reached. Please wait 10-30 seconds before retrying.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except InvalidArgument as exc:
         logger.warning("Invalid argument for Gemini call in chat %s: %s", chat_id, exc)
-        raise APIException(
+        raise HTTPException(
             status_code=400,
             detail="Invalid request parameters.",
-            hint="Verify request fields (e.g., prompt length must be 1-10000 characters, context must be <= 5000 characters).",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except (TimeoutError, DeadlineExceeded) as exc:
         logger.warning("Gemini API call timed out for chat %s: %s", chat_id, exc)
-        raise APIException(
+        raise HTTPException(
             status_code=504,
             detail="AI service timed out.",
-            hint="The AI provider did not respond within the deadline. Retry in a few seconds or try a shorter prompt.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except ServiceUnavailable as exc:
         logger.warning("Gemini service unavailable for chat %s: %s", chat_id, exc)
-        raise APIException(
+        raise HTTPException(
             status_code=503,
             detail="AI service temporarily unavailable.",
-            hint="The AI service is temporarily experiencing high load or provider downtime. Please retry in 30-60 seconds.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     except HTTPException as exc:
@@ -1302,10 +1181,9 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         raise
     except Exception as exc:
         logger.exception("unexpected error in /chat handler", extra={"chat_id": chat_id})
-        raise APIException(
+        raise HTTPException(
             status_code=500,
             detail="AI service error",
-            hint="An unexpected server error occurred while generating the answer. Please retry your request or contact support if the issue persists.",
             headers={"X-Trace-Id": trace.trace_id},
         ) from exc
     finally:
@@ -1360,8 +1238,7 @@ async def _summarize_history(
 
 
 @app.post("/chat/stream")
-@limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
-async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
+async def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
     """Streaming chat endpoint using Server-Sent Events (SSE).
 
     Returns incremental ``data:`` events carrying text deltas as JSON
@@ -1382,9 +1259,9 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     _handler_start = time.perf_counter()
 
     try:
-        chat_id = str(body.chat_id) if body.chat_id is not None else str(uuid.uuid4())
-        prompt = redact_secret_keys(body.prompt)
-        extra_context = redact_secret_keys(body.context)
+        chat_id = str(request.chat_id) if request.chat_id else str(uuid.uuid4())
+        prompt = redact_secret_keys(request.prompt)
+        extra_context = redact_secret_keys(request.context)
         logger.info(
             "streaming chat request received",
             extra={
@@ -1399,18 +1276,27 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             },
         )
 
+        # --- A/B experiment assignment ---
+        _current_experiment: ExperimentAssignment | None = None
+        for exp_id in experiment_harness.active_experiments():
+            try:
+                _current_experiment = experiment_harness.assign(exp_id, chat_id)
+                break
+            except Exception:  # noqa: BLE001 — experiments are best-effort
+                pass
+
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
-            madhhab = normalize_madhhab(body.madhhab)
+            madhhab = normalize_madhhab(request.madhhab)
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
-            effective_language = normalize_language(body.language)
+            effective_language = normalize_language(request.language)
 
         # --- Tafsir and zakat retrieval ---
         with trace.span("retrieval"):
-            tafsir_context = await tafsir_retriever(prompt, body.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context = await tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
-            zakat_context = await zakat_retriever(body.prompt, body.context)
+            zakat_context = await zakat_retriever(request.prompt, request.context)
             zakat_info = zakat_context.info if zakat_context else None
 
         combined_text: str = ""  # accumulated full response for post-processing
@@ -1418,9 +1304,11 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
         safety_enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
 
-        # --- Purchase history & personal context ---
-        purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
-        personal_context = await personal_context_retriever(body.prompt, body.user_id, body.auth_token)
+        # --- Purchase history ---
+        purchase_context = await purchase_retriever(request.prompt, request.transactions, request.auth_token)
+
+        # --- Per-user personal context (deny by default without user_id/token) ---
+        personal_context = await personal_context_retriever(request.prompt, request.user_id, request.auth_token)
 
         async def event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
@@ -1649,7 +1537,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 # Awaited (not fire-and-forget) so a client that immediately
                 # reloads the chat list sees this turn. Failures are caught
                 # inside the helper; the stream is already complete.
-                await _persist_chat_history(chat_id, body.user_id, chat_session)
+                await _persist_chat_history(chat_id, request.user_id, chat_session)
 
             except asyncio.CancelledError:
                 # Client disconnected mid-stream. Consume remaining chunks
@@ -1693,10 +1581,9 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             getattr(request, "chat_id", None),
             exc,
         )
-        raise APIException(
+        raise HTTPException(
             status_code=500,
             detail="AI service error",
-            hint="An unexpected server error occurred while initialising streaming chat. Please verify your connection and retry.",
         ) from exc
     finally:
         telemetry.registry.record_request(
@@ -1764,19 +1651,15 @@ async def get_user_chats(user_id: str) -> dict[str, Any]:
                 }
             )
         # Most recent first
-        chats.sort(key=lambda c: float(str(c["created_at"] or 0)), reverse=True)
+        chats.sort(key=lambda c: c["created_at"] or 0, reverse=True)
         return {"chats": chats}
     except Exception as e:
-        logger.error("Error listing user chats", exc_info=True)
-        raise APIException(
-            status_code=500,
-            detail="Internal server error",
-            hint="Failed to load user chat sessions. Verify user_id format and retry.",
-        ) from e
+        logger.exception("failed to list user chats", extra={"user_id_prefix": user_id[:8]})
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/chat/{chat_id}/history")
-async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
+async def get_chat_history(chat_id: str) -> list[dict[str, Any]]:
     """Get the message history for a specific chat."""
     try:
         history = await session_store.load_history(chat_id)
@@ -1787,16 +1670,13 @@ async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
                 msg["text"] = _strip_system_context(msg.get("text", ""))
         return history
     except Exception as e:
-        logger.error("Error loading chat history", exc_info=True)
-        raise APIException(
-            status_code=500,
-            detail="Internal server error",
-            hint="Failed to retrieve chat history. Verify chat_id and retry.",
-        ) from e
+        logger.exception("failed to load chat history", extra={"chat_id": chat_id})
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str]:
+async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
+    chat_id_str = str(chat_id)
     try:
         existed = chat_id in active_chats
         active_chats.pop(chat_id, None)
@@ -1813,12 +1693,13 @@ async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str
             return {"message": "Chat session deleted successfully"}
         return {"message": "Chat session not found"}
     except Exception as e:
-        logger.error("Error deleting chat", exc_info=True)
-        raise APIException(
-            status_code=500,
-            detail="Internal server error",
-            hint="Failed to delete chat session. Please retry.",
-        ) from e
+        logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+    if not (existed or persisted):
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    logger.info("chat session deleted", extra={"chat_id": chat_id_str})
+    return {"message": "Chat session deleted successfully"}
 
 
 # ---------------------------------------------------------------------------
@@ -1856,10 +1737,9 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
     for the same (chat_id, message_id) overwrites the earlier record.
     """
     if not rate_limiter.is_allowed(_client_ip(request)):
-        raise APIException(
+        raise HTTPException(
             status_code=429,
             detail="Too many feedback submissions. Please wait before trying again.",
-            hint="Feedback submissions are rate-limited to 20 per minute per IP. Please wait up to 60 seconds before submitting again.",
         )
 
     snapshot = answer_snapshots.get((body.chat_id, body.message_id))
@@ -1867,15 +1747,11 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
     answer_text = snapshot["answer"] if snapshot else body.answer
 
     if snapshot is None and (not prompt_text or not answer_text):
-        raise APIException(
+        raise HTTPException(
             status_code=422,
             detail=(
                 "This answer is no longer in memory. Please supply 'prompt' and "
                 "'answer' in the request body so the feedback has context."
-            ),
-            hint=(
-                "Supply both 'prompt' and 'answer' string fields in the JSON body "
-                "(e.g. {'chat_id': '...', 'message_id': '...', 'rating': 'up', 'prompt': '...', 'answer': '...'})."
             ),
         )
 
@@ -1890,19 +1766,15 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         answer=answer_text,
         model_name=telemetry.GEMINI_MODEL,
         generation_config=GENERATION_CONFIG,
-        created_at=datetime.now(timezone.utc).isoformat(),  # noqa: UP017
+        created_at=datetime.now(UTC).isoformat(),
     )
 
     try:
         # SQLite/Redis I/O is synchronous; keep it off the event loop.
         await run_in_threadpool(feedback_store.upsert, record)
     except Exception as exc:
-        logger.error("Failed to store feedback: %s", exc)
-        raise APIException(
-            status_code=500,
-            detail="Failed to store feedback.",
-            hint="Database error storing feedback record. Please retry in a few moments.",
-        ) from exc
+        logger.exception("failed to store feedback", extra={"chat_id": body.chat_id, "message_id": body.message_id})
+        raise HTTPException(status_code=500, detail="Failed to store feedback.") from exc
 
     logger.info(
         "Feedback stored: chat_id=%s message_id=%s rating=%s",
@@ -1922,12 +1794,8 @@ async def feedback_stats() -> dict[str, Any]:
     try:
         return await run_in_threadpool(feedback_store.stats)
     except Exception as exc:
-        logger.error("Failed to fetch feedback stats: %s", exc)
-        raise APIException(
-            status_code=500,
-            detail="Failed to fetch stats.",
-            hint="Database error aggregating feedback metrics. Please retry.",
-        ) from exc
+        logger.exception("failed to fetch feedback stats")
+        raise HTTPException(status_code=500, detail="Failed to fetch stats.") from exc
 
 
 @app.get("/feedback/records", dependencies=[Depends(require_admin)])
@@ -1941,33 +1809,101 @@ async def feedback_records(
     Requires the X-Admin-Token header.
     """
     if rating and rating not in ("up", "down"):
-        raise APIException(
-            status_code=422,
-            detail="rating must be 'up' or 'down'",
-            hint="Set the 'rating' query parameter to either 'up' or 'down' (e.g., ?rating=down).",
-        )
+        raise HTTPException(status_code=422, detail="rating must be 'up' or 'down'")
     if category and category not in FEEDBACK_TAXONOMY:
-        raise APIException(
+        raise HTTPException(
             status_code=422,
             detail=f"Unknown category. Valid: {sorted(FEEDBACK_TAXONOMY)}",
-            hint=f"Use one of the allowed taxonomy categories: {', '.join(sorted(FEEDBACK_TAXONOMY))} (e.g., ?category=incorrect_information).",
         )
     if not (1 <= limit <= 500):
-        raise APIException(
-            status_code=422,
-            detail="limit must be between 1 and 500",
-            hint="Specify an integer limit between 1 and 500 (e.g., ?limit=50). Default is 50.",
-        )
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
     try:
         records = await run_in_threadpool(feedback_store.list_records, rating, category, limit)
         return {"records": [r.to_dict() for r in records]}
     except Exception as exc:
-        logger.error("Failed to fetch feedback records: %s", exc)
-        raise APIException(
-            status_code=500,
-            detail="Failed to fetch records.",
-            hint="Database error retrieving feedback records. Please retry.",
-        ) from exc
+        logger.exception("failed to fetch feedback records")
+        raise HTTPException(status_code=500, detail="Failed to fetch records.") from exc
+
+
+# ---------------------------------------------------------------------------
+# Hybrid search: vector + keyword fusion retrieval (#226)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/search/hybrid", response_model=HybridSearchResponse)
+async def search_hybrid(body: HybridSearchRequest) -> HybridSearchResponse:
+    """Fuse semantic and keyword retrieval channels with RRF over the corpus.
+
+    All channels run offline in-process; production backends (pgvector,
+    Pinecone, ...) plug into hybrid_search's Protocols without touching this
+    handler.
+    """
+    if not settings.hybrid_enabled:
+        raise HTTPException(status_code=503, detail="Hybrid search is disabled.")
+    return await run_in_threadpool(handle_hybrid_search, body)
+
+
+@app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
+async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
+    """Arabic–English cross-lingual retrieval over the bundled corpus (#232)."""
+    return await crosslingual_search(body.query, body.k, body.lang_pref)
+
+
+# --- Calligraphy OCR (#234) ---------------------------------------------------
+
+
+@app.post("/calligraphy/analyze", response_model=CalligraphyAnalysis)
+@limiter.limit("10/minute")
+async def analyze_calligraphy(request: Request, file: UploadFile = File(...)) -> CalligraphyAnalysis:
+    """Recognize text in an Arabic calligraphy image and classify its style.
+
+    Accepts a single multipart JPEG or PNG (validated by magic bytes, capped at
+    ``calligraphy_max_image_bytes``). Heavy lifting lives in calligraphy_ocr;
+    this handler only enforces transport rules and picks the provider.
+
+    Errors: 413 oversize, 415 unsupported format, 422 no legible calligraphy,
+    502 engine failure, 503 provider unavailable. Rate-limited per API key/IP.
+    """
+    max_bytes = settings.calligraphy_max_image_bytes
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {max_bytes // (1024 * 1024)}MB size limit.",
+        )
+
+    mime = sniff_image_mime(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported.")
+
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    if settings.calligraphy_provider == "stub":
+        # The stub fabricates results from marker bytes — a dev/test aid only.
+        if environment == "production":
+            raise HTTPException(status_code=503, detail="The stub calligraphy provider is disabled in production.")
+        engine: GeminiCalligraphyEngine | StubCalligraphyEngine = StubCalligraphyEngine(
+            min_confidence=settings.calligraphy_min_confidence
+        )
+    elif settings.calligraphy_provider == "gemini":
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+        engine = GeminiCalligraphyEngine(timeout=GEMINI_TIMEOUT, min_confidence=settings.calligraphy_min_confidence)
+    else:
+        raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+
+    try:
+        # The vision call is synchronous; keep it off the event loop.
+        analysis = await run_in_threadpool(engine.analyze, data, mime)
+    except Exception as exc:
+        logger.error("Calligraphy analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Calligraphy analysis failed upstream.") from exc
+
+    if not analysis.extracted_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No legible Arabic calligraphy was detected in the image.",
+        )
+    return analysis
 
 
 @app.get("/ping")
@@ -1985,11 +1921,7 @@ async def get_memory(user_id: str) -> dict[str, Any]:
     """
     profile = await memory_store.get_profile(user_id)
     if profile is None:
-        raise APIException(
-            status_code=404,
-            detail="Memory not found",
-            hint="No user profile found for the provided user_id. Memory is created automatically when chatting with user_id provided.",
-        )
+        raise HTTPException(status_code=404, detail="Memory not found")
     return profile.model_dump()
 
 
@@ -2019,7 +1951,6 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
         "version": app.version,
         "checks": checks,
         "failing_check": "gemini_api_key_configured",
-        "hint": "Configure the GEMINI_API_KEY environment variable with a valid Google Gemini API key.",
     }, 503
 
 
@@ -2031,16 +1962,7 @@ async def health(deep: bool = False) -> JSONResponse:
 
 @app.get("/cache/stats")
 async def cache_stats() -> dict[str, Any]:
-    exact_cache = get_chat_exact_cache()
-    return {
-        "semantic": semantic_cache.get_stats(),
-        "exact": exact_cache.get_stats(),
-        "combined": {
-            "total_hits": semantic_cache.hits + exact_cache.hits,
-            "total_misses": semantic_cache.misses + exact_cache.misses,
-            "total_tokens_saved": semantic_cache.tokens_saved + exact_cache.tokens_saved,
-        },
-    }
+    return semantic_cache.get_stats()
 
 
 @app.get("/metrics")
@@ -2054,15 +1976,27 @@ async def metrics() -> dict[str, Any]:
     /cache/stats. #9 (auth/rate limiting) can consume the cost/token totals
     below without this endpoint enforcing anything itself.
     """
-    exact_cache = get_chat_exact_cache()
+    metrics.verify_metrics_access(request)
+    await metrics.refresh_scholar_queue_depth()
+
+    accept_header = request.headers.get("accept", "")
+    if format == "json" or "application/json" in accept_header:
+        snapshot = telemetry.registry.snapshot()
+        snapshot["semantic_cache"] = semantic_cache.get_stats()
+        return JSONResponse(content=snapshot)
+
+    return Response(
+        content=metrics.generate_prometheus_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+@app.get("/metrics/json")
+async def metrics_json(request: Request) -> dict[str, Any]:
+    """Return JSON telemetry snapshot for internal consumers."""
+    metrics.verify_metrics_access(request)
     snapshot = telemetry.registry.snapshot()
     snapshot["semantic_cache"] = semantic_cache.get_stats()
-    snapshot["exact_cache"] = exact_cache.get_stats()
-    snapshot["combined_cache"] = {
-        "total_hits": semantic_cache.hits + exact_cache.hits,
-        "total_misses": semantic_cache.misses + exact_cache.misses,
-        "total_tokens_saved": semantic_cache.tokens_saved + exact_cache.tokens_saved,
-    }
     return snapshot
 
 

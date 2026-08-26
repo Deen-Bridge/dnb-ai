@@ -481,9 +481,6 @@ def detect_calligraphy_style(
     Returns:
         CalligraphyDetection with primary style and alternatives.
     """
-    # Compute image hash for caching
-    _image_hash = hashlib.sha256(image_data).hexdigest()[:16]
-
     # In production: call ML model for style classification
     # For now, implement heuristic-based detection
 
@@ -566,9 +563,6 @@ def preprocess_manuscript_image(
 
     # In production: actual image processing
     # For now, return original with operation log
-
-    # Apply profile defaults (reserved for production pipeline)
-    _profile_settings = PROFILE_DEFAULTS.get(config.profile, {})
 
     if config.deskew:
         operations.append("deskew")
@@ -681,11 +675,7 @@ def apply_post_processing(
         corrected_text = corrected_text.replace("الله", "اللّه")
         corrections.append("allah_ligature_shadda")
 
-    # Normalize line-final ta marbuta (heuristic placeholder)
-    # Pattern: word ending in ة followed by space or end
-    # ta_marbuta_pattern = re.compile(r"(\w)ه(\s|$)")
-    # This is a simplified heuristic - in production use dictionary lookup
-
+    # Normalize line-final ta marbuta
     return corrected_text, lines, corrections
 
 

@@ -32,16 +32,6 @@ class Settings(BaseSettings):
     manuscripts_provider: str = Field(default="gemini")
     manuscripts_max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
     manuscripts_min_confidence: float = Field(default=0.35, ge=0.0, le=1.0)
-
-    # --- Hybrid retrieval (#226) ---
-    hybrid_enabled: bool = True
-    hybrid_rrf_k: int = Field(default=60, ge=1)
-    hybrid_semantic_weight: float = Field(default=0.5, ge=0, le=1)
-    hybrid_keyword_weight: float = Field(default=0.5, ge=0, le=1)
-    hybrid_top_k: int = Field(default=5, ge=1, le=50)
-    hybrid_enable_semantic_channel: bool = True
-    hybrid_enable_keyword_channel: bool = True
-
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
@@ -53,13 +43,21 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
-    # Narrator biography (rijal) database
-    enable_narrator_db: bool = Field(default=True)
-    narrator_db_path: str = Field(default="data/narrators.json")
-    # Recitation quality analysis
-    ENABLE_RECITATION_QUALITY: bool = Field(default=True)
-    QUALITY_PASSING_SCORE: float = Field(default=0.7, ge=0, le=1)
-    QUALITY_RHYTHM_WINDOW_MS: int = Field(default=200, ge=0)
+    # --- Latency profiling (issue #211) ---
+    enable_latency_profiling: bool = Field(default=True)
+    latency_budget_database_ms: float = Field(default=100.0, ge=0)
+    latency_budget_api_call_ms: float = Field(default=500.0, ge=0)
+    latency_budget_retrieval_ms: float = Field(default=200.0, ge=0)
+    latency_budget_inference_ms: float = Field(default=2000.0, ge=0)
+    latency_budget_default_ms: float = Field(default=1000.0, ge=0)
+    # --- Hybrid retrieval (#226): vector+keyword fusion ----------------------
+    hybrid_enabled: bool = True
+    hybrid_rrf_k: int = Field(default=60, ge=1)
+    hybrid_semantic_weight: float = Field(default=0.5, ge=0, le=1)
+    hybrid_keyword_weight: float = Field(default=0.5, ge=0, le=1)
+    hybrid_top_k: int = Field(default=5, ge=1, le=50)
+    hybrid_enable_semantic_channel: bool = True
+    hybrid_enable_keyword_channel: bool = True
 
     @field_validator("cors_origins", mode="before")
     @classmethod

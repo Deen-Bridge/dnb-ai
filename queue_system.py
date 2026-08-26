@@ -257,7 +257,7 @@ class InMemoryJobStore(JobStore):
         pending = [
             j
             for j in self._jobs.values()
-            if j.status in (JobStatus.PENDING, JobStatus.RETRYING)
+            if j.status == JobStatus.PENDING
             and (j.scheduled_at is None or j.scheduled_at <= now)
             and all(self._jobs.get(dep) and self._jobs[dep].status == JobStatus.COMPLETED for dep in j.depends_on)
         ]
