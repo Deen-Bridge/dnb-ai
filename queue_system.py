@@ -27,7 +27,7 @@ import os
 import time
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -304,7 +304,7 @@ class RedisJobStore(JobStore):
         # Add to status set
         await redis.sadd(f"{self._prefix}status:{job.status.value}", job.id)
         # Add to priority sorted set for pending jobs
-        if job.status == JobStatus.PENDING:
+        if job.status in (JobStatus.PENDING, JobStatus.RETRYING):
             score = -job.priority.value * 1e12 + job.created_at
             await redis.zadd(f"{self._prefix}pending", {job.id: score})
 

@@ -381,6 +381,7 @@ class DepthAdapter:
         target_config = self._configs[target_level]
 
         required_sections: list[dict[str, str]] = []
+
         if target_config.include_scholarly_disagreements:
             required_sections.append(
                 {
@@ -411,7 +412,6 @@ class DepthAdapter:
             "required_sections": required_sections,
             "prompt_additions": self.build_prompt_instructions(target_config),
         }
-
         return expansion_template
 
 
@@ -419,7 +419,7 @@ class UserPreferencesStore:
     """Store for user depth preferences."""
 
     def __init__(self, data_file: str | None = None) -> None:
-        self._data_file: str = data_file or os.getenv("DEPTH_PREFS_FILE") or "./data/depth_preferences.json"
+        self._data_file: str = str(data_file or os.getenv("DEPTH_PREFS_FILE") or "./data/depth_preferences.json")
         self._preferences: dict[str, UserDepthPreferences] = {}
         self._load_data()
 
@@ -509,17 +509,16 @@ def get_answer_config(
     prefs_store = get_preferences_store()
 
     # Determine effective level
+    user_prefs: UserDepthPreferences | None = prefs_store.get(user_id) if user_id else None
     if requested_level:
         level = requested_level
-    elif user_id:
-        prefs = prefs_store.get(user_id)
-        if topic and topic in prefs.per_topic_levels:
-            level = prefs.per_topic_levels[topic]
+    elif user_prefs:
+        if topic and topic in user_prefs.per_topic_levels:
+            level = user_prefs.per_topic_levels[topic]
         else:
-            level = prefs.default_level
+            level = user_prefs.default_level
     else:
         level = DepthLevel.STANDARD
 
-    # Get config with user preferences applied
     user_prefs = prefs_store.get(user_id) if user_id else None
     return adapter.get_effective_config(level, user_prefs)

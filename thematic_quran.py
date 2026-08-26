@@ -312,7 +312,37 @@ SUB_THEMES = [
     ),
 ]
 
-# Surah revelation periods (partial list - expand as needed)
+_MEDINAN_SURAHS = {
+    2,
+    3,
+    4,
+    5,
+    8,
+    9,
+    13,
+    22,
+    24,
+    33,
+    47,
+    48,
+    49,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    76,
+    98,
+    99,
+    110,
+}
+
+# Surah revelation periods for all 114 surahs
 SURAH_PERIODS: dict[int, RevelationPeriod] = {
     1: RevelationPeriod.MECCAN,  # Al-Fatiha
     2: RevelationPeriod.MEDINAN,  # Al-Baqarah
@@ -411,7 +441,7 @@ class ThemeVerseStore:
         self._mappings: list[VerseThemeMapping] = []
         self._by_verse: dict[tuple[int, int], list[VerseThemeMapping]] = {}
         self._by_theme: dict[str, list[VerseThemeMapping]] = {}
-        self._data_file: str = data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json"
+        self._data_file: str = str(data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json")
         self._load_data()
 
     def _load_data(self) -> None:
