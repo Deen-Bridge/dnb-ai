@@ -85,7 +85,8 @@ def test_schema_conformance(benchmark_data: list[dict]):
             assert key in record, f"Record {record.get('id')} missing key: {key}"
         assert record["schema_version"] == "1.0.0"
         assert record["difficulty"] in ("easy", "medium", "hard")
-        assert isinstance(record["key_points"], list) and len(record["key_points"]) > 0
+        assert isinstance(record["key_points"], list)
+        assert len(record["key_points"]) > 0
         assert isinstance(record["citations"], list)
         assert isinstance(record["evaluation_criteria"], dict)
 
@@ -113,7 +114,8 @@ def test_citation_integrity(benchmark_data: list[dict]):
             if c_type == "quran":
                 surah = c.get("surah")
                 ayah = c.get("ayah_start")
-                assert surah is not None and 1 <= surah <= 114, f"Invalid surah {surah} in {record['id']}"
+                assert surah is not None, f"Missing surah in {record['id']}"
+                assert 1 <= surah <= 114, f"Invalid surah {surah} in {record['id']}"
                 if ayah is not None:
                     assert surah_idx.is_valid_ayah(surah, ayah), (
                         f"Invalid ayah {ayah} for surah {surah} in {record['id']}"
