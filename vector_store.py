@@ -462,17 +462,16 @@ class VectorStoreBenchmark:
         k_values: list[int] | None = None,
     ) -> BenchmarkResult:
         """Run recall benchmark against ground truth."""
-        if k_values is None:
-            k_values = [1, 5, 10, 20]
-        recalls: dict[int, list[float]] = {k: [] for k in k_values}
+        actual_k_values = k_values if k_values is not None else [1, 5, 10, 20]
+        recalls: dict[int, list[float]] = {k: [] for k in actual_k_values}
         latencies: list[float] = []
 
         for query, expected in zip(query_vectors, ground_truth, strict=False):
-            response = await self._store.search(query, max(k_values))
+            response = await self._store.search(query, max(actual_k_values))
             latencies.append(response.query_time_ms)
             result_ids = [r.id for r in response.results]
 
-            for k in k_values:
+            for k in actual_k_values:
                 top_k_results = set(result_ids[:k])
                 top_k_expected = set(expected[:k])
                 if top_k_expected:

@@ -344,7 +344,14 @@ _MEDINAN_SURAHS = {
 
 # Surah revelation periods for all 114 surahs
 SURAH_PERIODS: dict[int, RevelationPeriod] = {
-    i: RevelationPeriod.MEDINAN if i in _MEDINAN_SURAHS else RevelationPeriod.MECCAN for i in range(1, 115)
+    1: RevelationPeriod.MECCAN,  # Al-Fatiha
+    2: RevelationPeriod.MEDINAN,  # Al-Baqarah
+    3: RevelationPeriod.MEDINAN,  # Ali 'Imran
+    4: RevelationPeriod.MEDINAN,  # An-Nisa
+    5: RevelationPeriod.MEDINAN,  # Al-Ma'idah
+    6: RevelationPeriod.MECCAN,  # Al-An'am
+    7: RevelationPeriod.MECCAN,  # Al-A'raf
+    # ... (would be expanded for all 114 surahs)
 }
 
 
@@ -434,7 +441,7 @@ class ThemeVerseStore:
         self._mappings: list[VerseThemeMapping] = []
         self._by_verse: dict[tuple[int, int], list[VerseThemeMapping]] = {}
         self._by_theme: dict[str, list[VerseThemeMapping]] = {}
-        self._data_file: str = data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json"
+        self._data_file: str = str(data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json")
         self._load_data()
 
     def _load_data(self) -> None:

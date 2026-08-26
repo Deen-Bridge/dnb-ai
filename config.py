@@ -53,13 +53,10 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
-    # Narrator biography (rijal) database
-    enable_narrator_db: bool = Field(default=True)
-    narrator_db_path: str = Field(default="data/narrators.json")
-    # Recitation quality analysis
-    ENABLE_RECITATION_QUALITY: bool = Field(default=True)
-    QUALITY_PASSING_SCORE: float = Field(default=0.7, ge=0, le=1)
-    QUALITY_RHYTHM_WINDOW_MS: int = Field(default=200, ge=0)
+    # Context manager
+    enable_context_manager: bool = Field(default=True)
+    context_max_turns: int = Field(default=50, ge=1)
+    context_session_ttl_hours: int = Field(default=24, ge=1)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

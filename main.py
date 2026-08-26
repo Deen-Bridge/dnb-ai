@@ -18,12 +18,8 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
-from logging_config import RequestContextMiddleware, configure_logging, prompt_debug_fields
-
-configure_logging()
-
 import google.generativeai as genai
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -42,16 +38,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
-from adhkar import corpus as adhkar_corpus
 from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
-from calligraphy_ocr import (
-    CalligraphyAnalysis,
-    GeminiCalligraphyEngine,
-    StubCalligraphyEngine,
-    sniff_image_mime,
-)
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
@@ -68,9 +57,7 @@ from confidence import (
     thresholds as confidence_thresholds,
 )
 from config import get_settings
-from crosslingual import CrosslingualSearchRequest, CrosslingualSearchResponse, crosslingual_search
 from errors import APIException
-from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -89,24 +76,7 @@ from fiqh import (
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from hadith_context import router as hadith_context_router
 from history import router as history_router
-from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
-from learning import router as learning_router
-from manuscript_ocr import (
-    ManuscriptAnalysis,
-    PoorQualityError,
-    UnsupportedFormatError,
-    UploadTooLargeError,
-    analyze_manuscript_bytes,
-    manuscript_rate_limiter,
-)
-from memory import (
-    ChatSummary,
-    PersonalContext,
-    UserProfile,
-    build_personal_context,
-    create_memory_store,
-    render_user_context,
-)
+from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
     apply_updates,
@@ -114,13 +84,12 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
-from narrator_biography import router as narrator_router
-from model_router import router as model_routing_router
-from prompts import ExperimentConfig, ExperimentHarness, Variant, get_registry, register_defaults
+from arabic_ocr import router as arabic_ocr_router
+from context_manager import router as context_router
+from calligraphy import router as calligraphy_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from reasoning_chains import router as reasoning_router
-from recitation_quality import router as recitation_router
 from reformulation import router as reformulation_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
@@ -149,9 +118,13 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
-from history import router as history_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
+from swahili import (
+    analyze_swahili,
+    router as swahili_router,
+    swahili_response_enhancer,
+)
 from tafsir import (
     TafsirContext,
     TafsirInfo,
@@ -160,7 +133,6 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
-from worship import router as worship_router
 
 logger = logging.getLogger(__name__)
 
@@ -171,12 +143,6 @@ GEMINI_API_KEY = settings.gemini_api_key
 genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="DeenBridge AI API")
-
-metrics.setup_metrics(app)
-
-prompt_registry = get_registry()
-register_defaults()
-experiment_harness = ExperimentHarness(prompt_registry)
 
 # --- Service API-key authentication ---
 # A shared secret between the DeenBridge backend/frontend and this service.
@@ -329,10 +295,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
-# Narrator biography: rijal lookup, isnad resolution, and network graphs
-app.include_router(narrator_router)
-# Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
-app.include_router(recitation_router)
+# Context manager: session-based user preferences, topic continuity, and follow-up detection
+app.include_router(context_router)
 
 # Configure CORS
 app.add_middleware(
@@ -639,6 +603,9 @@ LANGUAGE_INSTRUCTIONS = (
     "when writing in Latin-script languages.\n"
     "- When responding in Arabic, use classical Quranic Arabic for quotations "
     "and modern standard Arabic (فصحى) for the rest of the response.\n"
+    "- When responding in Swahili (Kiswahili), use standard respectful Swahili (Kiswahili Sanifu) "
+    "with proper Islamic honorifics (k.m. 'Mwenyezi Mungu (Subhanahu wa Ta'ala)', 'Mtume Muhammad (Swalla Allahu Alayhi wa Sallam / ﷺ)', "
+    "'Maswahaba (Radhi Allahu Anhum)') and standard Swahili Islamic terminology (Swala, Udhu, Saumu, Zaka, Hija, Halali, Haramu, Kadhi).\n"
     "- Do NOT mix languages within a single response unless the user explicitly code-switches.\n"
 )
 
@@ -662,45 +629,10 @@ def normalize_language(lang: str | None) -> str | None:
     return None
 
 
-class _MockResponse:
-    text = "Mock upstream response"
-
-
-class _MockPart:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class _MockContent:
-    def __init__(self, role: str, text: str) -> None:
-        self.role = role
-        self.parts = [_MockPart(text)]
-
-
-class _MockChatSession:
-    def __init__(self, history: list[Any] | None = None) -> None:
-        self.history = list(history or [])
-
-    async def send_message_async(self, message: str, **_kwargs: Any) -> _MockResponse:
-        latency_ms = int(os.getenv("MOCK_LLM_LATENCY_MS", "50"))
-        if latency_ms > 0:
-            await asyncio.sleep(latency_ms / 1000)
-        self.history.extend([_MockContent("user", message), _MockContent("model", _MockResponse.text)])
-        return _MockResponse()
-
-
-class _MockModel:
-    def start_chat(self, history: list[Any] | None = None) -> _MockChatSession:
-        return _MockChatSession(history)
-
-
 def get_model() -> genai.GenerativeModel:
-    if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
-        return _MockModel()  # type: ignore[return-value]
     return genai.GenerativeModel(
         model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
-        safety_settings=get_safety_settings(),
     )
 
 
@@ -839,7 +771,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        chat_id = str(body.chat_id) if body.chat_id is not None else str(uuid.uuid4())
+        chat_id = body.chat_id or str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = request.headers.get("X-Cache-Bypass") == "1"
 
@@ -849,18 +781,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         # detects that one was present and warns the user.
         prompt = redact_secret_keys(body.prompt)
         extra_context = redact_secret_keys(body.context)
-        logger.info(
-            "chat request received",
-            extra={
-                "chat_id": chat_id,
-                "new_session": is_new_chat,
-                "prompt_chars": len(prompt),
-                "context_chars": len(extra_context) if extra_context else 0,
-                "language": body.language,
-                "has_user_id": bool(body.user_id),
-                **prompt_debug_fields(prompt),
-            },
-        )
+        logger.info(f"Received chat request: {prompt[:100]}...")
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
@@ -868,6 +789,30 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
+
+            # --- Swahili analysis ---
+            is_swahili = effective_language == "sw"
+            swahili_analysis = None
+            if is_swahili or any(
+                w in prompt.lower()
+                for w in [
+                    "je,",
+                    "habari",
+                    "swala",
+                    "udhu",
+                    "saumu",
+                    "zaka",
+                    "hija",
+                    "kadhi",
+                    "bakwata",
+                    "maulidi",
+                    "kufunga",
+                ]
+            ):
+                swahili_analysis = analyze_swahili(prompt)
+                if not is_swahili and len(swahili_analysis.detected_terms) >= 2:
+                    is_swahili = True
+                    effective_language = "sw"
 
         # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
@@ -885,10 +830,6 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             # inline summary or a best-effort JWT fetch — never other users'.
             purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
-
-            # Per-user retrieval: only this user's most-relevant records (deny by
-            # default without user_id/auth_token; ownership re-checked post-fetch).
-            personal_context = await personal_context_retriever(body.prompt, body.user_id, body.auth_token)
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
@@ -910,7 +851,6 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             and tafsir_context is None
             and zakat_context is None
             and purchase_context is None
-            and personal_context is None
             and SEMANTIC_CACHE_ENABLED
         )
 
@@ -1025,6 +965,12 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
+            if is_swahili and swahili_analysis:
+                sw_enhancement = swahili_response_enhancer.build_prompt_enhancement(safety_prompt)
+                if sw_enhancement.cultural_notes:
+                    system_context += "\n\nMuktadha wa Afrika Mashariki (East African Context):\n" + "\n".join(
+                        f"- {note}" for note in sw_enhancement.cultural_notes
+                    )
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
@@ -1192,6 +1138,10 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
 
         fastapi_response.headers["X-Cache-Tier"] = "miss"
         fastapi_response.headers["X-Semantic-Cache"] = "bypass" if is_bypass else "miss"
+        if swahili_analysis:
+            fastapi_response.headers["X-Swahili-Dialect"] = swahili_analysis.dialect.primary_dialect.value
+            fastapi_response.headers["X-Swahili-Terms-Detected"] = str(len(swahili_analysis.detected_terms))
+            fastapi_response.headers["X-Swahili-Code-Switching"] = swahili_analysis.code_switch.switch_type.value
 
         # Assign this answer a stable id and snapshot the displayed text, so a
         # later /feedback call can reference exactly this turn and store what
@@ -1301,7 +1251,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         exc.headers = {**(exc.headers or {}), "X-Trace-Id": trace.trace_id}
         raise
     except Exception as exc:
-        logger.exception("unexpected error in /chat handler", extra={"chat_id": chat_id})
+        logger.exception("Unexpected error in /chat handler for session %s: %s", chat_id, exc)
         raise APIException(
             status_code=500,
             detail="AI service error",
@@ -1382,22 +1332,10 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     _handler_start = time.perf_counter()
 
     try:
-        chat_id = str(body.chat_id) if body.chat_id is not None else str(uuid.uuid4())
+        chat_id = body.chat_id or str(uuid.uuid4())
         prompt = redact_secret_keys(body.prompt)
         extra_context = redact_secret_keys(body.context)
-        logger.info(
-            "streaming chat request received",
-            extra={
-                "chat_id": chat_id,
-                "prompt_chars": len(prompt),
-                "context_chars": len(extra_context) if extra_context else 0,
-                "language": body.language,
-                "madhhab": body.madhhab,
-                "user_id_prefix": body.user_id[:8] if body.user_id else None,
-                "remember": body.remember,
-                **prompt_debug_fields(prompt),
-            },
-        )
+        logger.info("Received streaming chat request: %s...", prompt[:100])
 
         # --- Fiqh/intent classification & madhhab ---
         with trace.span("classification"):
@@ -1420,7 +1358,6 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
         # --- Purchase history & personal context ---
         purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
-        personal_context = await personal_context_retriever(body.prompt, body.user_id, body.auth_token)
 
         async def event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
@@ -2074,210 +2011,6 @@ async def confidence_policy() -> dict[str, Any]:
         "review_queue": await review_store.stats(),
     }
 
-
-class AdhkarRecommendRequest(BaseModel):
-    category: str | None = None
-    query: str | None = None
-
-
-@app.post("/adhkar/recommend")
-async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
-    matches = adhkar_corpus.search(category=body.category, query=body.query)
-    message = (
-        "Found authenticated supplications."
-        if matches
-        else "No authenticated supplication found for the given criteria."
-    )
-    return {"matches": matches, "message": message}
-
-
-@app.post("/manuscripts/analyze", response_model=ManuscriptAnalysis)
-async def analyze_manuscript(request: Request, file: UploadFile = File(...)) -> ManuscriptAnalysis:
-    if not manuscript_rate_limiter.is_allowed(_client_ip(request)):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many manuscript analyses. Please wait and try again.",
-        )
-    data = await file.read()
-    try:
-        return await analyze_manuscript_bytes(file.filename or "", data)
-    except UploadTooLargeError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
-    except UnsupportedFormatError as exc:
-        raise HTTPException(status_code=415, detail=str(exc)) from exc
-    except PoorQualityError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@app.post("/search/hybrid", response_model=HybridSearchResponse)
-async def search_hybrid(body: HybridSearchRequest) -> HybridSearchResponse:
-    if not settings.hybrid_enabled:
-        raise HTTPException(status_code=503, detail="Hybrid search is disabled.")
-    return await run_in_threadpool(handle_hybrid_search, body)
-
-
-@app.post("/search/crosslingual", response_model=CrosslingualSearchResponse)
-async def search_crosslingual(body: CrosslingualSearchRequest) -> CrosslingualSearchResponse:
-    return await crosslingual_search(body.query, body.k, body.lang_pref)
-
-
-@app.post("/calligraphy/analyze", response_model=CalligraphyAnalysis)
-@limiter.limit("10/minute")
-async def analyze_calligraphy(request: Request, file: UploadFile = File(...)) -> CalligraphyAnalysis:
-    """Recognize text in an Arabic calligraphy image and classify its style.
-
-    Accepts a single multipart JPEG or PNG (validated by magic bytes, capped at
-    ``calligraphy_max_image_bytes``). Heavy lifting lives in calligraphy_ocr;
-    this handler only enforces transport rules and picks the provider.
-
-    Errors: 413 oversize, 415 unsupported format, 422 no legible calligraphy,
-    502 engine failure, 503 provider unavailable. Rate-limited per API key/IP.
-    """
-    max_bytes = settings.calligraphy_max_image_bytes
-    data = await file.read(max_bytes + 1)
-    if len(data) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Image exceeds the {max_bytes // (1024 * 1024)}MB size limit.",
-        )
-
-    mime = sniff_image_mime(data)
-    if mime is None:
-        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported.")
-
-    environment = os.getenv("ENVIRONMENT", "").lower()
-    if settings.calligraphy_provider == "stub":
-        if environment == "production":
-            raise HTTPException(status_code=503, detail="The stub calligraphy provider is disabled in production.")
-        engine: GeminiCalligraphyEngine | StubCalligraphyEngine = StubCalligraphyEngine(
-            min_confidence=settings.calligraphy_min_confidence
-        )
-    elif settings.calligraphy_provider == "gemini":
-        if not GEMINI_API_KEY:
-            raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
-        engine = GeminiCalligraphyEngine(
-            timeout=settings.gemini_timeout, min_confidence=settings.calligraphy_min_confidence
-        )
-    else:
-        raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
-
-    try:
-        analysis = await run_in_threadpool(engine.analyze, data, mime)
-    except Exception as exc:
-        logger.error("Calligraphy analysis failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Calligraphy analysis failed upstream.") from exc
-
-    if not analysis.extracted_text.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="No legible Arabic calligraphy was detected in the image.",
-        )
-    return analysis
-
-
-@app.get("/uncertainty/taxonomy")
-async def uncertainty_taxonomy() -> dict[str, Any]:
-    """Islamic epistemology and uncertainty quantification taxonomy (#199)."""
-    from uncertainty import EpistemicCertainty, EvidenceStrength, PositionType, UncertaintyFactor
-
-    return {
-        "epistemic_certainty": [e.value for e in EpistemicCertainty],
-        "position_types": [p.value for p in PositionType],
-        "evidence_strengths": [s.value for s in EvidenceStrength],
-        "uncertainty_factors": [f.value for f in UncertaintyFactor],
-        "description": "Taxonomy defining ruling certainty (Qat'i vs Dhanni), juristic positions, and evidence levels.",
-    }
-
-
-@app.get("/prompts")
-async def list_prompt_templates() -> dict[str, str]:
-    return prompt_registry.list_templates()
-
-
-@app.get("/prompts/{name}")
-async def get_prompt_template(name: str, version: str | None = None) -> dict[str, Any]:
-    template = prompt_registry.get(name, version)
-    if template is None:
-        raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
-    return {
-        "name": template.name,
-        "version": template.version,
-        "variables": list(template.variables),
-        "changelog": template.changelog,
-        "body": template.body,
-    }
-
-
-@app.get("/experiments")
-async def list_experiments() -> dict[str, Any]:
-    experiments = {}
-    for eid, cfg in experiment_harness._experiments.items():
-        all_variants = [cfg.control] + cfg.variants
-        experiments[eid] = {
-            "experiment_id": cfg.experiment_id,
-            "kill_switch": cfg.kill_switch,
-            "variants": [{"name": v.name, "template_name": v.template_name, "weight": v.weight} for v in all_variants],
-        }
-    return {"experiments": experiments}
-
-
-class ExperimentCreateRequest(BaseModel):
-    experiment_id: str = Field(..., max_length=128)
-    control_template: str = Field(..., max_length=128)
-    control_version: str | None = None
-    variants: list[dict[str, Any]] = Field(default_factory=list)
-    kill_switch: bool = False
-
-
-@app.post("/experiments", dependencies=[Depends(require_admin)])
-async def create_experiment(body: ExperimentCreateRequest) -> dict[str, Any]:
-    control = Variant(
-        name="control",
-        template_name=body.control_template,
-        template_version=body.control_version,
-        weight=1.0,
-    )
-    variant_list = [
-        Variant(
-            name=v["name"],
-            template_name=v["template_name"],
-            template_version=v.get("template_version"),
-            weight=v.get("weight", 1.0),
-        )
-        for v in body.variants
-    ]
-    config = ExperimentConfig(
-        experiment_id=body.experiment_id,
-        control=control,
-        variants=variant_list,
-        kill_switch=body.kill_switch,
-    )
-    experiment_harness.register_experiment(config)
-    return {"status": "ok", "experiment_id": body.experiment_id}
-
-
-@app.post("/experiments/{experiment_id}/kill", dependencies=[Depends(require_admin)])
-async def kill_experiment(experiment_id: str) -> dict[str, Any]:
-    cfg = experiment_harness._experiments.get(experiment_id)
-    if cfg is None:
-        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
-    cfg.kill_switch = True
-    return {"status": "ok", "experiment_id": experiment_id, "kill_switch": True}
-
-
-@app.post("/experiments/{experiment_id}/resume", dependencies=[Depends(require_admin)])
-async def resume_experiment(experiment_id: str) -> dict[str, Any]:
-    cfg = experiment_harness._experiments.get(experiment_id)
-    if cfg is None:
-        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
-    cfg.kill_switch = False
-    return {"status": "ok", "experiment_id": experiment_id, "kill_switch": False}
-
-
-@app.delete("/experiments/{experiment_id}", dependencies=[Depends(require_admin)])
-async def delete_experiment(experiment_id: str) -> dict[str, str]:
-    experiment_harness.unregister_experiment(experiment_id)
-    return {"status": "ok", "experiment_id": experiment_id}
 
 if __name__ == "__main__":
     import uvicorn
