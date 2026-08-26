@@ -520,7 +520,7 @@ async def classify_route(traits: TraitVector) -> ClassificationResponse:
     return classify(traits)
 
 
-@router.post("/analyze", response_model=AnalysisResponse)
+@router.post("/estimate", response_model=AnalysisResponse)
 async def analyze_route(traits: TraitVector) -> AnalysisResponse:
     """Classify a specimen and add legibility, embellishment, and OCR-hint notes."""
     return analyze(traits)

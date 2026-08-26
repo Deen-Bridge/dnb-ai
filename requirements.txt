@@ -16,3 +16,4 @@ prometheus-client>=0.20.0
 hijridate>=2.6.0
 tzdata
 Pillow==11.2.1
+requests>=2.33.0,<3.0.0

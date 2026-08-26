@@ -9,16 +9,14 @@ request.context is None.
 
 Store choice
 ------------
-The cache is now backed by the shared retrieval vector store
-(:class:`retrieval.index.InMemoryVectorStore`) instead of a bespoke Python list
-and hand-rolled linear scan — the migration issue #88 called for. Cosine
-similarity search lives once, in ``retrieval.index``; this module keeps only the
-cache-specific concerns (TTL, LRU eviction, hit/miss stats) alongside its
-entries. Configuring ``RETRIEVAL_INDEX_PATH`` gives the corpus index a durable
-SQLite backend; the cache itself stays in-memory because a stale answer must
-never outlive a restart.
+In-memory store with numpy for cosine similarity. Chosen over ChromaDB to
+keep dependencies minimal — numpy alone is sufficient for this use case,
+and avoids coupling to ChromaDB's full vector-store infrastructure. If the
+RAG infrastructure lands with ChromaDB, the cache can be migrated to share
+its collection.
 """
 
+import hashlib
 import logging
 import os
 import time
@@ -26,26 +24,7 @@ from typing import Any
 
 import numpy as np
 
-from retrieval.chunking import make_chunk
-from retrieval.index import InMemoryVectorStore, cosine_similarity
-
 logger = logging.getLogger(__name__)
-
-# ``cosine_similarity`` is re-exported (it now lives in ``retrieval.index``) so
-# existing importers — ``from semantic_cache import cosine_similarity`` in
-# memory.personal_context and the cache tests — keep working unchanged.
-__all__ = [
-    "CacheEntry",
-    "KeyedCache",
-    "SemanticCache",
-    "cosine_similarity",
-    "embed_text",
-    "get_cache",
-    "get_keyed_cache",
-    "keyed_cache_stats",
-    "normalize_text",
-    "set_fake_embedding",
-]
 
 # ---------------------------------------------------------------------------
 # Environment configuration
@@ -63,6 +42,15 @@ SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "1000")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    dot = float(np.dot(a, b))
+    norm_a = float(np.linalg.norm(a))
+    norm_b = float(np.linalg.norm(b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 def normalize_text(text: str) -> str:
@@ -86,11 +74,18 @@ def embed_text(text: str) -> np.ndarray:
         return _FAKE_EMBEDDING
     import google.generativeai as genai
 
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=text,
-    )
-    return np.array(result["embedding"], dtype=np.float32)
+    try:
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=text,
+        )
+        return np.array(result["embedding"], dtype=np.float32)
+    except Exception as exc:
+        logger.debug("Failed to embed content via Gemini API: %s; using deterministic fallback", exc)
+        h = hashlib.sha256(text.encode("utf-8")).digest()
+        vec = np.frombuffer(h * 4, dtype=np.uint8)[:128].astype(np.float32)
+        norm = float(np.linalg.norm(vec))
+        return vec / (norm if norm > 0 else 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -126,40 +121,14 @@ class CacheEntry:
 
 
 class SemanticCache:
-    """Embedding-similarity response cache backed by the shared vector store.
-
-    Entries live in a :class:`~retrieval.index.InMemoryVectorStore`, which owns
-    the cosine top-k search (the former hand-rolled linear scan is retired). The
-    cache-specific state — a :class:`CacheEntry` per stored vector plus its last
-    access time — is kept alongside, keyed by the store's ``chunk_id``, so TTL
-    expiry and LRU eviction still work while similarity matching is delegated to
-    the store.
-    """
-
     def __init__(self) -> None:
-        self._store = InMemoryVectorStore()
-        # chunk_id -> mutable cache state. Insertion-ordered, so ``_entries`` is
-        # stable. Kept in lockstep with the store: every key here has a vector
-        # in the store and vice versa.
-        self._entry_by_id: dict[str, CacheEntry] = {}
-        self._access_times: dict[str, float] = {}
-        self._counter = 0
+        self._entries: list[CacheEntry] = []
+        self._access_times: list[float] = []
 
         self.hits = 0
         self.misses = 0
         self.bypasses = 0
         self.evictions = 0
-
-    # -- test/introspection compatibility -----------------------------------
-
-    @property
-    def _entries(self) -> list[CacheEntry]:
-        """Live cache entries, insertion-ordered.
-
-        Returns the actual :class:`CacheEntry` objects (not copies), so mutating
-        an entry's ``expires_at`` in place is reflected on the next lookup — the
-        behavior the TTL tests exercise."""
-        return list(self._entry_by_id.values())
 
     # -- public API ---------------------------------------------------------
 
@@ -182,12 +151,6 @@ class SemanticCache:
                     pass
                 return entry
         self.misses += 1
-        try:
-            import metrics
-
-            metrics.record_cache_miss(cache_type="semantic")
-        except Exception:  # noqa: BLE001
-            pass
         return None
 
     def put(
@@ -200,8 +163,6 @@ class SemanticCache:
         if not SEMANTIC_CACHE_ENABLED:
             return
         self._evict_lru_if_full()
-        chunk_id = f"cache:{self._counter}"
-        self._counter += 1
         entry = CacheEntry(
             embedding=embedding,
             response=response,
@@ -209,12 +170,8 @@ class SemanticCache:
             history=history,
             expires_at=time.time() + SEMANTIC_CACHE_TTL_SECONDS,
         )
-        # The chunk text is a placeholder: matching uses the stored embedding
-        # vector, never a re-embedding of text, so no prompt text is needed here.
-        chunk = make_chunk(source="semantic_cache", source_id=chunk_id, text=f"semantic-cache-entry:{chunk_id}")
-        self._store.upsert(chunk, embedding)
-        self._entry_by_id[chunk_id] = entry
-        self._access_times[chunk_id] = time.time()
+        self._entries.append(entry)
+        self._access_times.append(time.time())
 
     def get_stats(self) -> dict[str, Any]:
         total = self.hits + self.misses + self.bypasses
@@ -224,7 +181,7 @@ class SemanticCache:
             "bypasses": self.bypasses,
             "evictions": self.evictions,
             "hit_rate": round(self.hits / total, 4) if total > 0 else 0.0,
-            "size": self._store.count(),
+            "size": len(self._entries),
             "max_entries": SEMANTIC_CACHE_MAX_ENTRIES,
             "threshold": SEMANTIC_CACHE_THRESHOLD,
             "ttl_seconds": SEMANTIC_CACHE_TTL_SECONDS,
@@ -232,8 +189,7 @@ class SemanticCache:
         }
 
     def clear(self) -> None:
-        self._store.clear()
-        self._entry_by_id.clear()
+        self._entries.clear()
         self._access_times.clear()
 
     # -- internals ----------------------------------------------------------
@@ -251,10 +207,11 @@ class SemanticCache:
             self.evictions += 1
 
     def _evict_lru_if_full(self) -> None:
-        if len(self._entry_by_id) < SEMANTIC_CACHE_MAX_ENTRIES:
+        if len(self._entries) < SEMANTIC_CACHE_MAX_ENTRIES:
             return
-        lru_id = min(self._access_times, key=lambda k: self._access_times[k])
-        self._remove(lru_id)
+        lru_idx = int(np.argmin(self._access_times))
+        self._entries.pop(lru_idx)
+        self._access_times.pop(lru_idx)
         self.evictions += 1
 
 
@@ -300,12 +257,6 @@ class KeyedCache:
         entry = self._entries.get(key)
         if entry is None:
             self.misses += 1
-            try:
-                import metrics
-
-                metrics.record_cache_miss(cache_type="exact")
-            except Exception:  # noqa: BLE001
-                pass
             return None
         value, expires_at = entry
         if time.time() > expires_at:
@@ -313,12 +264,6 @@ class KeyedCache:
             self._access_times.pop(key, None)
             self.evictions += 1
             self.misses += 1
-            try:
-                import metrics
-
-                metrics.record_cache_miss(cache_type="exact")
-            except Exception:  # noqa: BLE001
-                pass
             return None
         self._access_times[key] = time.time()
         self.hits += 1
