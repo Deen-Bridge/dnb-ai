@@ -520,5 +520,4 @@ def get_answer_config(
     else:
         level = DepthLevel.STANDARD
 
-    user_prefs = prefs_store.get(user_id) if user_id else None
     return adapter.get_effective_config(level, user_prefs)

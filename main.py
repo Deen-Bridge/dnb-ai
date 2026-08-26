@@ -348,6 +348,25 @@ app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
 app.include_router(recitation_router)
 
+
+class AdhkarRecommendRequest(BaseModel):
+    category: str | None = None
+    query: str | None = None
+
+
+@app.post("/adhkar/recommend")
+async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
+    matches = adhkar_corpus.search(category=body.category, query=body.query)
+    message = (
+        f"Found {len(matches)} authenticated supplication(s) matching your request."
+        if matches
+        else "No authenticated supplication found matching your request."
+    )
+    return {
+        "matches": matches,
+        "message": message,
+    }
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,

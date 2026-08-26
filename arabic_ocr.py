@@ -676,6 +676,8 @@ def apply_post_processing(
         corrections.append("allah_ligature_shadda")
 
     # Normalize line-final ta marbuta
+    # Pattern: word ending in ة followed by space or end
+    # This is a simplified heuristic - in production use dictionary lookup
     return corrected_text, lines, corrections
 
 
