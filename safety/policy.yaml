@@ -89,3 +89,40 @@ categories:
       - "\\b(?:quran|hadith|scripture|islam|jihad|religious|fatwa).{0,55}\\b(?:kill(?:ing)?|violence|violent|attack|bomb|poison|abuse|hurt|recruit|weapons?|stab(?:bing)?|shoot(?:ing)?|assault|kidnap(?:ping)?|torture)\\b"
       - "\\b(?:kill(?:ing)?|violence|violent|attack|bomb|poison|abuse|hurt|recruit|weapons?|stab(?:bing)?|shoot(?:ing)?|assault|kidnap(?:ping)?|torture).{0,55}\\b(?:quran|hadith|scripture|islam|jihad|religious|fatwa)\\b"
     output_patterns: []
+
+  - id: DB-SAFE-005
+    name: disrespectful_scholarly_discourse
+    description: >-
+      Requests or outputs that use disrespectful, dismissive, or polarizing
+      language about scholarly disagreements, failing to acknowledge legitimate
+      ikhtilaf (differences of opinion) and proper adab.
+    examples:
+      - "Only my view is correct; everyone else is ignorant."
+      - "That scholar is a deviant and deserves contempt."
+      - "Anyone who follows that madhhab is a fool."
+    action: refuse
+    failure_action: refuse
+    fail_mode: closed_to_refusal
+    guidance: >-
+      Give a respectful, educational response that acknowledges legitimate
+      scholarly differences (ikhtilaf mu'tabar) and treats all views with adab.
+      Suggest respectful alternative phrasings, e.g., 'Scholars have differed on
+      this matter; each view has supporting evidence.'
+    refusal: >-
+      I can't provide disrespectful or polarizing characterizations of scholarly
+      opinions. I can offer a balanced overview of the different positions and
+      their evidence.
+    keywords:
+      - "\\b(?:only|just|exclusively) (?:my|our|this|the) (?:view|position|opinion|interpretation|madhhab).{0,30}\\b(?:correct|valid|true|right)\\b"
+      - "\\b(?:scholar|mufti|imam|sheikh|shaykh|madhhab|sect).{0,30}\\b(?:deviant|misguided|ignorant|fool|liar|charlatan|stupid|wrong)\\b"
+      - "\\b(?:stupid|idiot|ignorant|nonsense|absurd|ridiculous|laughable|worthless|useless|foolish).{0,40}\\b(?:scholar|opinion|view|madhhab|interpretation|islamic|fiqh)\\b"
+      - "\\b(?:hate|despise|contempt|scorn|attack|insult|humiliate).{0,40}\\b(?:scholar|opinion|view|madhhab|sect|muslims?)\\b"
+      - "\\b(?:undisputed|absolutely certain|no room for doubt|definitive).{0,50}\\b(?:halal|haram|permissible|forbidden|valid|invalid)\\b"
+      - "\\b(?:consensus of all scholars|all scholars agree|every scholar says).{0,40}\\b(?:except|other|different|opposing)\\b"
+    output_patterns:
+      - "\\b(?:only|just|exclusively) (?:my|our|this|the) (?:view|position|opinion|interpretation|madhhab).{0,30}\\b(?:correct|valid|true|right)\\b"
+      - "\\b(?:scholar|mufti|imam|sheikh|shaykh|madhhab|sect).{0,30}\\b(?:deviant|misguided|ignorant|fool|liar|charlatan|stupid|wrong)\\b"
+      - "\\b(?:stupid|idiot|ignorant|nonsense|absurd|ridiculous|laughable|worthless|useless|foolish).{0,40}\\b(?:scholar|opinion|view|madhhab|interpretation|islamic|fiqh)\\b"
+      - "\\b(?:hate|despise|contempt|scorn|attack|insult|humiliate).{0,40}\\b(?:scholar|opinion|view|madhhab|sect|muslims?)\\b"
+      - "\\b(?:undisputed|absolutely certain|no room for doubt|definitive).{0,50}\\b(?:halal|haram|permissible|forbidden|valid|invalid)\\b"
+      - "\\b(?:consensus of all scholars|all scholars agree|every scholar says).{0,40}\\b(?:except|other|different|opposing)\\b"
