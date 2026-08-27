@@ -276,6 +276,114 @@ class InMemoryJobStore(JobStore):
         return False
 
 
+@dataclass
+class AgentCapability:
+    """Agent capability registration for task assignment."""
+    name: str
+    capabilities: list[str] = field(default_factory=list)
+    job_type: str = ""
+    max_concurrency: int = 1
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SubTask:
+    """A single decomposable unit of work."""
+    id: str
+    description: str
+    required_capability: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)
+    priority: JobPriority = JobPriority.NORMAL
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class QueryAnalysis:
+    """Result of analyzing a complex query."""
+    query: str
+    complexity: float
+    required_capabilities: list[str]
+    independent_subqueries: list[str]
+    suggested_granularity: str
+
+
+@dataclass
+class DecompositionPlan:
+    """A complete task decomposition plan."""
+    query: str
+    tasks: list[SubTask]
+    agent_assignment: dict[str, str] = field(default_factory=dict)
+    execution_waves: list[list[str]] = field(default_factory=list)
+    validation: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "tasks": [
+                {
+                    "id": task.id,
+                    "description": task.description,
+                    "required_capability": task.required_capability,
+                    "payload": task.payload,
+                    "dependencies": task.dependencies,
+                    "priority": task.priority.value,
+                    "metadata": task.metadata,
+                }
+                for task in self.tasks
+            ],
+            "agent_assignment": self.agent_assignment,
+            "execution_waves": self.execution_waves,
+            "validation": self.validation,
+            "metadata": self.metadata,
+        }
+
+
+class TaskDecompositionError(Exception):
+    """Raised when a query cannot be decomposed."""
+
+
+class TaskDecompositionEngine:
+    """Intelligent task decomposition engine."""
+
+    def __init__(
+        self,
+        job_queue: JobQueue | None = None,
+        agents: list[AgentCapability] | None = None,
+    ) -> None:
+        self._job_queue = job_queue
+        self._agents: list[AgentCapability] = agents or []
+        self._metrics = {
+            "decompositions": 0,
+            "successful_decompositions": 0,
+            "failed_decompositions": 0,
+            "avg_decomposition_ms": 0.0,
+            "total_parallel_waves": 0,
+            "total_tasks": 0,
+        }
+
+    def register_agent(self, agent: AgentCapability) -> None:
+        """Register an agent capability for task assignment."""
+        self._agents.append(agent)
+
+    def analyze_query(self, query: str) -> QueryAnalysis:
+        """Analyze query complexity and identify required capabilities."""
+        query = query.strip()
+        if not query:
+            raise TaskDecompositionError("Query cannot be empty")
+        words = query.split()
+        connector_count = sum(
+            1
+            for token in ("and", "or", "then", "but", "while", "because", "for", "after")
+            if token in query.lower()
+        )
+        question_depth = sum(
+            1
+            for marker in ("what", "how", "why", "when", "where", "who", "which")
+            if marker in query.lower()
+        )
+        complexity = min(1.0, (len(words) / 200)
 class RedisJobStore(JobStore):
     """Redis-backed job store for production."""
 
