@@ -25,6 +25,13 @@ class Settings(BaseSettings):
 
     gemini_timeout: int = Field(default=30, ge=1)
 
+    # Synthesis engine settings
+    synthesis_max_agents: int = Field(default=5, ge=2, le=10)
+    synthesis_contradiction_threshold: float = Field(default=0.9, ge=0, le=1)
+    synthesis_redundancy_reduction_target: float = Field(default=0.7, ge=0, le=1)
+    synthesis_attribution_required: bool = Field(default=True)
+    synthesis_quality_threshold: float = Field(default=0.8, ge=0, le=1)
+
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
