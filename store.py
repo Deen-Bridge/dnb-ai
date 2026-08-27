@@ -509,3 +509,199 @@ def create_session_store() -> SessionStore | FirestoreSessionStore:
                 exc,
             )
     return SessionStore()
+
+
+class FallbackModelConfig:
+    """Validated configuration for a multi-tier fallback model chain."""
+
+    def __init__(
+        self,
+        model_type: str,
+        primary: str,
+        fallbacks: list[str],
+        min_quality: float = 0.8,
+        circuit_breaker_threshold: int = 5,
+        circuit_breaker_timeout: float = 60.0,
+        health_check_interval: float = 30.0,
+    ) -> None:
+        self.model_type = model_type
+        self.primary = primary
+        self.fallbacks = list(fallbacks)
+        self.min_quality = min_quality
+        self.circuit_breaker_threshold = circuit_breaker_threshold
+        self.circuit_breaker_timeout = circuit_breaker_timeout
+        self.health_check_interval = health_check_interval
+        self.validate()
+
+    @property
+    def chain(self) -> list[str]:
+        return [self.primary, *self.fallbacks]
+
+    def validate(self) -> None:
+        """Raise ValueError when the fallback chain is not usable."""
+        if not self.model_type:
+            raise ValueError("model_type is required")
+        if not self.primary:
+            raise ValueError(f"{self.model_type}: primary model is required")
+        if not self.fallbacks:
+            raise ValueError(f"{self.model_type}: at least one fallback model is required")
+        if len(set(self.chain)) != len(self.chain):
+            raise ValueError(f"{self.model_type}: fallback chain contains duplicate models")
+        if not 0.0 <= self.min_quality <= 1.0:
+            raise ValueError(f"{self.model_type}: min_quality must be between 0 and 1")
+        if self.circuit_breaker_threshold < 1:
+            raise ValueError(f"{self.model_type}: circuit_breaker_threshold must be at least 1")
+        if self.circuit_breaker_timeout <= 0:
+            raise ValueError(f"{self.model_type}: circuit_breaker_timeout must be positive")
+        if self.health_check_interval <= 0:
+            raise ValueError(f"{self.model_type}: health_check_interval must be positive")
+
+
+class CircuitBreaker:
+    """Simple circuit breaker for a single model endpoint."""
+
+    def __init__(self, failure_threshold: int, timeout: float) -> None:
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self._failures = 0
+        self._opened_at = 0.0
+
+    @property
+    def is_open(self) -> bool:
+        if self._opened_at and time.monotonic() - self._opened_at >= self.timeout:
+            self._failures = 0
+            self._opened_at = 0.0
+            return False
+        return self._failures >= self.failure_threshold
+
+    def record_failure(self) -> None:
+        self._failures += 1
+        if self._failures >= self.failure_threshold and not self._opened_at:
+            self._opened_at = time.monotonic()
+
+    def record_success(self) -> None:
+        self._failures = 0
+        self._opened_at = 0.0
+
+
+class FallbackModelManager:
+    """Manages failover across configured models and tracks fallback state."""
+
+    def __init__(self, config: FallbackModelConfig) -> None:
+        self.config = config
+        self._current = config.primary
+        self._breakers = {
+            model: CircuitBreaker(config.circuit_breaker_threshold, config.circuit_breaker_timeout)
+            for model in config.chain
+        }
+        self._health = {model: True for model in config.chain}
+        self._last_health_check = 0.0
+        self._analytics = {
+            model: {"activations": 0, "restorations": 0, "failures": 0}
+            for model in config.chain
+        }
+
+    @property
+    def active_model(self) -> str:
+        return self._current
+
+    @property
+    def degraded(self) -> bool:
+        return self._current != self.config.primary
+
+    @property
+    def health_check_due(self) -> bool:
+        return time.monotonic() - self._last_health_check >= self.config.health_check_interval
+
+    @property
+    def analytics(self) -> dict[str, dict[str, int]]:
+        return self._analytics
+
+    async def select_model(self) -> str:
+        """Return the best available model, opening the circuit if needed."""
+        if self._breakers[self._current].is_open:
+            self._activate_next()
+        return self._current
+
+    def record_success(self, model: str) -> None:
+        if model not in self._breakers:
+            return
+        self._breakers[model].record_success()
+        self._health[model] = True
+        self._last_health_check = time.monotonic()
+        if model == self.config.primary and self._current != self.config.primary:
+            self._current = self.config.primary
+            self._analytics[self.config.primary]["restorations"] += 1
+            logger.info("Restored primary model %s", self.config.primary)
+
+    def record_failure(self, model: str) -> None:
+        if model not in self._breakers:
+            return
+        self._analytics[model]["failures"] += 1
+        self._health[model] = False
+        self._last_health_check = time.monotonic()
+        self._breakers[model].record_failure()
+        if self._breakers[model].is_open:
+            self._activate_next()
+
+    def _activate_next(self) -> None:
+        if self._current == self.config.primary:
+            candidates = self.config.fallbacks
+        else:
+            try:
+                idx = self.config.fallbacks.index(self._current)
+                candidates = self.config.fallbacks[idx + 1 :]
+            except ValueError:
+                candidates = self.config.fallbacks
+        for model in candidates:
+            if not self._breakers[model].is_open:
+                self._current = model
+                self._analytics[model]["activations"] += 1
+                logger.warning(
+                    "Falling back from %s to %s (quality floor %s)",
+                    self.config.primary,
+                    model,
+                    self.config.min_quality,
+                )
+                return
+        logger.error(
+            "All fallback models are unavailable for %s; staying on %s",
+            self.config.model_type,
+            self._current,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize fallback state for persistence across restarts."""
+        return {
+            "config": {
+                "model_type": self.config.model_type,
+                "primary": self.config.primary,
+                "fallbacks": self.config.fallbacks,
+                "min_quality": self.config.min_quality,
+                "circuit_breaker_threshold": self.config.circuit_breaker_threshold,
+                "circuit_breaker_timeout": self.config.circuit_breaker_timeout,
+                "health_check_interval": self.config.health_check_interval,
+            },
+            "current": self._current,
+            "breakers": {
+                model: {"failures": breaker._failures, "opened_at": breaker._opened_at}
+                for model, breaker in self._breakers.items()
+            },
+            "health": self._health,
+            "last_health_check": self._last_health_check,
+            "analytics": self._analytics,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FallbackModelManager":
+        config = FallbackModelConfig(**data["config"])
+        manager = cls(config)
+        manager._current = data.get("current", config.primary)
+        for model, state in data.get("breakers", {}).items():
+            if model in manager._breakers:
+                manager._breakers[model]._failures = state.get("failures", 0)
+                manager._breakers[model]._opened_at = state.get("opened_at", 0.0)
+        manager._health.update(data.get("health", {}))
+        manager._last_health_check = data.get("last_health_check", 0.0)
+        manager._analytics.update(data.get("analytics", {}))
+        return manager
