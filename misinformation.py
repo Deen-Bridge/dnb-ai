@@ -25,6 +25,196 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Respectful disagreement enforcement (adab al-ikhtilaf)
+# ---------------------------------------------------------------------------
+
+class AdabAction(str, Enum):
+    WARNING = "warning"
+    BLOCK = "block"
+
+class AdabViolationType(str, Enum):
+    DISMISSIVE = "dismissive"
+    DISPARAGING = "disparaging"
+    ABSOLUTIST = "absolutist"
+    POLARIZING = "polarizing"
+    NON_ACKNOWLEDGMENT = "non_acknowledgment"
+
+class AdabRule(BaseModel):
+    id: str
+    violation_type: AdabViolationType
+    patterns: list[str]
+    suggestion: str
+    action: AdabAction = AdabAction.WARNING
+
+class AdabViolation(BaseModel):
+    rule_id: str
+    violation_type: AdabViolationType
+    matched_pattern: str
+    suggestion: str
+    action: AdabAction
+
+class DisagreementScanResult(BaseModel):
+    violations: list[AdabViolation] = []
+    has_violations: bool = False
+    should_block: bool = False
+    acknowledgment_missing: bool = False
+    respectful_alternatives: list[str] = []
+
+DEBATED_MATTERS: dict[str, dict[str, Any]] = {
+    "music": {"legitimate": True, "reference": "Ibn Hazm; Al-Ghazali"},
+    "mawlid": {"legitimate": True, "reference": "Four madhhabs"},
+    "tawassul": {"legitimate": True, "reference": "Bukhari 1014"},
+    "sufism": {"legitimate": True, "reference": "Classical scholars"},
+}
+
+ADAB_RULES: list[AdabRule] = [
+    AdabRule(
+        id="dismissive-invalid",
+        violation_type=AdabViolationType.DISMISSIVE,
+        patterns=[
+            r"\b(invalid|baseless|worthless|absurd|nonsense)\s+(opinion|view|position|interpretation|argument)\b",
+            r"\b(there\s+is|this\s+is)\s+no\s+(valid|acceptable|legitimate)\s+(opinion|view|position|interpretation)\b",
+            r"\b(clearly|obviously|undoubtedly|without\s+doubt)\s+(wrong|invalid|baseless|false)\b",
+        ],
+        suggestion=(
+            "Acknowledge the valid difference: 'Scholars have differed on this "
+            "matter; all positions are entitled to respectful consideration.'"
+        ),
+        action=AdabAction.WARNING,
+    ),
+    AdabRule(
+        id="disparaging-scholars",
+        violation_type=AdabViolationType.DISPARAGING,
+        patterns=[
+            r"\b(scholar|mufti|sheikh|imam|ulama|mujtahid)s?\b.{0,40}\b(ignorant|deviant|misguided|liar|false|corrupt|stupid)\b",
+            r"\b(salafi|sufi|deobandi|barelwi|shi[ai]|sunni)\b.{0,40}\b(kafir|mushrik|deviant|misguided|ignorant)\b",
+        ],
+        suggestion=(
+            "Describe differing scholars with respect: 'Other scholars, based on "
+            "their reading of the evidences, have reached a different conclusion.'"
+        ),
+        action=AdabAction.BLOCK,
+    ),
+    AdabRule(
+        id="absolutist-debated",
+        violation_type=AdabViolationType.ABSOLUTIST,
+        patterns=[
+            r"\b(there\s+is|this\s+is|it\s+is)\s+(only|the\s+only|no\s+other|one)\s+(valid|correct|acceptable|scholarly)\s+(view|opinion|position|ruling|interpretation)\b",
+            r"\b(all\s+|every\s+|the\s+entire\s+)(scholars?|ulama|fuqaha|mujtahid)\b.{0,30}\b(agree|consensus|ijma)\b",
+            r"\b(absolutely|categorically|definitely|without\s+exception|in\s+all\s+cases)\s+(haram|halal|bid'ah|sunnah|shirk|obligatory)\b",
+        ],
+        suggestion=(
+            "Present the ruling as the subject of scholarly debate: 'Many scholars "
+            "consider this impermissible, while other scholars hold a different view.'"
+        ),
+        action=AdabAction.WARNING,
+    ),
+    AdabRule(
+        id="polarizing-camps",
+        violation_type=AdabViolationType.POLARIZING,
+        patterns=[
+            r"\b(either|two)\s+(sides|camps|groups)\b.{0,40}\b(truth|falsehood|right|wrong)\b",
+            r"\b(those\s+who|people\s+who)\b.{0,30}\b(are\s+on|follow)\b.{0,20}\b(falsehood|deviation|misguidance)\b",
+            r"\b(dividing|split|tearing\s+apart)\b.{0,40}\b(muslims|ummah|community)\b",
+        ],
+        suggestion=(
+            "Avoid polarizing framing: 'There is a range of scholarly views; "
+            "we should debate with evidence and respect.'"
+        ),
+        action=AdabAction.WARNING,
+    ),
+]
+
+ADAB_RULE_DB = {rule.id: rule for rule in ADAB_RULES}
+
+_IKHTILAF_ACK_PATTERNS = [
+    r"\bikhtilaf\b",
+    r"\bdiffer(ent|ence|ing)?\s+(of\s+opinion|views?|scholars?|opinions?)\b",
+    r"\bscholars?\s+(have\s+differed|differ|disagree|disagreed)\b",
+    r"\bthere\s+is\s+(a\s+)?(valid\s+)?(difference|disagreement)\b",
+    r"\b(multiple|several|many)\s+(valid\s+)?(opinions?|views?|positions?)\b",
+]
+
+_DEBATED_MATTER_PATTERNS = [
+    r"\bmawlid\b",
+    r"\b(music|musical\s+instruments?)\b",
+    r"\b(visiting\s+graves?|grave\s*visiting|ziyarat)\b",
+    r"\btawassul\b",
+    r"\b(sufism|tasawwuf)\b",
+    r"\b(raf[ ']?al[- ]?yadayn|qunoot)\b",
+]
+
+def _detect_adab_violations(text: str) -> list[AdabViolation]:
+    violations: list[AdabViolation] = []
+    for rule in ADAB_RULES:
+        for pattern in rule.patterns:
+            try:
+                match = re.search(pattern, text, re.IGNORECASE)
+            except re.error:
+                logger.warning("Invalid adab regex in rule %s: %s", rule.id, pattern)
+                continue
+            if match:
+                violations.append(AdabViolation(
+                    rule_id=rule.id,
+                    violation_type=rule.violation_type,
+                    matched_pattern=match.group(0),
+                    suggestion=rule.suggestion,
+                    action=rule.action,
+                ))
+                break
+    return violations
+
+def has_ikhtilaf_acknowledgment(text: str) -> bool:
+    """Return True if the text acknowledges legitimate ikhtilaf."""
+    return any(re.search(p, text, re.IGNORECASE) for p in _IKHTILAF_ACK_PATTERNS)
+
+def _involves_debated_matter(text: str) -> bool:
+    return any(re.search(p, text, re.IGNORECASE) for p in _DEBATED_MATTER_PATTERNS)
+
+def suggest_respectful_alternatives(text: str) -> list[str]:
+    """Suggest respectful rephrasings for detected adab violations."""
+    return list({v.suggestion for v in _detect_adab_violations(text)})
+
+def enforce_respectful_disagreement(
+    text: str,
+    require_acknowledgment: bool = False,
+) -> DisagreementScanResult:
+    """Scan text for disrespectful scholarly discourse and adab violations."""
+    violations = _detect_adab_violations(text)
+    acknowledgment_missing = False
+    if require_acknowledgment or _involves_debated_matter(text):
+        if not has_ikhtilaf_acknowledgment(text):
+            acknowledgment_missing = True
+            violations.append(AdabViolation(
+                rule_id="missing-ikhtilaf-ack",
+                violation_type=AdabViolationType.NON_ACKNOWLEDGMENT,
+                matched_pattern="",
+                suggestion=(
+                    "Acknowledge the legitimate scholarly differences (ikhtilaf) "
+                    "on this debated topic before presenting one position."
+                ),
+                action=AdabAction.WARNING,
+            ))
+    return DisagreementScanResult(
+        violations=violations,
+        has_violations=len(violations) > 0,
+        should_block=any(v.action == AdabAction.BLOCK for v in violations),
+        acknowledgment_missing=acknowledgment_missing,
+        respectful_alternatives=suggest_respectful_alternatives(text),
+    )
+
+def is_disrespectful(text: str) -> bool:
+    """Quick check: should this text be blocked for adab violations?"""
+    return enforce_respectful_disagreement(text).should_block
+
+def register_adab_rule(rule: AdabRule) -> None:
+    """Register a new adab pattern for continuous learning."""
+    ADAB_RULE_DB[rule.id] = rule
+    ADAB_RULES.append(rule)
+
+
+
+# ---------------------------------------------------------------------------
 # Misconception database
 # ---------------------------------------------------------------------------
 
