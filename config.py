@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    gemini_api_key: str = Field(default="test-key")
+    gemina_api_key: str = Field(default="test-key")
 
     model_name: str = "gemini-1.5-flash"
 
@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     )
 
     port: int = Field(default=8000, ge=1)
+
+    # Task decomposition system settings
+    decomposition_enabled: bool = True
+    decomposition_max_subtasks: int = Field(default=10, ge=1, le=50)
+    decomposition_min_subtasks: int = Field(default=2, ge=1, le=10)
+    decomposition_parallel_threshold: int = Field(default=3, ge=1)
+    decomposition_validation_enabled: bool = True
+    decomposition_dynamic_replanning: bool = True
+    decomposition_timeout: int = Field(default=60, ge=1)
 
     @field_validator("cors_origins", mode="before")
     @classmethod
