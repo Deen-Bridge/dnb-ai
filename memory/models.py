@@ -17,11 +17,19 @@ VALID_KNOWLEDGE_LEVELS = frozenset({"beginner", "intermediate", "advanced"})
 class TopicEntry(BaseModel):
     topic: str = Field(max_length=MAX_TOPIC_LENGTH)
     last_asked: float
+    embedding: list[float] = Field(default_factory=list)
+    shared: bool = False
 
 
 class FactEntry(BaseModel):
     fact: str = Field(max_length=MAX_FACT_LENGTH)
     created_at: float
+    embedding: list[float] = Field(default_factory=list)
+    shared: bool = False
+    version: int = 1
+    last_accessed: float = Field(default_factory=time.time)
+    archived: bool = False
+    metadata: dict = Field(default_factory=dict)
 
 
 class UserProfile(BaseModel):
@@ -43,5 +51,8 @@ class ChatSummary(BaseModel):
     turn_count: int = 0
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
+    embedding: list[float] = Field(default_factory=list)
+    shared: bool = False
+    version: int = 1
 
     model_config = {"extra": "forbid"}
