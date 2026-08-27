@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    gemini_api_key: str = Field(default="test-key")
+    gemina_api_key: str = Field(default="test-key")
 
     model_name: str = "gemini-1.5-flash"
 
@@ -36,9 +36,43 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
+    # --- Arabic Phoneme Alignment System ---
+    # Enable/disable the phoneme alignment feature.
+    phoneme_alignment_enabled: bool = True
+
+    # Path or identifier for the Arabic phoneme recognition model.
+    phoneme_alignment_model: str = "quranic_phoneme_model"
+
+    # Tajw-ede aware phonetic model path/name.
+    tajweed_model: str = "tajweed_model"
+
+    # Supported Qira'at (recitation styles) for alignment.
+    qiraat_styles: list[str] = Field(
+        default_factory=lambda: ["hafs", "warsh"]
+    )
+
+    # Confidence threshold for accepting alignments (0.0 - 1.0).
+    alignment_confidence_threshold: float = Field(default=0.8, ge=0, le=1)
+
+    # Window size for temporal segmentation (in frames/ms).
+    alignment_window_size: int = Field(default=10, ge=1)
+
+    # Enable real-time alignment for live recitation.
+    real_time_alignment: bool = True
+
+    # Directory containing the recitation corpus for training/evaluation.
+    corpus_directory: str = "data/quranic_corpus"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("qiraat_styles", mode="before")
+    @classmethod
+    def parse_qiraat_styles(cls, value):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
