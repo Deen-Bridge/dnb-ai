@@ -43,6 +43,7 @@ import logging
 import os
 import re
 from collections.abc import Awaitable, Callable
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
@@ -102,6 +103,166 @@ DISCLAIMER = (
     "does not carry; consult a qualified scholar before acting on an "
     "interpretation."
 )
+
+
+# ---------------------------------------------------------------------------
+# Cross-Surah Reference System
+# ---------------------------------------------------------------------------
+
+
+class ReferenceType(str, Enum):
+    """Categorisation of a link between two ayahs."""
+
+    REPEATED_STORY = "repeated_story"
+    RELATED_RULING = "related_ruling"
+    SIMILAR_TEACHING = "similar_teaching"
+    THEMATIC_PARALLEL = "thematic_parallel"
+    LINGUISTIC_ECHO = "linguistic_echo"
+
+
+class CrossReference(BaseModel):
+    """A single directed cross-reference between two ayahs."""
+
+    source: str
+    target: str
+    reference_type: ReferenceType
+    context: str
+    commentary: str
+    source_work: str | None = None
+
+
+SEED_CROSS_REFERENCES: list[CrossReference] = [
+    CrossReference(
+        source="2:282",
+        target="65:2",
+        reference_type=ReferenceType.RELATED_RULING,
+        context="Both ayahs establish the requirement of witnesses for binding agreements.",
+        commentary="Classical mufassirun link the documentation of debt with the witnessing of divorce and return.",
+        source_work="Tafsir al-Qurtubi",
+    ),
+    CrossReference(
+        source="1:5",
+        target="5:117",
+        reference_type=ReferenceType.SIMILAR_TEACHING,
+        context="'Ever do we worship You' mirrors the declaration that Allah is the only Lord.",
+        commentary="Ibn Kathir notes this as an affirmation of exclusive worship.",
+        source_work="Tafsir Ibn Kathir",
+    ),
+    CrossReference(
+        source="2:255",
+        target="3:2",
+        reference_type=ReferenceType.REPEATED_STORY,
+        context="Ayat al-Kursi and Aal Imran open with the same divine self-description.",
+        commentary="Both verses are linked by the theme of Allah's eternal self-subsistence.",
+        source_work="Tafsir al-Tabari",
+    ),
+]
+
+CROSS_REFERENCE_DATA_PATH = Path(__file__).resolve().parent / "data" / "quran" / "cross_references.json"
+
+
+def _load_cross_references() -> list[CrossReference]:
+    """Load cross-references from an external JSON file, falling back to the seed list."""
+    if CROSS_REFERENCE_DATA_PATH.exists():
+        with CROSS_REFERENCE_DATA_PATH.open(encoding="utf-8") as f:
+            try:
+                raw = json.load(f)
+                return [CrossReference(**item) for item in raw]
+            except (json.JSONDecodeError, TypeError, ValueError):
+                logger.warning("Could not parse cross-reference database; using seed.")
+                return list(SEED_CROSS_REFERENCES)
+    return list(SEED_CROSS_REFERENCES)
+
+
+CROSS_REFERENCES: list[CrossReference] = _load_cross_references()
+
+# Index references by ayah key for O(1) lookup.
+_REFERENCE_INDEX: dict[str, list[CrossReference]] = {}
+for _ref in CROSS_REFERENCES:
+    _REFERENCE_INDEX.setdefault(_ref.source, []).append(_ref)
+    _REFERENCE_INDEX.setdefault(_ref.target, []).append(_ref)
+
+
+def find_cross_references(
+    ayah_key: str,
+    reference_type: ReferenceType | None = None,
+    target_surah: int | None = None,
+) -> list[CrossReference]:
+    """Return all references linked to `ayah_key`, with optional filters."""
+    results = []
+    for ref in _REFERENCE_INDEX.get(ayah_key, []):
+        if reference_type is not None and ref.reference_type != reference_type:
+            continue
+        counterpart = ref.target if ref.source == ayah_key else ref.source
+        counterpart_number = int(counterpart.split(":")[0])
+        if target_surah is not None and counterpart_number != target_surah:
+            continue
+        results.append(ref)
+    return results
+
+
+def _validate_ayah_key(ayah_key: str) -> tuple[int, int]:
+    """Validate a 'surah:ayah' key against the surah index, returning (surah, ayah)."""
+    try:
+        surah_num, ayah_num = map(int, ayah_key.split(":"))
+    except ValueError:
+        raise APIException(400, "Ayah key must be in the form 'surah:ayah'.")
+    surah = surah_by_number(surah_num)
+    if surah is None:
+        raise APIException(400, f"Unknown surah number: {surah_num}")
+    if not (1 <= ayah_num <= surah.ayah_count):
+        raise APIException(400, f"Ayah {ayah_num} out of range for Surah {surah.name} (1-{surah.ayah_count}).")
+    return surah_num, ayah_num
+
+
+@router.get("/cross-references/{ayah_key}", response_model=list[CrossReference])
+def get_cross_references(
+    ayah_key: str,
+    reference_type: str | None = None,
+    target_surah: int | None = None,
+) -> list[CrossReference]:
+    """Retrieve cross-references for a given ayah.
+
+    Query parameters:
+    - reference_type: filter by `repeated_story`, `related_ruling`, etc.
+    - target_surah: limit results to references pointing into that surah.
+    """
+    _validate_ayah_key(ayah_key)
+    ref_type: ReferenceType | None = None
+    if reference_type:
+        try:
+            ref_type = ReferenceType(reference_type)
+        except ValueError:
+            raise APIException(400, f"Unknown reference_type: {reference_type}")
+    return find_cross_references(ayah_key, ref_type, target_surah)
+
+
+@router.get("/cross-reference-network")
+def cross_reference_network(target_surah: int | None = None) -> dict[str, list]:
+    """Build a network of all stored cross-references for visualisation.
+
+    Optionally restrict to a single surah; every node/edge touching that surah
+    is returned.
+    """
+    nodes: set[str] = set()
+    edges: list[dict[str, str]] = []
+    for ref in CROSS_REFERENCES:
+        source_number = int(ref.source.split(":")[0])
+        target_number = int(ref.target.split(":")[0])
+        if target_surah is not None and source_number != target_surah and target_number != target_surah:
+            continue
+        nodes.add(ref.source)
+        nodes.add(ref.target)
+        edges.append(
+            {
+                "source": ref.source,
+                "target": ref.target,
+                "type": ref.reference_type.value,
+                "context": ref.context,
+            }
+        )
+    return {"nodes": sorted(nodes), "edges": edges}
+
 
 
 # ---------------------------------------------------------------------------
