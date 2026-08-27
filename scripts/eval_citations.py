@@ -59,6 +59,11 @@ MIN_VALIDITY_RATE = 0.90
 # index either has 200 surahs or it does not. So the floor here is absolute.
 MIN_REJECTION_RATE = 1.00
 
+# LLM-as-judge configuration
+JUDGE_DIMENSIONS = ["accuracy", "completeness", "appropriateness", "citation_quality", "tone"]
+JUDGE_SCALE = 5
+DEFAULT_JUDGE_URL = "http://localhost:8000/judge"
+
 
 def load_dataset(path):
     if not path.exists():
@@ -86,6 +91,60 @@ def fetch_live_answer(url, question):
     )
     response.raise_for_status()
     return response.json()
+
+
+def fetch_judge_scores(judge_url, question, answer):
+    """Get LLM judge scores for a single Q&A pair."""
+    import httpx
+    response = httpx.post(
+        judge_url,
+        json={
+            "question": question,
+            "answer": answer,
+            "dimensions": JUDGE_DIMENSIONS,
+            "scale": JUDGE_SCALE,
+        },
+        timeout=60.0,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def evaluate_with_judge(records, judge_url, verbose=False):
+    """Evaluate records using an LLM judge."""
+    scores = {dim: [] for dim in JUDGE_DIMENSIONS}
+    rows = []
+    for record in records:
+        question = record["question"]
+        answer = record.get("answer", "")
+        if not answer and "response" in record:
+            answer = record["response"]
+        result = fetch_judge_scores(judge_url, question, answer)
+        row = {"id": record["id"]}
+        for dim in JUDGE_DIMENSIONS:
+            score = result.get(dim)
+            row[dim] = score
+            if score is not None:
+                scores[dim].append(float(score))
+        rows.append(row)
+
+    print("LLM-as-Judge Evaluation")
+    print(f"mode              judge")
+    print(f"cases             {len(records)}")
+    for dim in JUDGE_DIMENSIONS:
+        vals = scores[dim]
+        avg = sum(vals) / len(vals) if vals else 0.0
+        print(f"{dim:20s} {avg:.2f} (n={len(vals)})")
+
+    if verbose:
+        print()
+        header = f"{'id':<30}" + "".join(f"{dim:<20}" for dim in JUDGE_DIMENSIONS)
+        print(header)
+        for row in rows:
+            line = f"{row['id']:<30}" + "".join(f"{str(row[dim]):<20}" for dim in JUDGE_DIMENSIONS)
+            print(line)
+
+    return 0
 
 
 def evaluate(records, live_url=None, verbose=False):
@@ -202,9 +261,13 @@ def main():
     parser.add_argument("--live", action="store_true", help="query a running server")
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--judge", action="store_true", help="run LLM-as-judge evaluation")
+    parser.add_argument("--judge-url", default=DEFAULT_JUDGE_URL, help="LLM judge endpoint URL")
     args = parser.parse_args()
 
     records = load_dataset(args.dataset)
+    if args.judge:
+        return evaluate_with_judge(records, args.judge_url, args.verbose)
     return evaluate(records, args.url if args.live else None, args.verbose)
 
 
