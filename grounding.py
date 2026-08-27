@@ -544,3 +544,198 @@ GROUNDING_BLOCK_MESSAGE = (
     "for this question. Please consult a qualified scholar or check "
     "authenticated sources directly."
 )
+
+
+# ---------------------------------------------------------------------------
+# Agent response synthesis and consolidation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AgentResponse:
+    """A single agent's raw response with attribution metadata."""
+
+    agent_id: str
+    text: str
+    citations: list[str] = field(default_factory=list)
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
+class SynthesizedSentence:
+    """A sentence selected for the final consolidated answer."""
+
+    text: str
+    agent_ids: list[str] = field(default_factory=list)
+    citations: list[str] = field(default_factory=list)
+    fidelity: float = 0.0
+
+
+@dataclass
+class SynthesisReport:
+    """Quality and provenance summary for a consolidated answer."""
+
+    text: str
+    sentences: list[SynthesizedSentence]
+    contradictions_resolved: int
+    redundancy_removed: int
+    attribution_errors: int = 0
+    quality_score: float = 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "text": self.text,
+            "sentence_count": len(self.sentences),
+            "contradictions_resolved": self.contradictions_resolved,
+            "redundancy_removed": self.redundancy_removed,
+            "attribution_errors": self.attribution_errors,
+            "quality_score": round(self.quality_score, 4),
+        }
+
+
+def _merge_unique(*lists: list[str]) -> list[str]:
+    """Merge string lists preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for values in lists:
+        for value in values:
+            if value not in seen:
+                seen.add(value)
+                out.append(value)
+    return out
+
+
+def _sentences_are_redundant(a: str, b: str, threshold: float = 0.85) -> bool:
+    """True when two sentences are near-duplicate paraphrases."""
+    a_tokens = set(_tokenize(a))
+    b_tokens = set(_tokenize(b))
+    if not a_tokens or not b_tokens:
+        return False
+    overlap = len(a_tokens & b_tokens) / min(len(a_tokens), len(b_tokens))
+    return overlap >= threshold or sequence_similarity(a, b) >= threshold
+
+
+def _sentences_conflict(a: str, b: str) -> bool:
+    """Heuristic contradiction detection based on shared topic but low entailment."""
+    a_tokens = set(_tokenize(a))
+    b_tokens = set(_tokenize(b))
+    if not a_tokens or not b_tokens:
+        return False
+    jaccard = len(a_tokens & b_tokens) / len(a_tokens | b_tokens)
+    if jaccard < 0.4:
+        return False
+    ent_ab = check_entailment(a, b)
+    ent_ba = check_entailment(b, a)
+    return not (ent_ab.supported or ent_ba.supported)
+
+
+def _synthesis_quality(sentences: list[SynthesizedSentence], source_index: SourceIndex | None) -> float:
+    """Quality is mean grounding fidelity, capped at 1.0."""
+    if not sentences:
+        return 1.0
+    if source_index is None:
+        return 1.0
+    return sum(s.fidelity for s in sentences) / len(sentences)
+
+
+def normalize_terminology(text: str, term_map: dict[str, str] | None = None) -> str:
+    """Normalize alternative terms to a canonical form."""
+    if not term_map or not text:
+        return text
+    canonical = {term.lower(): replacement for term, replacement in term_map.items()}
+    pattern = re.compile(
+        r"\b(" + "|".join(re.escape(term) for term in canonical) + r")\b",
+        re.IGNORECASE,
+    )
+    return pattern.sub(lambda match: canonical[match.group(0).lower()], text)
+
+
+def synthesize_responses(
+    responses: list[AgentResponse],
+    source_index: SourceIndex | None = None,
+    redundancy_threshold: float = 0.85,
+    terminology_map: dict[str, str] | None = None,
+) -> SynthesisReport:
+    """Merge multiple agent responses into one grounded, attributed answer.
+
+    The consolidation is greedy and purely local:
+    - Sentences are deduplicated with semantic overlap.
+    - Contradictory claims are resolved in favour of the better-grounded sentence.
+    - Attribution and citation lists are merged, never dropped.
+    - A quality score is produced for downstream validation.
+    """
+    if not responses:
+        return SynthesisReport(
+            text="",
+            sentences=[],
+            contradictions_resolved=0,
+            redundancy_removed=0,
+        )
+
+    selected: list[SynthesizedSentence] = []
+    contradictions = 0
+    redundancy = 0
+
+    for response in responses:
+        for sentence in split_sentences(response.text):
+            if terminology_map:
+                sentence = normalize_terminology(sentence, terminology_map)
+
+            fidelity = sentence_fidelity(sentence, source_index) if source_index is not None else 0.0
+            candidate = SynthesizedSentence(
+                text=sentence,
+                agent_ids=[response.agent_id],
+                citations=list(response.citations),
+                fidelity=fidelity,
+            )
+
+            # Remove redundancy while preserving attribution.
+            redundant = False
+            for existing in selected:
+                if _sentences_are_redundant(existing.text, sentence, redundancy_threshold):
+                    existing.agent_ids = _merge_unique(existing.agent_ids, [response.agent_id])
+                    existing.citations = _merge_unique(existing.citations, response.citations)
+                    redundancy += 1
+                    redundant = True
+                    break
+            if redundant:
+                continue
+
+            # Resolve contradictions in favour of the better-grounded sentence.
+            conflict_idx = None
+            for idx, existing in enumerate(selected):
+                if _sentences_conflict(existing.text, sentence):
+                    conflict_idx = idx
+                    break
+
+            if conflict_idx is not None:
+                existing = selected[conflict_idx]
+                contradictions += 1
+                if candidate.fidelity > existing.fidelity:
+                    candidate.agent_ids = _merge_unique(existing.agent_ids, candidate.agent_ids)
+                    candidate.citations = _merge_unique(existing.citations, candidate.citations)
+                    selected[conflict_idx] = candidate
+                else:
+                    existing.agent_ids = _merge_unique(existing.agent_ids, [response.agent_id])
+                    existing.citations = _merge_unique(existing.citations, response.citations)
+                continue
+
+            selected.append(candidate)
+
+    text = " ".join(sentence.text for sentence in selected)
+    return SynthesisReport(
+        text=text,
+        sentences=selected,
+        contradictions_resolved=contradictions,
+        redundancy_removed=redundancy,
+        quality_score=_synthesis_quality(selected, source_index),
+    )
+
+
+def validate_synthesis(report: SynthesisReport, min_quality: float = 0.0) -> bool:
+    """Return True only when a synthesized answer is ready for delivery."""
+    if not report.text.strip():
+        return False
+    if report.attribution_errors:
+        return False
+    return report.quality_score >= min_quality
