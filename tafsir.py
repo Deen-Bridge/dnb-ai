@@ -43,6 +43,8 @@ import logging
 import os
 import re
 from collections.abc import Awaitable, Callable
+from collections import defaultdict, deque
+from itertools import combinations
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
@@ -103,6 +105,225 @@ DISCLAIMER = (
     "interpretation."
 )
 
+# ---------------------------------------------------------------------------
+# Ayah relationship graph
+# ---------------------------------------------------------------------------
+
+RELATIONSHIP_TYPES = {
+    "parallel_teaching": "Parallel teaching",
+    "elaboration": "Elaboration",
+    "example": "Example",
+    "contrast": "Contrast",
+    "complement": "Complement",
+}
+RELATIONSHIP_TYPE_LABELS = RELATIONSHIP_TYPES
+DEFAULT_MAX_RELATED_AYAT = 20
+DEFAULT_GRAPH_DEPTH = 2
+RELATIONSHIP_DATA_PATH = Path(__file__).resolve().parent / "data" / "relationships.json"
+
+
+class AyahRelationship(BaseModel):
+    """A related ayah and the nature of its connection to the source ayah."""
+
+    target: str
+    relationship_type: str
+    strength: float
+    scholarly_note: str | None = None
+
+
+class RelatedAyahResponse(BaseModel):
+    source: str
+    direct: list[AyahRelationship]
+    indirect: list[list[str]] = []
+    disclaimer: str = DISCLAIMER
+
+
+class RelationshipGraphResponse(BaseModel):
+    source: str
+    nodes: list[str]
+    edges: list[dict[str, Any]]
+
+
+class RelationshipGraph:
+    """In-memory bi-directional graph of ayah relationships.
+
+    The graph is read-heavy and small enough to remain resident; lookups are
+    O(neighbors) and never touch the network, keeping related-ayah queries
+    comfortably inside the 500ms real-time budget.
+    """
+
+    def __init__(self) -> None:
+        self._edges: dict[str, dict[str, AyahRelationship]] = defaultdict(dict)
+
+    def add_relationship(
+        self,
+        source: str,
+        target: str,
+        relationship_type: str,
+        strength: float,
+        scholarly_note: str | None = None,
+    ) -> None:
+        rel = AyahRelationship(
+            target=target,
+            relationship_type=relationship_type,
+            strength=strength,
+            scholarly_note=scholarly_note,
+        )
+        self._edges[source][target] = rel
+        reverse = AyahRelationship(
+            target=source,
+            relationship_type=relationship_type,
+            strength=strength,
+            scholarly_note=scholarly_note,
+        )
+        self._edges[target][source] = reverse
+
+    def related(
+        self,
+        key: str,
+        relationship_types: set[str] | None = None,
+        min_strength: float = 0.0,
+        max_results: int = DEFAULT_MAX_RELATED_AYAT,
+    ) -> list[AyahRelationship]:
+        edges = self._edges.get(key, {})
+        filtered = [
+            rel
+            for rel in edges.values()
+            if (relationship_types is None or rel.relationship_type in relationship_types)
+            and rel.strength >= min_strength
+        ]
+        filtered.sort(key=lambda rel: rel.strength, reverse=True)
+        return filtered[:max_results]
+
+    def indirect_connections(
+        self,
+        key: str,
+        max_hops: int = DEFAULT_GRAPH_DEPTH,
+        max_results: int = DEFAULT_MAX_RELATED_AYAT,
+    ) -> list[list[str]]:
+        queue: deque[tuple[str, list[str]]] = deque([(key, [key])])
+        seen = {key}
+        paths: list[list[str]] = []
+        while queue and len(paths) < max_results:
+            current, path = queue.popleft()
+            if len(path) > 1:
+                paths.append(path)
+            if len(path) >= max_hops + 1:
+                continue
+            for neighbor in self._edges.get(current, {}):
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    queue.append((neighbor, path + [neighbor]))
+        return paths[:max_results]
+
+    def to_visualization(self, key: str, max_hops: int = DEFAULT_GRAPH_DEPTH) -> RelationshipGraphResponse:
+        nodes = {key}
+        edges: list[dict[str, Any]] = []
+        for neighbor, rel in self._edges.get(key, {}).items():
+            nodes.add(neighbor)
+            edges.append(
+                {
+                    "source": key,
+                    "target": neighbor,
+                    "type": rel.relationship_type,
+                    "strength": rel.strength,
+                }
+            )
+            if max_hops > 1:
+                for second, second_rel in self._edges.get(neighbor, {}).items():
+                    if second != key:
+                        nodes.add(second)
+                        edges.append(
+                            {
+                                "source": neighbor,
+                                "target": second,
+                                "type": second_rel.relationship_type,
+                                "strength": second_rel.strength,
+                            }
+                        )
+        return RelationshipGraphResponse(source=key, nodes=sorted(nodes), edges=edges)
+
+
+_BUILTIN_THEME_CLUSTERS: dict[str, list[str]] = {
+    "tawhid": ["2:255", "3:2", "6:102", "20:14", "23:91", "37:4", "112:1", "112:2", "112:3", "112:4"],
+    "patience": ["2:45", "2:153", "3:200", "8:46", "11:115", "16:127", "20:130", "31:17", "40:55", "103:3"],
+    "prayer": ["2:45", "2:153", "2:238", "4:103", "5:6", "11:114", "17:78", "20:14", "29:45", "31:4", "73:20"],
+    "charity": ["2:261", "2:264", "2:265", "2:267", "2:270", "2:271", "2:274", "3:92", "9:60", "57:18", "64:16"],
+    "judgment": ["1:4", "2:281", "3:9", "3:25", "6:73", "7:187", "19:75", "20:112", "36:51", "50:20", "82:1", "99:1"],
+}
+
+_SCHOLARLY_NOTES: dict[tuple[str, str], str] = {
+    ("112:1", "2:255"): "Both verses affirm Allah's absolute oneness, self-subsistence, and freedom from need.",
+    ("2:153", "2:45"): "Classical mufassirun link these verses: the earlier command to seek help through patience and prayer is restated with the promise that Allah is with the patient.",
+    ("20:14", "2:45"): "The Qur'an consistently ties constancy in prayer to consciousness of Allah; al-Tabari notes the connection in explanation of 20:14.",
+    ("57:18", "64:16"): "Both passages pair faith with spending in Allah's cause and promise multiplied reward.",
+    ("2:264", "2:265"): "The two verses are often read together: one warns against reproachful charity, the other commends sincere giving.",
+}
+
+_CONTRAST_PAIRS: list[tuple[str, str]] = [
+    ("2:264", "2:265"),
+]
+
+
+def _scholarly_note_for(source: str, target: str) -> str | None:
+    return _SCHOLARLY_NOTES.get(tuple(sorted((source, target))))
+
+
+def _thematic_similarity(source: str, target: str) -> float:
+    source_themes = {theme for theme, members in _BUILTIN_THEME_CLUSTERS.items() if source in members}
+    target_themes = {theme for theme, members in _BUILTIN_THEME_CLUSTERS.items() if target in members}
+    union = source_themes | target_themes
+    if not union:
+        return 0.0
+    return len(source_themes & target_themes) / len(union)
+
+
+def _relationship_strength(source: str, target: str, relationship_type: str) -> float:
+    topical = _thematic_similarity(source, target)
+    base = {
+        "parallel_teaching": 0.70,
+        "elaboration": 0.75,
+        "example": 0.65,
+        "contrast": 0.60,
+        "complement": 0.68,
+    }.get(relationship_type, 0.65)
+    return round(min(0.99, base + topical * 0.25), 3)
+
+
+def _load_relationship_seeds() -> dict[str, Any]:
+    if RELATIONSHIP_DATA_PATH.exists():
+        try:
+            return json.loads(RELATIONSHIP_DATA_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            logger.exception("Failed to load relationship seed data from %s", RELATIONSHIP_DATA_PATH)
+    return {}
+
+
+def _build_relationship_graph() -> RelationshipGraph:
+    graph = RelationshipGraph()
+    seeds = _load_relationship_seeds()
+    clusters = seeds.get("clusters") or _BUILTIN_THEME_CLUSTERS
+    for theme, members in clusters.items():
+        relationship_type = "parallel_teaching"
+        if theme in {"patience", "prayer"}:
+            relationship_type = "complement"
+        elif theme == "charity":
+            relationship_type = "example"
+        elif theme == "judgment":
+            relationship_type = "elaboration"
+        for source, target in combinations(members, 2):
+            graph.add_relationship(
+                source,
+                target,
+                relationship_type,
+                _relationship_strength(source, target, relationship_type),
+                scholarly_note=_scholarly_note_for(source, target),
+            )
+
+    for source, target, rel_type, strength, note in seeds.get("explicit_relationships", []):
+        graph.add_relationship(source, target, rel_type, strength, scholarly_note=note)
+
+    for source, target in _CONTRAST_PAIRS
 
 # ---------------------------------------------------------------------------
 # Tafsir registry
