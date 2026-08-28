@@ -28,8 +28,6 @@ from corpus import corpus
 from verifier import (
     VerificationStatus,
     extract_and_verify_all,
-    normalize_english,
-    verify_quran_citation,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,10 +56,10 @@ class HallucinationType(str, Enum):
 class HallucinationSeverity(str, Enum):
     """Severity levels for detected hallucinations."""
 
-    MINOR = "minor"          # Small inaccuracy, low impact
-    MODERATE = "moderate"    # Notable error, could mislead
-    MAJOR = "major"          # Significant error in religious content
-    CRITICAL = "critical"    # Fabricated verse/hadith or dangerous claim
+    MINOR = "minor"  # Small inaccuracy, low impact
+    MODERATE = "moderate"  # Notable error, could mislead
+    MAJOR = "major"  # Significant error in religious content
+    CRITICAL = "critical"  # Fabricated verse/hadith or dangerous claim
 
     @property
     def weight(self) -> float:
@@ -270,49 +268,55 @@ def detect_fabricated_citations(text: str) -> list[HallucinationFlag]:
                         htype = HallucinationType.FABRICATED_CITATION
                         desc = f"Misquoted Quran {surah}:{ayah}: text does not match corpus."
 
-                flags.append(HallucinationFlag(
-                    hallucination_type=htype,
-                    severity=sev,
-                    description=desc,
-                    evidence=v.get("reason", ""),
-                    expected_fact=v.get("correct_text", ""),
-                    confidence=0.95,
-                ))
+                flags.append(
+                    HallucinationFlag(
+                        hallucination_type=htype,
+                        severity=sev,
+                        description=desc,
+                        evidence=v.get("reason", ""),
+                        expected_fact=v.get("correct_text", ""),
+                        confidence=0.95,
+                    )
+                )
             elif source == "hadith":
-                flags.append(HallucinationFlag(
-                    hallucination_type=HallucinationType.FABRICATED_CITATION,
-                    severity=HallucinationSeverity.MAJOR,
-                    description=f"Unverifiable hadith citation: {v.get('collection', '')} {v.get('number', '')}",
-                    evidence=v.get("reason", ""),
-                    confidence=0.7,
-                ))
+                flags.append(
+                    HallucinationFlag(
+                        hallucination_type=HallucinationType.FABRICATED_CITATION,
+                        severity=HallucinationSeverity.MAJOR,
+                        description=f"Unverifiable hadith citation: {v.get('collection', '')} {v.get('number', '')}",
+                        evidence=v.get("reason", ""),
+                        confidence=0.7,
+                    )
+                )
 
     # Check for known fabricated hadith text patterns
     for entry in FABRICATED_HADITH_PATTERNS:
         if re.search(entry["pattern"], text, re.IGNORECASE):
-            flags.append(HallucinationFlag(
-                hallucination_type=HallucinationType.FABRICATED_HADITH,
-                severity=HallucinationSeverity.MAJOR,
-                description=f"Known {entry['status']} hadith detected.",
-                evidence=entry["note"],
-                source_text=re.search(entry["pattern"], text, re.IGNORECASE).group(0),  # type: ignore[union-attr]
-                confidence=0.9,
-            ))
+            flags.append(
+                HallucinationFlag(
+                    hallucination_type=HallucinationType.FABRICATED_HADITH,
+                    severity=HallucinationSeverity.MAJOR,
+                    description=f"Known {entry['status']} hadith detected.",
+                    evidence=entry["note"],
+                    source_text=re.search(entry["pattern"], text, re.IGNORECASE).group(0),  # type: ignore[union-attr]
+                    confidence=0.9,
+                )
+            )
 
     # Detect impossible Quran references in text (e.g. "Surah 115")
-    impossible_refs = re.finditer(
-        r"(?:surah|quran|qur'an)\s+(\d+)", text, re.IGNORECASE
-    )
+    impossible_refs = re.finditer(r"(?:surah|quran|qur'an)\s+(\d+)", text, re.IGNORECASE)
     for match in impossible_refs:
         surah_num = int(match.group(1))
         if surah_num > TOTAL_SURAHS or surah_num < 1:
-            flags.append(HallucinationFlag(
-                hallucination_type=HallucinationType.FABRICATED_VERSE,
-                severity=HallucinationSeverity.CRITICAL,
-                description=f"Reference to non-existent Surah {surah_num} (Quran has {TOTAL_SURAHS} surahs).",
-                evidence=match.group(0),
-                confidence=1.0,
-            ))
+            flags.append(
+                HallucinationFlag(
+                    hallucination_type=HallucinationType.FABRICATED_VERSE,
+                    severity=HallucinationSeverity.CRITICAL,
+                    description=f"Reference to non-existent Surah {surah_num} (Quran has {TOTAL_SURAHS} surahs).",
+                    evidence=match.group(0),
+                    confidence=1.0,
+                )
+            )
 
     return flags
 
@@ -345,17 +349,19 @@ def detect_misattributions(text: str) -> list[HallucinationFlag]:
                             birth = int(re.sub(r"\D", "", era_parts[0]))
                             death = int(re.sub(r"\D", "", era_parts[1]))
                             if year < birth - 50 or year > death + 50:
-                                flags.append(HallucinationFlag(
-                                    hallucination_type=HallucinationType.TEMPORAL_CONFUSION,
-                                    severity=HallucinationSeverity.MODERATE,
-                                    description=(
-                                        f"Possible anachronism: {scholar_name} lived {era}, "
-                                        f"but text references year {year} CE near their name."
-                                    ),
-                                    evidence=context.strip(),
-                                    expected_fact=f"{scholar_name} lived {era}",
-                                    confidence=0.7,
-                                ))
+                                flags.append(
+                                    HallucinationFlag(
+                                        hallucination_type=HallucinationType.TEMPORAL_CONFUSION,
+                                        severity=HallucinationSeverity.MODERATE,
+                                        description=(
+                                            f"Possible anachronism: {scholar_name} lived {era}, "
+                                            f"but text references year {year} CE near their name."
+                                        ),
+                                        evidence=context.strip(),
+                                        expected_fact=f"{scholar_name} lived {era}",
+                                        confidence=0.7,
+                                    )
+                                )
 
         # Check for wrong school attributions
         if school:
@@ -367,17 +373,19 @@ def detect_misattributions(text: str) -> list[HallucinationFlag]:
             if wsm:
                 attributed_school = wsm.group(1).strip().lower()
                 if attributed_school != school.lower() and not school.lower().startswith(attributed_school):
-                    flags.append(HallucinationFlag(
-                        hallucination_type=HallucinationType.MISATTRIBUTION,
-                        severity=HallucinationSeverity.MAJOR,
-                        description=(
-                            f"Wrong school attribution: {scholar_name} is associated with "
-                            f"the {school} school, but text says '{attributed_school}'."
-                        ),
-                        evidence=wsm.group(0),
-                        expected_fact=f"{scholar_name} is associated with the {school} school.",
-                        confidence=0.9,
-                    ))
+                    flags.append(
+                        HallucinationFlag(
+                            hallucination_type=HallucinationType.MISATTRIBUTION,
+                            severity=HallucinationSeverity.MAJOR,
+                            description=(
+                                f"Wrong school attribution: {scholar_name} is associated with "
+                                f"the {school} school, but text says '{attributed_school}'."
+                            ),
+                            evidence=wsm.group(0),
+                            expected_fact=f"{scholar_name} is associated with the {school} school.",
+                            confidence=0.9,
+                        )
+                    )
 
     return flags
 
@@ -388,26 +396,33 @@ def detect_unsupported_claims(text: str) -> list[HallucinationFlag]:
 
     # Pattern: absolute claims about Islamic rulings without citations
     absolute_claim_patterns = [
-        (r"islam\s+(categorically|absolutely|unequivocally)\s+(forbids?|prohibits?|allows?|permits?)",
-         "Absolute categorical claim about Islamic ruling without nuance"),
-        (r"all\s+scholars?\s+(?:unanimously\s+)?(?:agree|consensus)\s+that",
-         "Claim of unanimous scholarly consensus"),
-        (r"the\s+quran\s+(clearly|explicitly)\s+(states?|says?|commands?)\s+that.*(?![\[\(]\d)",
-         "Claim about Quran content without verse reference"),
-        (r"the\s+prophet\s+(?:ﷺ\s+)?said\s*[:\"](?!.*(?:bukhari|muslim|tirmidhi|abu\s+dawud|nasa'i|ibn\s+majah))",
-         "Hadith quotation without collection reference"),
+        (
+            r"islam\s+(categorically|absolutely|unequivocally)\s+(forbids?|prohibits?|allows?|permits?)",
+            "Absolute categorical claim about Islamic ruling without nuance",
+        ),
+        (r"all\s+scholars?\s+(?:unanimously\s+)?(?:agree|consensus)\s+that", "Claim of unanimous scholarly consensus"),
+        (
+            r"the\s+quran\s+(clearly|explicitly)\s+(states?|says?|commands?)\s+that.*(?![\[\(]\d)",
+            "Claim about Quran content without verse reference",
+        ),
+        (
+            r"the\s+prophet\s+(?:ﷺ\s+)?said\s*[:\"](?!.*(?:bukhari|muslim|tirmidhi|abu\s+dawud|nasa'i|ibn\s+majah))",
+            "Hadith quotation without collection reference",
+        ),
     ]
 
     for pattern, description in absolute_claim_patterns:
         matches = re.finditer(pattern, text, re.IGNORECASE)
         for match in matches:
-            flags.append(HallucinationFlag(
-                hallucination_type=HallucinationType.UNSUPPORTED_CLAIM,
-                severity=HallucinationSeverity.MODERATE,
-                description=description,
-                evidence=match.group(0),
-                confidence=0.6,
-            ))
+            flags.append(
+                HallucinationFlag(
+                    hallucination_type=HallucinationType.UNSUPPORTED_CLAIM,
+                    severity=HallucinationSeverity.MODERATE,
+                    description=description,
+                    evidence=match.group(0),
+                    confidence=0.6,
+                )
+            )
 
     return flags
 
@@ -433,23 +448,27 @@ def detect_temporal_errors(text: str) -> list[HallucinationFlag]:
             if "AH" in match.group(0).upper():
                 expected_ah = event_info.get("year_ah")
                 if expected_ah and abs(mentioned_year - expected_ah) > 2:
-                    flags.append(HallucinationFlag(
+                    flags.append(
+                        HallucinationFlag(
+                            hallucination_type=HallucinationType.TEMPORAL_CONFUSION,
+                            severity=HallucinationSeverity.MODERATE,
+                            description=f"Incorrect date for {event_desc}: {mentioned_year} AH (expected ~{expected_ah} AH).",
+                            evidence=match.group(0),
+                            expected_fact=f"{event_desc} occurred in {expected_ah} AH ({expected_year} CE).",
+                            confidence=0.85,
+                        )
+                    )
+            elif abs(mentioned_year - expected_year) > 5:
+                flags.append(
+                    HallucinationFlag(
                         hallucination_type=HallucinationType.TEMPORAL_CONFUSION,
                         severity=HallucinationSeverity.MODERATE,
-                        description=f"Incorrect date for {event_desc}: {mentioned_year} AH (expected ~{expected_ah} AH).",
+                        description=f"Incorrect date for {event_desc}: {mentioned_year} CE (expected ~{expected_year} CE).",
                         evidence=match.group(0),
-                        expected_fact=f"{event_desc} occurred in {expected_ah} AH ({expected_year} CE).",
+                        expected_fact=f"{event_desc} occurred in {expected_year} CE.",
                         confidence=0.85,
-                    ))
-            elif abs(mentioned_year - expected_year) > 5:
-                flags.append(HallucinationFlag(
-                    hallucination_type=HallucinationType.TEMPORAL_CONFUSION,
-                    severity=HallucinationSeverity.MODERATE,
-                    description=f"Incorrect date for {event_desc}: {mentioned_year} CE (expected ~{expected_year} CE).",
-                    evidence=match.group(0),
-                    expected_fact=f"{event_desc} occurred in {expected_year} CE.",
-                    confidence=0.85,
-                ))
+                    )
+                )
 
     return flags
 
@@ -479,13 +498,15 @@ def detect_scholar_position_errors(text: str) -> list[HallucinationFlag]:
 
     for entry in cross_school_errors:
         if re.search(entry["pattern"], text, re.IGNORECASE):
-            flags.append(HallucinationFlag(
-                hallucination_type=HallucinationType.SCHOLAR_POSITION_ERROR,
-                severity=entry["severity"],
-                description=entry["error"],
-                evidence=re.search(entry["pattern"], text, re.IGNORECASE).group(0),  # type: ignore[union-attr]
-                confidence=0.85,
-            ))
+            flags.append(
+                HallucinationFlag(
+                    hallucination_type=HallucinationType.SCHOLAR_POSITION_ERROR,
+                    severity=entry["severity"],
+                    description=entry["error"],
+                    evidence=re.search(entry["pattern"], text, re.IGNORECASE).group(0),  # type: ignore[union-attr]
+                    confidence=0.85,
+                )
+            )
 
     return flags
 
