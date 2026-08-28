@@ -65,6 +65,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
+| `GET` | `/uncertainty/taxonomy` | Islamic epistemology taxonomy and uncertainty quantification categories |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
 | `GET` | `/review/{id}` | A single review item (reviewer token) |

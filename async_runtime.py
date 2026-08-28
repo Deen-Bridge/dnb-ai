@@ -182,7 +182,10 @@ class AsyncTaskScheduler:
         task: asyncio.Task[Any] | None = None
         try:
             coroutine = item.context.run(item.factory)
-            task = asyncio.create_task(coroutine, name=item.name, context=item.context)
+            try:
+                task = asyncio.create_task(coroutine, name=item.name, context=item.context)
+            except TypeError:
+                task = asyncio.create_task(coroutine, name=item.name)
             await task
         except asyncio.CancelledError:
             if task is not None:

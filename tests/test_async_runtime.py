@@ -3,7 +3,7 @@ import contextvars
 import uuid
 
 import pytest
-from fastapi import Response
+from fastapi import Request, Response
 
 from async_runtime import AsyncTaskScheduler, HttpClientPool, KeyedLockPool, TaskPriority
 
@@ -182,10 +182,11 @@ async def test_chat_wrapper_serializes_same_chat_and_parallelizes_other_chats(mo
     same = main.ChatRequest(prompt="two", chat_id=first.chat_id)
     other = main.ChatRequest(prompt="three", chat_id=uuid.uuid4())
 
+    scope = {"type": "http", "path": "/chat", "headers": [], "client": ("127.0.0.1", 12345)}
     results = await asyncio.gather(
-        main.chat(first, object(), Response()),
-        main.chat(same, object(), Response()),
-        main.chat(other, object(), Response()),
+        main.chat(first, Request(scope), Response()),
+        main.chat(same, Request(scope), Response()),
+        main.chat(other, Request(scope), Response()),
     )
 
     assert results == [str(first.chat_id), str(first.chat_id), str(other.chat_id)]

@@ -26,6 +26,7 @@ from stellar_sdk.exceptions import NotFoundError
 from stellar_sdk.strkey import StrKey
 
 from async_runtime import http_client_pool
+from errors import APIException
 from nisab import NisabQuote, get_nisab, override_quote
 
 logger = logging.getLogger(__name__)
@@ -117,9 +118,14 @@ def validate_public_key(public_key: str) -> str:
     """
     cleaned = (public_key or "").strip()
     if not StrKey.is_valid_ed25519_public_key(cleaned):
-        raise HTTPException(
+        raise APIException(
             status_code=400,
             detail="Invalid Stellar public key. Expected a 56-character key starting with G.",
+            hint=(
+                "Provide a valid 56-character Stellar Ed25519 public key starting with 'G' "
+                "(e.g., 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'). "
+                "Do not provide secret keys starting with 'S'."
+            ),
         )
     return cleaned
 
@@ -196,9 +202,13 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
     try:
         account = server.accounts().account_id(public_key).call()
     except NotFoundError:
-        raise HTTPException(
+        raise APIException(
             status_code=404,
             detail=f"Account not found on the Stellar {STELLAR_NETWORK} network.",
+            hint=(
+                f"Ensure the account has been funded with XLM and created on the Stellar "
+                f"{STELLAR_NETWORK} network (Horizon URL: {horizon_url()})."
+            ),
         ) from None
     for balance in account.get("balances", []):
         if balance.get("asset_code") == "USDC" and balance.get("asset_issuer") == usdc_issuer():
