@@ -60,8 +60,16 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Wahidi, Asbab al-Nuzul; reports via Ibn Abbas",
         "period": "Makki",
         "narrations": [
-            {"scholar": "Ibn Abbas", "text": "This was the first verse revealed concerning intoxicants.", "source": "al-Wahidi"},
-            {"scholar": "Qatadah", "text": "The people drank wine and traded in it freely; this verse gave them pause.", "source": "al-Tabari"},
+            {
+                "scholar": "Ibn Abbas",
+                "text": "This was the first verse revealed concerning intoxicants.",
+                "source": "al-Wahidi",
+            },
+            {
+                "scholar": "Qatadah",
+                "text": "The people drank wine and traded in it freely; this verse gave them pause.",
+                "source": "al-Tabari",
+            },
         ],
         "suggested_interpretation": "Lay out the staged context: 2:219 → 4:43 → 5:90.",
     },
@@ -74,7 +82,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Tirmidhi; al-Wahidi, Asbab al-Nuzul",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Abu al-Darda'", "text": "A Companion came to the Prophet while intoxicated; the verse was revealed.", "source": "al-Tirmidhi"},
+            {
+                "scholar": "Abu al-Darda'",
+                "text": "A Companion came to the Prophet while intoxicated; the verse was revealed.",
+                "source": "al-Tirmidhi",
+            },
         ],
         "suggested_interpretation": "Intermediate stage: prayer quality-based prohibition before the categorical ban.",
     },
@@ -87,7 +99,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Bukhari; al-Wahidi, Asbab al-Nuzul",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Umar ibn al-Khattab", "text": "Umar prayed for guidance on the matter of intoxicants; this verse was the answer.", "source": "al-Bukhari"},
+            {
+                "scholar": "Umar ibn al-Khattab",
+                "text": "Umar prayed for guidance on the matter of intoxicants; this verse was the answer.",
+                "source": "al-Bukhari",
+            },
         ],
         "suggested_interpretation": "Emphasize tadarruj (gradualism) as a jurisprudential principle illustrated by this sequence.",
     },
@@ -103,8 +119,16 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "Abu Dawud; al-Nasa'i; via Ibn Abbas",
         "period": "Makki",
         "narrations": [
-            {"scholar": "Ibn Abbas", "text": "Revealed concerning women of the Ansar whose children had embraced Judaism.", "source": "al-Tabari"},
-            {"scholar": "al-Qurtubi", "text": "Some scholars considered this verse abrogated by the sword verses; the majority held it abrogating nothing.", "source": "al-Qurtubi, al-Jami'"},
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Revealed concerning women of the Ansar whose children had embraced Judaism.",
+                "source": "al-Tabari",
+            },
+            {
+                "scholar": "al-Qurtubi",
+                "text": "Some scholars considered this verse abrogated by the sword verses; the majority held it abrogating nothing.",
+                "source": "al-Qurtubi, al-Jami'",
+            },
         ],
         "suggested_interpretation": "Frame within abrogation debate; majority scholarly position is that it stands unrestricted.",
     },
@@ -121,8 +145,16 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Tabari, Jami' al-Bayan",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Ibn Abbas", "text": "The context of the surrounding verses restricts this to those who violated their treaties.", "source": "al-Tabari"},
-            {"scholar": "al-Razi", "text": "Read only within its immediate textual surrounding, not as a standalone command.", "source": "Tafsir al-Kabir"},
+            {
+                "scholar": "Ibn Abbas",
+                "text": "The context of the surrounding verses restricts this to those who violated their treaties.",
+                "source": "al-Tabari",
+            },
+            {
+                "scholar": "al-Razi",
+                "text": "Read only within its immediate textual surrounding, not as a standalone command.",
+                "source": "Tafsir al-Kabir",
+            },
         ],
         "suggested_interpretation": "Always contextualize with 9:4 and 9:7; do not extract in isolation.",
     },
@@ -138,7 +170,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Tirmidhi; al-Wahidi, Asbab al-Nuzul",
         "period": "Makki",
         "narrations": [
-            {"scholar": "Abdullah ibn Umm Maktum", "text": "'O Prophet, teach me what Allah has taught you.' The Prophet turned away in annoyance.", "source": "al-Bukhari, al-Muslim"},
+            {
+                "scholar": "Abdullah ibn Umm Maktum",
+                "text": "'O Prophet, teach me what Allah has taught you.' The Prophet turned away in annoyance.",
+                "source": "al-Bukhari, al-Muslim",
+            },
         ],
         "suggested_interpretation": "Models accountability of the Prophet himself to divine correction; matters of social status are irrelevant in seeking knowledge.",
     },
@@ -153,7 +189,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Wahidi, Asbab al-Nuzul",
         "period": "Makki",
         "narrations": [
-            {"scholar": "Ibn Abbas", "text": "Companions in travel were confused about qiblah direction; this verse relieved them.", "source": "al-Wahidi"},
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Companions in travel were confused about qiblah direction; this verse relieved them.",
+                "source": "al-Wahidi",
+            },
         ],
         "suggested_interpretation": "Demonstrates divine ease and the principle that God's presence is not confined to one direction.",
     },
@@ -166,7 +206,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Bukhari; al-Tabari",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Anas ibn Malik", "text": "People used to pray towards Jerusalem; they rejoiced when the qiblah was turned towards Mecca.", "source": "al-Bukhari"},
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "People used to pray towards Jerusalem; they rejoiced when the qiblah was turned towards Mecca.",
+                "source": "al-Bukhari",
+            },
         ],
         "suggested_interpretation": "Narrate the 16/17 hijri transition; discuss why Jerusalem prayer preceded the Meccan command.",
     },
@@ -180,7 +224,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Tabari; al-Razi",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Ibn Abbas", "text": "Do not begin hostilities; fight only those who fight you first.", "source": "al-Tabari"},
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Do not begin hostilities; fight only those who fight you first.",
+                "source": "al-Tabari",
+            },
         ],
         "suggested_interpretation": "Highlight 'do not transgress' as the constraining clause that limits scope to defensive warfare.",
     },
@@ -203,7 +251,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Bukhari; Muslim",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Sa'd ibn al-Rabi'", "text": "Sa'd offered half his estate to his daughter; the Prophet instead applied the fixed Quranic shares.", "source": "al-Bukhari"},
+            {
+                "scholar": "Sa'd ibn al-Rabi'",
+                "text": "Sa'd offered half his estate to his daughter; the Prophet instead applied the fixed Quranic shares.",
+                "source": "al-Bukhari",
+            },
         ],
         "suggested_interpretation": "Introduce Islamic inheritance as a revolutionary equitable system displacing patriarchy.",
     },
@@ -216,7 +268,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Tabari; Ibn Kathir",
         "period": "Madani",
         "narrations": [
-            {"scholar": "al-Tabari", "text": "Qawwamah is tied to financial support and guardianship, not inherent superiority.", "source": "Tafsir al-Tabari"},
+            {
+                "scholar": "al-Tabari",
+                "text": "Qawwamah is tied to financial support and guardianship, not inherent superiority.",
+                "source": "Tafsir al-Tabari",
+            },
         ],
         "suggested_interpretation": "Ground in guardianship and financial duty; avoid anachronistic readings.",
     },
@@ -229,7 +285,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Wahidi; al-Tha'labi",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Omar ibn al-Khattab", "text": "After the sermon, Umar said 'Well done, O son of Abu Talib!' indicating public acknowledgment.", "source": "Ibn Kathir"},
+            {
+                "scholar": "Omar ibn al-Khattab",
+                "text": "After the sermon, Umar said 'Well done, O son of Abu Talib!' indicating public acknowledgment.",
+                "source": "Ibn Kathir",
+            },
         ],
         "suggested_interpretation": "Present both Sunni and Shia readings neutrally; attribution certainty is high for the event, not its scope.",
     },
@@ -264,7 +324,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Bukhari; Muslim",
         "period": "Makki",
         "narrations": [
-            {"scholar": "Anas ibn Malik", "text": "Quraysh mocked the claim of night travel; the Prophet confirmed the details privately.", "source": "al-Bukhari"},
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "Quraysh mocked the claim of night travel; the Prophet confirmed the details privately.",
+                "source": "al-Bukhari",
+            },
         ],
         "suggested_interpretation": "Recount the Isra and Mi'raj event; note theological significance of Jerusalem as the first qiblah.",
     },
@@ -277,7 +341,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Tabari; Ibn Kathir",
         "period": "Makki",
         "narrations": [
-            {"scholar": "Ibn Abbas", "text": "Al-Khidr met Musa to teach him the inner meanings that the Torah does not contain.", "source": "al-Tabari"},
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Al-Khidr met Musa to teach him the inner meanings that the Torah does not contain.",
+                "source": "al-Tabari",
+            },
         ],
         "suggested_interpretation": "Narrate the parable as an epistemological lesson on divine knowledge beyond apparent events.",
     },
@@ -301,7 +369,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Tabari; al-Qurtubi",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Anas ibn Malik", "text": "Men would follow women through the streets; this verse was revealed to establish boundaries.", "source": "al-Tabari"},
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "Men would follow women through the streets; this verse was revealed to establish boundaries.",
+                "source": "al-Tabari",
+            },
         ],
         "suggested_interpretation": "Present with full scholarly context; note significant disagreement on what exactly is mandated.",
     },
@@ -314,7 +386,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Bukhari; al-Tabari",
         "period": "Madani",
         "narrations": [
-            {"scholar": "Anas ibn Malik", "text": "Zayd divorced Zaynab; the Prophet married her by divine command, abolishing the pre-Islamic adoption-kinship rule.", "source": "al-Bukhari"},
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "Zayd divorced Zaynab; the Prophet married her by divine command, abolishing the pre-Islamic adoption-kinship rule.",
+                "source": "al-Bukhari",
+            },
         ],
         "suggested_interpretation": "Link to abolition of pre-Islamic adoption (tabanni'); focus on the legal principle, not the biographical detail.",
     },
@@ -338,7 +414,11 @@ ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
         "attribution": "al-Bukhari; Muslim",
         "period": "Makki",
         "narrations": [
-            {"scholar": "Abu Bakr", "text": "'By Allah, this is equal to one-third of the Quran in reward.'", "source": "al-Bukhari"},
+            {
+                "scholar": "Abu Bakr",
+                "text": "'By Allah, this is equal to one-third of the Quran in reward.'",
+                "source": "al-Bukhari",
+            },
         ],
         "suggested_interpretation": "Use as the purest monotheistic creed text; link to the Quraysh's tribal-theology challenge.",
     },
@@ -611,6 +691,7 @@ def _match_keywords(text: str, table: dict[str, str]) -> list[str]:
 
 class NarrationEntry(BaseModel):
     """One scholarly narration of the circumstances of revelation."""
+
     scholar: str
     text: str
     source: str = ""
