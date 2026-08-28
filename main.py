@@ -313,6 +313,7 @@ async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
         "message": message,
     }
 
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
