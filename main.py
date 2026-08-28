@@ -45,6 +45,7 @@ import metrics
 import telemetry
 from adhkar import corpus as adhkar_corpus
 from arabic_ocr import router as arabic_ocr_router
+from audio_analysis import router as audio_analysis_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
 from calligraphy_ocr import (
@@ -331,6 +332,8 @@ app.include_router(reformulation_router)
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
 app.include_router(audio_hadith_router)
+# Audio analysis: voice-note transcription, recitation detection and terminology
+app.include_router(audio_analysis_router)
 # Database query optimization: static anti-pattern analysis + runtime profiling
 app.include_router(query_optimizer_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
