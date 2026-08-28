@@ -120,14 +120,65 @@ def verify_hadith_citation(collection: str, number: str | None = None, quote: st
             "status": VerificationStatus.UNVERIFIED,
             "reason": "Hadith corpus not available for verification.",
         }
-    # Future expansion for #24 when Hadith corpus lands
-    return {
-        "source": "hadith",
-        "collection": collection,
-        "number": number,
-        "status": VerificationStatus.UNVERIFIED,
-        "reason": "Hadith verification not implemented.",
-    }
+    # Attempt to retrieve hadith text from corpus
+    get_hadith = getattr(corpus, "get_hadith", None)
+    if not callable(get_hadith):
+        return {
+            "source": "hadith",
+            "collection": collection,
+            "number": number,
+            "status": VerificationStatus.UNVERIFIED,
+            "reason": "Hadith corpus getter not available.",
+        }
+
+    hadith_data = get_hadith(collection, number)
+    if hadith_data is None:
+        return {
+            "source": "hadith",
+            "collection": collection,
+            "number": number,
+            "status": VerificationStatus.MISMATCH,
+            "reason": f"Hadith {collection} #{number} not found in corpus.",
+        }
+
+    if not quote or not quote.strip():
+        return {
+            "source": "hadith",
+            "collection": collection,
+            "number": number,
+            "status": VerificationStatus.NOT_QUOTED,
+            "reason": "Reference exists; no quote provided for verification.",
+        }
+
+    corpus_text = hadith_data.get("english", "") or hadith_data.get("text", "")
+    if not corpus_text:
+        return {
+            "source": "hadith",
+            "collection": collection,
+            "number": number,
+            "status": VerificationStatus.UNVERIFIED,
+            "reason": "Hadith text not available in corpus.",
+        }
+
+    similarity = calculate_similarity(quote, corpus_text)
+    if similarity >= 0.70:
+        return {
+            "source": "hadith",
+            "collection": collection,
+            "number": number,
+            "status": VerificationStatus.VERIFIED,
+            "similarity": round(similarity, 2),
+        }
+    else:
+        return {
+            "source": "hadith",
+            "collection": collection,
+            "number": number,
+            "status": VerificationStatus.MISMATCH,
+            "similarity": round(similarity, 2),
+            "correct_text": corpus_text,
+            "reason": f"Quote does not match {collection} #{number} text in corpus.",
+        }
 
 
 def extract_and_verify_all(text: str) -> list[dict[str, Any]]:
@@ -151,3 +202,63 @@ def extract_and_verify_all(text: str) -> list[dict[str, Any]]:
         results.append(res)
 
     return results
+
+
+def verify_claim(claim: str, evidence: str) -> dict[str, Any]:
+    """Verify a scholarly claim against provided evidence text.
+
+    Args:
+        claim: The scholarly claim being made.
+        evidence: Text containing citations (Quran, Hadith) supporting the claim.
+
+    Returns:
+        A verification report including status, support score, and audit trail.
+    """
+    # Extract and verify all citations from the evidence
+    citation_results = extract_and_verify_all(evidence)
+
+    # If no citations are found, the claim is unsupported
+    if not citation_results:
+        return {
+            "claim": claim,
+            "status": VerificationStatus.UNVERIFIED,
+            "reason": "No primary source citations found in evidence.",
+            "evidence": [],
+            "support_score": 0.0,
+            "audit_trail": ["No citations extracted from evidence."]
+        }
+
+    # Determine overall status based on citation verification results
+    verified = [r for r in citation_results if r["status"] == VerificationStatus.VERIFIED]
+    mismatched = [r for r in citation_results if r["status"] == VerificationStatus.MISMATCH]
+    unverified = [r for r in citation_results if r["status"] in (VerificationStatus.UNVERIFIED, VerificationStatus.NOT_QUOTED)]
+
+    if verified and not mismatched and not unverified:
+        overall_status = VerificationStatus.VERIFIED
+        reason = "All cited evidence verified successfully."
+    elif mismatched:
+        overall_status = VerificationStatus.MISMATCH
+        reason = f"{len(mismatched)} citation(s) failed verification."
+    else:
+        overall_status = VerificationStatus.UNVERIFIED
+        reason = "No citation could be fully verified."
+
+    support_score = len(verified) / len(citation_results)
+
+    # Build audit trail
+    audit_trail = []
+    for r in citation_results:
+        source = r.get("source", "unknown")
+        ref = r.get("surah", r.get("collection", ""))
+        detail = r.get("ayah", r.get("number", ""))
+        audit_trail.append(f"{source} {ref} {detail}: {r['status']} - {r.get('reason', '')}")
+
+    return {
+        "claim": claim,
+        "status": overall_status,
+        "reason": reason,
+        "evidence": citation_results,
+        "support_score": round(support_score, 2),
+        "audit_trail": audit_trail
+    }
+
