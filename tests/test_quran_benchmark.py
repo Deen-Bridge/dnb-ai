@@ -93,8 +93,17 @@ class TestGroundTruthData:
         assert len(_VERSE_DATA) >= 30
 
     def test_all_required_fields(self):
-        required = {"id", "category", "surah", "ayah", "english", "tags",
-                     "related_verses", "partial_quote", "wrong_options"}
+        required = {
+            "id",
+            "category",
+            "surah",
+            "ayah",
+            "english",
+            "tags",
+            "related_verses",
+            "partial_quote",
+            "wrong_options",
+        }
         for case in _VERSE_DATA:
             missing = required - set(case.keys())
             assert not missing, f"{case['id']} missing: {missing}"
@@ -104,15 +113,15 @@ class TestGroundTruthData:
             assert 1 <= case["surah"] <= 114, f"{case['id']}: surah {case['surah']}"
 
     def test_categories_are_valid(self):
-        valid_cats = {"exact_lookup", "translation_fidelity", "partial_match",
-                       "cross_reference", "edge_case"}
+        valid_cats = {"exact_lookup", "translation_fidelity", "partial_match", "cross_reference", "edge_case"}
         for case in _VERSE_DATA:
             assert case["category"] in valid_cats, f"{case['id']}: {case['category']}"
 
     def test_all_references_valid(self):
         for case in _VERSE_DATA:
-            assert reference_valid(case["surah"], case["ayah"]), \
+            assert reference_valid(case["surah"], case["ayah"]), (
                 f"{case['id']}: invalid ref {case['surah']}:{case['ayah']}"
+            )
 
     def test_no_duplicate_ids(self):
         ids = [c["id"] for c in _VERSE_DATA]
@@ -120,8 +129,7 @@ class TestGroundTruthData:
 
     def test_categories_covered(self):
         cats = {c["category"] for c in _VERSE_DATA}
-        assert cats == {"exact_lookup", "translation_fidelity", "partial_match",
-                         "cross_reference", "edge_case"}
+        assert cats == {"exact_lookup", "translation_fidelity", "partial_match", "cross_reference", "edge_case"}
 
 
 # ---------------------------------------------------------------------------
@@ -164,12 +172,20 @@ class TestBenchmarkRunner:
 class TestBenchmarkWithBadPredictions:
     def test_wrong_translation_fails(self):
         """A completely wrong translation should produce a low pass rate."""
-        bad_data = [{
-            "id": "bad-001", "category": "exact_lookup",
-            "surah": 1, "ayah": 1, "arabic": "",
-            "english": "In the name of Allah, the Entirely Merciful, the Especially Merciful.",
-            "tags": [], "related_verses": [], "partial_quote": "", "wrong_options": [],
-        }]
+        bad_data = [
+            {
+                "id": "bad-001",
+                "category": "exact_lookup",
+                "surah": 1,
+                "ayah": 1,
+                "arabic": "",
+                "english": "In the name of Allah, the Entirely Merciful, the Especially Merciful.",
+                "tags": [],
+                "related_verses": [],
+                "partial_quote": "",
+                "wrong_options": [],
+            }
+        ]
 
         def bad_lookup(surah: int, ayah: int) -> str:
             return "Completely wrong translation with no similarity."
@@ -178,12 +194,20 @@ class TestBenchmarkWithBadPredictions:
         assert result.pass_rate < 1.0
 
     def test_custom_test_data(self):
-        data = [{
-            "id": "custom-001", "category": "translation_fidelity",
-            "surah": 2, "ayah": 286, "arabic": "",
-            "english": "Allah does not charge a soul except within its capacity.",
-            "tags": [], "related_verses": [], "partial_quote": "", "wrong_options": [],
-        }]
+        data = [
+            {
+                "id": "custom-001",
+                "category": "translation_fidelity",
+                "surah": 2,
+                "ayah": 286,
+                "arabic": "",
+                "english": "Allah does not charge a soul except within its capacity.",
+                "tags": [],
+                "related_verses": [],
+                "partial_quote": "",
+                "wrong_options": [],
+            }
+        ]
 
         def good_lookup(surah: int, ayah: int) -> str:
             return "Allah does not charge a soul except within its capacity."
@@ -204,10 +228,21 @@ class TestPrintReport:
         assert code == 0
 
     def test_fail_returns_one(self):
-        result = BenchmarkResult(total_cases=1, results=[
-            CaseResult(case_id="x", category="exact_lookup", passed=False,
-                       exact_match_score=False, token_overlap_score=0.0,
-                       sequence_similarity=0.0, reference_valid=True),
-        ], category_counts={"exact_lookup": 1}, category_passed={})
+        result = BenchmarkResult(
+            total_cases=1,
+            results=[
+                CaseResult(
+                    case_id="x",
+                    category="exact_lookup",
+                    passed=False,
+                    exact_match_score=False,
+                    token_overlap_score=0.0,
+                    sequence_similarity=0.0,
+                    reference_valid=True,
+                ),
+            ],
+            category_counts={"exact_lookup": 1},
+            category_passed={},
+        )
         code = print_report(result)
         assert code == 1
