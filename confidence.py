@@ -60,8 +60,11 @@ import logging
 import os
 import re
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
+
+from uncertainty import UncertaintyQuantification
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +216,10 @@ class ConfidenceSignals(BaseModel):
     expressed_certainty: float | None = Field(None, ge=0.0, le=1.0, description="Inverse of the answer's own hedging")
     is_religious: bool = False
     is_high_stakes: bool = False
+    prompt: str | None = None
+    answer_text: str | None = None
+    hadith_refs: list[Any] | None = None
+    citations: list[Any] | None = None
 
     def present(self) -> dict[str, float]:
         return {
@@ -236,6 +243,7 @@ class ConfidenceAssessment(BaseModel):
     signals: dict[str, float] = {}
     signals_used: list[str] = []
     review_id: str | None = None
+    uncertainty: UncertaintyQuantification | None = None
 
 
 def compute_confidence(signals: ConfidenceSignals) -> float:
@@ -291,6 +299,27 @@ def assess(signals: ConfidenceSignals) -> ConfidenceAssessment:
     except Exception:  # noqa: BLE001
         pass
     band = band_for(score)
+
+    uncertainty_profile: UncertaintyQuantification | None = None
+    if signals.is_religious or bool(signals.prompt) or bool(signals.answer_text):
+        try:
+            from uncertainty import quantify_uncertainty
+
+            expressed_score = signals.expressed_certainty if signals.expressed_certainty is not None else 1.0
+            uncertainty_profile = quantify_uncertainty(
+                prompt=signals.prompt or "",
+                answer=signals.answer_text or "",
+                is_fiqh=signals.is_high_stakes,
+                is_religious=signals.is_religious,
+                hadith_refs=signals.hadith_refs,
+                citations=signals.citations,
+                citation_score=signals.citation_verification,
+                consistency_score=signals.self_consistency,
+                expressed_certainty_score=expressed_score,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to quantify uncertainty profile")
+
     return ConfidenceAssessment(
         score=score,
         band=band,
@@ -298,6 +327,7 @@ def assess(signals: ConfidenceSignals) -> ConfidenceAssessment:
         queued=should_queue_for_scholar(score, signals),
         signals=signals.present(),
         signals_used=sorted(signals.present()),
+        uncertainty=uncertainty_profile,
     )
 
 
@@ -352,6 +382,9 @@ def build_signals(
     is_high_stakes: bool = False,
     self_consistency: float | None = None,
     citation_verification: float | None = None,
+    prompt: str | None = None,
+    hadith_refs: list[Any] | None = None,
+    citations: list[Any] | None = None,
 ) -> ConfidenceSignals:
     """Assemble signals for a turn, deriving only the text-based one here."""
     return ConfidenceSignals(
@@ -360,6 +393,10 @@ def build_signals(
         expressed_certainty=expressed_certainty(answer),
         is_religious=is_religious,
         is_high_stakes=is_high_stakes,
+        prompt=prompt,
+        answer_text=answer,
+        hadith_refs=hadith_refs,
+        citations=citations,
     )
 
 

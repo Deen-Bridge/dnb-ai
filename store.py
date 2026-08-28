@@ -299,7 +299,7 @@ class SessionStore:
         if entry is None:
             return []
         expires_at, history = entry
-        if time.monotonic() > expires_at:
+        if time.monotonic() >= expires_at:
             del self._local[chat_id]
             return []
         return history

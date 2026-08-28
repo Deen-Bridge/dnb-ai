@@ -9,24 +9,31 @@ import asyncio
 import time
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from semantic_cache import get_keyed_cache
 from tafsir import (
     DEFAULT_COMPARISON_TAFSIR_KEYS,
     DEFAULT_TAFSIR_KEYS,
     MAX_AYAT_PER_REQUEST,
+    MAX_REFERENCES_PER_BATCH,
+    MAX_TOTAL_AYAT_PER_BATCH,
     MIN_COMPARISON_TAFSIRS,
     TAFSIR_REGISTRY,
     AyahRef,
     FakeComparisonGenerator,
     FakeTafsirSource,
+    InvalidBatchRequest,
     InvalidReference,
+    TafsirBatchRequest,
     TafsirComparisonRequest,
     TafsirRequest,
     TafsirWork,
     VerseText,
     _normalize_surah_name,
     build_chat_tafsir_context,
+    build_tafsir_batch_response,
     build_tafsir_comparison,
     build_tafsir_prompt_block,
     build_tafsir_response,
@@ -37,6 +44,7 @@ from tafsir import (
     parse_reference,
     parse_tafsir_payload,
     resolve_requested_tafsirs,
+    router,
     strip_html,
     summarize_tafsir_context,
     surah_by_name,
@@ -582,6 +590,95 @@ class TestBuildResponse:
             run(build_tafsir_response(TafsirRequest(reference="2:300"), make_source()))
 
 
+class TestBuildBatchResponse:
+    def test_returns_results_keyed_by_reference(self):
+        source = make_source(
+            tafsirs={
+                ("en-tafisr-ibn-kathir", "2:255"): IBN_KATHIR_103,
+                ("en-tafisr-ibn-kathir", "112:1"): IBN_KATHIR_103,
+            },
+            verses={
+                "2:255": VerseText(translation="Allah! There is no deity except Him.", translation_language="en"),
+                "112:1": VerseText(translation="Say, He is Allah, [who is] One.", translation_language="en"),
+            },
+        )
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(
+                    references=["2:255", "103:1-3", "112:1-4"],
+                    tafsirs=["ibn-kathir"],
+                ),
+                source,
+            )
+        )
+        assert set(response.results) == {"2:255", "103:1-3", "112:1-4"}
+        assert response.errors == {}
+        assert response.results["2:255"].language == "en"
+        assert [ayah.ayah for ayah in response.results["103:1-3"].ayat] == ["103:1", "103:2", "103:3"]
+
+    def test_invalid_reference_is_returned_as_an_inline_error(self):
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(references=["103:2", "2:300"], tafsirs=["ibn-kathir"]),
+                make_source(),
+            )
+        )
+        assert "103:2" in response.results
+        assert "2:300" in response.errors
+        assert "Al-Baqarah" in response.errors["2:300"]
+
+    def test_retrieval_failure_is_returned_as_an_inline_error(self):
+        class FailingSource(FakeTafsirSource):
+            async def fetch_verse(self, verse_key, language):
+                if verse_key == "103:2":
+                    raise RuntimeError("upstream unavailable")
+                return await super().fetch_verse(verse_key, language)
+
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(references=["103:2", "103:3"], tafsirs=["ibn-kathir"]),
+                FailingSource(),
+            )
+        )
+        assert "103:2" not in response.results
+        assert response.errors["103:2"] == "Failed to retrieve tafsir for this reference."
+        assert "103:3" in response.results
+
+    def test_references_are_retrieved_concurrently(self):
+        class SlowSource(FakeTafsirSource):
+            async def fetch_tafsir(self, slug, verse_key):
+                await asyncio.sleep(0.05)
+                return await super().fetch_tafsir(slug, verse_key)
+
+            async def fetch_verse(self, verse_key, language):
+                await asyncio.sleep(0.05)
+                return await super().fetch_verse(verse_key, language)
+
+        source = SlowSource(
+            tafsirs={("en-tafisr-ibn-kathir", f"103:{number}"): IBN_KATHIR_103 for number in range(1, 4)},
+            verses={
+                f"103:{number}": VerseText(translation="By time,", translation_language="en") for number in range(1, 4)
+            },
+        )
+        started = time.monotonic()
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(references=["103:1", "103:2", "103:3"], tafsirs=["ibn-kathir"]),
+                source,
+            )
+        )
+        assert time.monotonic() - started < 0.25
+        assert len(response.results) == 3
+
+    def test_total_ayah_limit_is_checked_before_fetching(self):
+        source = make_source()
+        references = [f"{number}:1-2" for number in range(1, MAX_REFERENCES_PER_BATCH)] + ["103:1-3"]
+        with pytest.raises(InvalidBatchRequest, match=str(MAX_TOTAL_AYAT_PER_BATCH)):
+            run(build_tafsir_batch_response(TafsirBatchRequest(references=references), source))
+        assert source.tafsir_calls == []
+        assert source.verse_calls == []
+
+
 # ---------------------------------------------------------------------------
 # Comparative analysis
 # ---------------------------------------------------------------------------
@@ -728,6 +825,57 @@ class TestEndpoint:
         assert set(DEFAULT_TAFSIR_KEYS) <= keys
         for source in sources:
             assert source.name and source.author and source.languages
+
+    def test_batch_endpoint_returns_partial_results(self):
+        from tafsir import QuranComTafsirSource, get_tafsir_batch, set_source
+
+        set_source(make_source())
+        try:
+            response = run(get_tafsir_batch(TafsirBatchRequest(references=["103:2", "2:300"], tafsirs=["ibn-kathir"])))
+        finally:
+            set_source(QuranComTafsirSource())
+        assert "103:2" in response.results
+        assert "2:300" in response.errors
+
+    def test_batch_endpoint_rejects_total_ayah_limit(self):
+        from fastapi import HTTPException
+
+        from tafsir import QuranComTafsirSource, get_tafsir_batch, set_source
+
+        set_source(make_source())
+        try:
+            with pytest.raises(HTTPException) as exc:
+                run(get_tafsir_batch(TafsirBatchRequest(references=["2:1-10", "3:1-10", "4:1"])))
+        finally:
+            set_source(QuranComTafsirSource())
+        assert exc.value.status_code == 400
+        assert str(MAX_TOTAL_AYAT_PER_BATCH) in str(exc.value.detail)
+
+    @pytest.mark.parametrize(
+        "references",
+        [
+            [],
+            [f"2:{number}" for number in range(1, MAX_REFERENCES_PER_BATCH + 2)],
+        ],
+    )
+    def test_batch_endpoint_validates_reference_count(self, references):
+        app = FastAPI()
+        app.include_router(router)
+
+        async def post_batch():
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                return await client.post("/tafsir/batch", json={"references": references})
+
+        response = run(post_batch())
+        assert response.status_code == 422
+
+    def test_batch_endpoint_is_documented_in_openapi(self):
+        app = FastAPI()
+        app.include_router(router)
+        operation = app.openapi()["paths"]["/tafsir/batch"]["post"]
+        assert operation["summary"] == "Get Tafsir Batch"
+        request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+        assert request_schema["$ref"].endswith("/TafsirBatchRequest")
 
 
 # ---------------------------------------------------------------------------
