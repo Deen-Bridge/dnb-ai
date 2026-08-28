@@ -600,3 +600,62 @@ async def pool_efficiency_endpoint(request: PoolRequest) -> PoolResponse:
     """Score connection-pool efficiency against the 85% target from the issue."""
     score = pool_efficiency(request.active, request.idle, request.waiting)
     return PoolResponse(efficiency=score, healthy=score >= 0.85)
+# ---------------------------------------------------------------------------
+# Ayah relationship mapping
+# ---------------------------------------------------------------------------
+
+_QURANIC_STOPWORDS = frozenset({"the", "and", "of", "to", "in", "that", "it", "is", "for", "on", "with", "as", "by", "are", "be", "this", "those", "who", "whom", "which", "from", "at", "an", "or", "we", "you", "they", "he", "she", "them", "his", "her", "their", "our", "your", "will", "shall", "may", "all", "not", "but", "have", "has", "had", "do", "does", "did", "then", "when", "what", "why", "how", "so", "if", "there", "where", "than", "too", "very", "can", "would", "should", "could", "must", "unto", "thy", "thou", "ye", "hath", "doth", "art", "shalt", "wilt", "verily", "indeed", "surely", "lord", "allah", "god", "people", "say", "said", "says", "o", "yea", "nay", "also", "still", "even", "yet", "thus", "among", "before", "after", "until", "against", "upon", "into", "over", "under", "through", "during", "within", "without", "about", "between", "because", "such", "same", "own", "every", "each", "both", "some", "any", "no", "one", "two", "many", "much", "more", "most", "other", "another", "these", "those", "therein", "thereafter", "deem"})
+
+def _tokens(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-zA-Z0-9']+", text.lower()) if w not in _QURANIC_STOPWORDS and len(w) > 1}
+
+class AyahText(BaseModel):
+    """One Quranic ayah with thematic labels used for similarity detection."""
+    surah: int = Field(..., ge=1, le=114)
+    ayah: int = Field(..., ge=1)
+    text: str = Field(..., min_length=1)
+    topics: list[str] = Field(default_factory=list)
+    scholarly_note: str | None = None
+
+class AyahRelationshipEdge(BaseModel):
+    source: str
+    target: str
+    relationship_type: str
+    strength: float = Field(..., ge=0.0, le=1.0)
+    scholarly_note: str | None = None
+
+class AyahCorpus(BaseModel):
+    ayahs: list[AyahText] = Field(..., min_length=1)
+
+class BuildGraphResult(BaseModel):
+    ayahs: int
+    relationships: int
+
+class IndirectPath(BaseModel):
+    path: list[str]
+    average_strength: float
+
+class RelatedAyahResult(BaseModel):
+    source: str
+    direct: list[AyahRelationshipEdge]
+    indirect: list[IndirectPath] = Field(default_factory=list)
+
+class RelationshipGraphNode(BaseModel):
+    id: str
+    surah: int
+    ayah: int
+    topics: list[str]
+
+class RelationshipGraph(BaseModel):
+    nodes: list[RelationshipGraphNode]
+    edges: list[AyahRelationshipEdge]
+
+def _classify_relationship(a: AyahText, b: AyahText, jaccard: float, topic_overlap: float) -> str:
+    a_tokens = _tokens(a.text)
+    b_tokens = _tokens(b.text)
+    if not a_tokens or not b_tokens:
+        return "parallel_teaching"
+    contrast = {"but", "however", "yet", "while", "whereas", "except", "without"}
+    example = {"example", "like", "likeness", "parable", "similitude"}
+    if topic_overlap >= 0.65 and jaccard >= 0.25:
+        return "parallel_teaching
