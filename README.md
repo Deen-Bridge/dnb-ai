@@ -43,6 +43,7 @@ The platform is composed of three services:
 - 🗺️ **Personalized learning paths** — an ordered, justified "what to study next" drawn strictly from a caller-supplied course catalog, with grounding enforced in code so the model can never recommend a non-catalog or already-completed course
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
 - 📚 **Structured citations** — Quran and Hadith references returned as validated, typed objects on every answer, bounds-checked against the 114-surah index
+- 🎙️ **Voice-note transcription & Islamic audio analysis** — offline language/dialect ID, recitation detection, question extraction, terminology recognition, speaker estimate, timeline and noise assessment over transcribed audio
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
@@ -634,6 +635,33 @@ link per hash. Without history the assistant says it cannot see purchases;
 memos are treated as untrusted data so injection text cannot change behavior.
 Purchase answers are never written to the semantic cache and include a
 `purchases` block on the response.
+
+### Voice-note transcription & audio analysis
+
+Voice notes and short audio clips can be transcribed and analyzed with a
+deterministic offline pipeline, with optional Gemini or Whisper backends for
+actual speech-to-text:
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `POST` | `/audio/transcribe` | Transcribe an uploaded clip (`MP3`, `WAV`, `M4A`, `OGG`, ≤ 25 MiB) into timestamped segments |
+| `POST` | `/audio/analyze` | Transcribe *and* run the full offline Islamic-audio analysis |
+| `POST` | `/audio/generate` | Draft a grounded answer from a transcript |
+| `GET` | `/audio/terminology` | List the recognised Islamic terminology glossary (~60 entries) |
+| `GET` | `/audio/formats` | List supported formats and MIME types |
+
+The `analyze` pipeline adds, entirely offline: language/dialect identification
+(Arabic dialect families: Egyptian, Levantine, Gulf, Maghrebi), Quranic
+recitation detection, question extraction with timestamps, Islamic-terminology
+recognition, a conservative speaker estimate, a timeline of key moments, and an
+emotional/spiritual tone read via the same engine as `/sentiment`.
+
+Backends are selected from the environment: `GEMINI_API_KEY` enables the default
+Gemini transcriber and responder, `WHISPER_API_KEY` / `WHISPER_API_BASE` route to
+any OpenAI-compatible Whisper endpoint, and with neither key set the endpoints
+behave read-only (formats + terminology) or answer with the built-in template
+responder. WAV uploads also get a noise/SNR assessment that recommends a
+denoising profile.
 
 ### Answer feedback & the quality loop
 
