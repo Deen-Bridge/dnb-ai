@@ -125,6 +125,9 @@ jobs:
       - name: Run Swahili language processing tests
         run: pytest -q tests/test_swahili.py
 
+      - name: Run research agent orchestration tests
+        run: pytest -q tests/test_orchestration.py
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 
