@@ -107,6 +107,7 @@ def find_by_word(word: str) -> dict[str, Any] | None:
 # Frequency analysis
 # ---------------------------------------------------------------------------
 
+
 def _count_word_in_corpus(word: str) -> int:
     """Count occurrences of a word across all ayat."""
     w = strip_tashkeel(word)
@@ -153,11 +154,13 @@ def get_example_verses(word: str, limit: int = 5) -> list[dict[str, Any]]:
         text = ayah_data.get("text", "")
         if w in strip_tashkeel(text):
             parts = key.split(":")
-            results.append({
-                "surah": int(parts[0]),
-                "ayah": int(parts[1]),
-                "text": text,
-            })
+            results.append(
+                {
+                    "surah": int(parts[0]),
+                    "ayah": int(parts[1]),
+                    "text": text,
+                }
+            )
             if len(results) >= limit:
                 break
     return results
@@ -273,6 +276,7 @@ async def get_word_detail(word: str) -> VocabularyEntry:
     entry = find_by_word(word)
     if not entry:
         from errors import APIException
+
         raise APIException(
             status_code=404,
             detail=f"Word '{word}' not found in vocabulary database.",
