@@ -73,7 +73,12 @@ from fiqh import (
     classify_fiqh,
     normalize_madhhab,
 )
-from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from hadith import (
+    HADITH_ADAB_CONTEXT,
+    HadithReference,
+    annotate as annotate_hadith,
+    build_caution_note,
+)
 from hadith_context import router as hadith_context_router
 from history import router as history_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
@@ -84,6 +89,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from misinformation_api import router as misinformation_router
 from model_router import router as model_routing_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
@@ -118,7 +124,6 @@ from stellar import (
 )
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
-from misinformation_api import router as misinformation_router
 from swahili import (
     analyze_swahili,
     router as swahili_router,
@@ -231,7 +236,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         if hint:
             content["hint"] = hint
 
-    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(content), headers=headers)
+    return JSONResponse(
+        status_code=exc.status_code, content=jsonable_encoder(content), headers=headers
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -536,7 +543,11 @@ answer_snapshots: "OrderedDict[tuple, dict[str, str]]" = OrderedDict()
 # Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
 # control; otherwise any client can rotate the header to mint a fresh rate-limit
 # bucket on every request and defeat the only control on the write endpoint.
-TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 def _record_answer(chat_id: str, prompt: str, answer: str) -> str:

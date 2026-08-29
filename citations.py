@@ -109,12 +109,22 @@ class HadithCitation(BaseModel):
 
 
 class ScholarlyReference(BaseModel):
-    """A named work that is neither Quran nor hadith."""
+    """A named work that is neither Quran nor hadith.
+
+    ``volume``, ``pages``, ``edition``, and ``publisher`` are optional
+    bibliographic fields that the advanced verification layer
+    (``citation_verification.py``) checks for format consistency and
+    cross-references against known editions.
+    """
 
     type: Literal["scholarly"] = "scholarly"
     work: str
     author: str | None = None
     detail: str | None = None
+    volume: str | None = None
+    pages: str | None = None
+    edition: str | None = None
+    publisher: str | None = None
 
 
 Citation = Annotated[
@@ -133,6 +143,7 @@ class CitationExtraction(BaseModel):
     citations: list[Citation] = []
     attempted: int = 0
     rejected: list[str] = []
+    verification: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def score(self) -> float | None:
@@ -246,6 +257,10 @@ def _build_scholarly(raw: dict[str, Any]) -> tuple[ScholarlyReference | None, st
         work=work,
         author=_clean_str(raw.get("author")),
         detail=_clean_str(raw.get("detail")) or _clean_str(raw.get("note")),
+        volume=_clean_str(raw.get("volume")),
+        pages=_clean_str(raw.get("pages")) or _clean_str(raw.get("page")),
+        edition=_clean_str(raw.get("edition")),
+        publisher=_clean_str(raw.get("publisher")),
     )
     return citation, None
 
@@ -317,6 +332,16 @@ def parse_citations(payload: str | None) -> CitationExtraction:
             continue
         seen.add(fingerprint)
         extraction.citations.append(citation)
+
+    # Run advanced verification (format, completeness, cross-reference, drift).
+    # Imported lazily to avoid a circular import: citation_verification imports
+    # the Citation models from this module at module load time.
+    try:
+        from citation_verification import verify_citations
+
+        extraction.verification = verify_citations(extraction).model_dump()
+    except Exception as exc:  # noqa: BLE001 - verification is best-effort
+        logger.warning("Citation verification failed; skipping: %s", exc)
 
     return extraction
 
