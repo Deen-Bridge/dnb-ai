@@ -242,22 +242,13 @@ def _check_scholarly(citation: ScholarlyReference, index: int) -> CitationFindin
         for record in editions:
             if volume is not None and record.volume and str(volume) != record.volume:
                 finding.drift_detected = True
-                finding.issues.append(
-                    f"volume {volume!r} does not match known edition volume "
-                    f"{record.volume!r}"
-                )
+                finding.issues.append(f"volume {volume!r} does not match known edition volume {record.volume!r}")
             if pages is not None and record.pages and str(pages) != record.pages:
                 finding.drift_detected = True
-                finding.issues.append(
-                    f"page range {pages!r} does not match known edition pages "
-                    f"{record.pages!r}"
-                )
+                finding.issues.append(f"page range {pages!r} does not match known edition pages {record.pages!r}")
             if edition is not None and record.edition and str(edition) != record.edition:
                 finding.drift_detected = True
-                finding.issues.append(
-                    f"edition {edition!r} does not match known edition "
-                    f"{record.edition!r}"
-                )
+                finding.issues.append(f"edition {edition!r} does not match known edition {record.edition!r}")
     else:
         # Unknown work: we cannot cross-reference, but that is not a failure.
         finding.cross_referenced = False

@@ -228,9 +228,7 @@ def generate() -> list[dict]:
             question = template.format(topic=topic)
             gt = [_quran_citation(surah, ayah, ayah_end)]
             answer = _build_answer(question, gt)
-            records.append(
-                _build_record(idx, "quran", question, gt, answer, "aqeedah")
-            )
+            records.append(_build_record(idx, "quran", question, gt, answer, "aqeedah"))
             idx += 1
 
     # --- Hadith-only records (60) ---
@@ -239,9 +237,7 @@ def generate() -> list[dict]:
             question = template.format(topic=topic)
             gt = [_hadith_citation(coll, number)]
             answer = _build_answer(question, gt)
-            records.append(
-                _build_record(idx, "hadith", question, gt, answer, "hadith_sciences")
-            )
+            records.append(_build_record(idx, "hadith", question, gt, answer, "hadith_sciences"))
             idx += 1
 
     # --- Scholarly records (60) ---
@@ -250,9 +246,7 @@ def generate() -> list[dict]:
             question = template.format(topic=_TOPICS[i % len(_TOPICS)])
             gt = [_scholarly_citation(work, author)]
             answer = _build_answer(question, gt)
-            records.append(
-                _build_record(idx, "scholarly", question, gt, answer, domain)
-            )
+            records.append(_build_record(idx, "scholarly", question, gt, answer, domain))
             idx += 1
 
     # --- Mixed records (60) ---
@@ -286,9 +280,7 @@ def generate() -> list[dict]:
                 _hadith_citation(h_coll, h_num),
             ]
             answer = _build_answer(question, gt)
-            records.append(
-                _build_record(idx, "mixed", question, gt, answer, domain)
-            )
+            records.append(_build_record(idx, "mixed", question, gt, answer, domain))
             idx += 1
 
     # --- Multi-source records (60) ---
@@ -367,9 +359,7 @@ def generate() -> list[dict]:
             for s in s_refs:
                 gt.append(_scholarly_citation(s[0], s[1]))
             answer = _build_answer(question, gt)
-            records.append(
-                _build_record(idx, "multi_source", question, gt, answer, domain, requires_multiple=True)
-            )
+            records.append(_build_record(idx, "multi_source", question, gt, answer, domain, requires_multiple=True))
             idx += 1
 
     return records

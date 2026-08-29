@@ -38,33 +38,25 @@ class TestMisconceptionDatabase:
 
 class TestMisinformationDetection:
     def test_clean_text_no_flags(self):
-        result = detect_misinformation(
-            "The five pillars of Islam are Shahada, Salat, Zakat, Sawm, and Hajj."
-        )
+        result = detect_misinformation("The five pillars of Islam are Shahada, Salat, Zakat, Sawm, and Hajj.")
         assert result.has_misinformation is False
         assert result.should_block is False
         assert result.flags == []
 
     def test_detect_shahada_addition(self):
-        result = detect_misinformation(
-            "The Shahada is 'La ilaha illallah Muhammadun Rasulullah Aliyun'."
-        )
+        result = detect_misinformation("The Shahada is 'La ilaha illallah Muhammadun Rasulullah Aliyun'.")
         assert result.has_misinformation is True
         assert result.should_block is True  # CRITICAL
         assert any(f.misconception_id == "shahada-addition" for f in result.flags)
 
     def test_detect_force_conversion_claim(self):
-        result = detect_misinformation(
-            "Islam allows forced conversion of non-Muslims."
-        )
+        result = detect_misinformation("Islam allows forced conversion of non-Muslims.")
         assert result.has_misinformation is True
         assert result.should_block is True
         assert any(f.misconception_id == "force-conversion" for f in result.flags)
 
     def test_detect_jihad_misconception(self):
-        result = detect_misinformation(
-            "Jihad is obligatory on all Muslims always, and it only means fighting."
-        )
+        result = detect_misinformation("Jihad is obligatory on all Muslims always, and it only means fighting.")
         assert result.has_misinformation is True
         assert result.should_block is True
         assert any(f.misconception_id == "jihad-obligation" for f in result.flags)
@@ -91,8 +83,7 @@ class TestMisinformationDetection:
 
     def test_multiple_flags(self):
         result = detect_misinformation(
-            "Women are not allowed to drive in Islam. "
-            "All music is haram absolutely in Islam."
+            "Women are not allowed to drive in Islam. All music is haram absolutely in Islam."
         )
         assert result.has_misinformation is True
         assert len(result.flags) >= 2
@@ -100,15 +91,10 @@ class TestMisinformationDetection:
     def test_correction_summary_provided(self):
         result = detect_misinformation("Women are not allowed to drive in Islam.")
         assert result.correction_summary is not None
-        assert (
-            "driving" in result.correction_summary.lower()
-            or "source" in result.correction_summary.lower()
-        )
+        assert "driving" in result.correction_summary.lower() or "source" in result.correction_summary.lower()
 
     def test_overall_severity_is_highest(self):
-        result = detect_misinformation(
-            "The Shahada includes Ali. Women are not allowed to drive."
-        )
+        result = detect_misinformation("The Shahada includes Ali. Women are not allowed to drive.")
         assert result.overall_severity == MisconceptionSeverity.CRITICAL
 
 
@@ -122,7 +108,7 @@ class TestQuotationValidation:
         assert match.is_authentic is True
 
     def test_suspicious_violent_attribution(self):
-        match = validate_quotation("God says: \"kill all those who disbelieve\"")
+        match = validate_quotation('God says: "kill all those who disbelieve"')
         assert match.is_authentic is False
         assert match.notes is not None
 

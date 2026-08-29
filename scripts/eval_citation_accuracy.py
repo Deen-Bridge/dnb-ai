@@ -329,9 +329,7 @@ def evaluate(records: list[dict], verbose: bool = False) -> int:
     total_tp = sum(round(r["precision"] * r["model_citations"], 4) for r in results)
     total_hallucinated = sum(round(r["hallucination_rate"] * r["model_citations"], 4) for r in results)
     total_format_ok = sum(round(r["format_correctness"] * r["model_citations"], 4) for r in results)
-    total_authority_ok = sum(
-        round(r["authority_appropriateness"] * r["model_citations"], 4) for r in results
-    )
+    total_authority_ok = sum(round(r["authority_appropriateness"] * r["model_citations"], 4) for r in results)
     total_critical = sum(r["critical_errors"] for r in results)
 
     precision = total_tp / total_model if total_model else 0.0
@@ -374,9 +372,7 @@ def evaluate(records: list[dict], verbose: bool = False) -> int:
     if precision < MIN_PRECISION:
         failures.append(f"precision {precision:.4f} below {MIN_PRECISION:.2f}")
     if hallucination_rate > MAX_HALLUCINATION_RATE:
-        failures.append(
-            f"hallucination rate {hallucination_rate:.4f} above {MAX_HALLUCINATION_RATE:.2f}"
-        )
+        failures.append(f"hallucination rate {hallucination_rate:.4f} above {MAX_HALLUCINATION_RATE:.2f}")
     if format_correctness < MIN_FORMAT_CORRECTNESS:
         failures.append(f"format correctness {format_correctness:.4f} below {MIN_FORMAT_CORRECTNESS:.2f}")
     if authority_appropriateness < MIN_AUTHORITY_APPROPRIATENESS:

@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
+import google.generativeai as genai
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
@@ -31,13 +32,13 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
-import google.generativeai as genai
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
@@ -236,9 +237,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         if hint:
             content["hint"] = hint
 
-    return JSONResponse(
-        status_code=exc.status_code, content=jsonable_encoder(content), headers=headers
-    )
+    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(content), headers=headers)
 
 
 @app.exception_handler(RequestValidationError)
@@ -296,6 +295,9 @@ app.include_router(arabic_ocr_router)
 app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
+# Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
+# normalization and dialectal terminology lexicon (#136)
+app.include_router(arabic_dialect_router)
 # Religious misinformation flagging: detection, correction, and blocking of misinformation
 app.include_router(misinformation_router)
 
@@ -319,6 +321,7 @@ async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
         "matches": matches,
         "message": message,
     }
+
 
 # Configure CORS
 app.add_middleware(
