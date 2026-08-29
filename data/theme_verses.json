@@ -1,0 +1,2110 @@
+{
+  "mappings": [
+    {
+      "surah": 2,
+      "ayah": 255,
+      "theme_id": "tawhid",
+      "relevance_score": 1.0,
+      "annotation": "Ayat al-Kursi — Allah's oneness, life, and sovereignty",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 112,
+      "ayah": 1,
+      "theme_id": "tawhid",
+      "relevance_score": 1.0,
+      "annotation": "Qul Huwa Allahu Ahad — the essence of tawhid",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 112,
+      "ayah": 2,
+      "theme_id": "tawhid",
+      "relevance_score": 1.0,
+      "annotation": "Allah us-Samad — the Self-Sufficient",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 112,
+      "ayah": 3,
+      "theme_id": "tawhid",
+      "relevance_score": 1.0,
+      "annotation": "Neither begets nor is begotten",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 112,
+      "ayah": 4,
+      "theme_id": "tawhid",
+      "relevance_score": 1.0,
+      "annotation": "None is comparable to Him",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 18,
+      "theme_id": "tawhid",
+      "relevance_score": 0.95,
+      "annotation": "Allah bears witness that there is no deity but Him",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 20,
+      "ayah": 14,
+      "theme_id": "tawhid",
+      "relevance_score": 0.95,
+      "annotation": "Indeed, I am Allah; there is no deity except Me",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 47,
+      "ayah": 19,
+      "theme_id": "tawhid",
+      "relevance_score": 0.9,
+      "annotation": "Know that there is no deity except Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 37,
+      "ayah": 35,
+      "theme_id": "tawhid",
+      "relevance_score": 0.85,
+      "annotation": "There is no deity but Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 59,
+      "ayah": 22,
+      "theme_id": "tawhid",
+      "relevance_score": 0.9,
+      "annotation": "He is Allah, other than whom there is no deity",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 59,
+      "ayah": 23,
+      "theme_id": "tawhid",
+      "relevance_score": 0.85,
+      "annotation": "Allah's names and attributes",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 6,
+      "ayah": 102,
+      "theme_id": "tawhid",
+      "relevance_score": 0.85,
+      "annotation": "That is Allah, your Lord; there is no deity except Him",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 163,
+      "theme_id": "tawhid",
+      "relevance_score": 0.9,
+      "annotation": "Your god is one God",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 51,
+      "theme_id": "tawhid",
+      "relevance_score": 0.85,
+      "annotation": "Do not take two deities; indeed, He is but one God",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 21,
+      "ayah": 25,
+      "theme_id": "tawhid",
+      "relevance_score": 0.85,
+      "annotation": "There is no deity except Me, so worship Me",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 23,
+      "ayah": 91,
+      "theme_id": "tawhid",
+      "relevance_score": 0.8,
+      "annotation": "Allah has not taken any son, nor has there been any deity with Him",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 17,
+      "ayah": 111,
+      "theme_id": "tawhid",
+      "relevance_score": 0.8,
+      "annotation": "Praise to Allah who has not taken a son",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 1,
+      "ayah": 2,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 1.0,
+      "annotation": "All praise is due to Allah, Lord of the worlds",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 13,
+      "ayah": 16,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 0.9,
+      "annotation": "Say: Allah is the Creator of all things, the One",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 39,
+      "ayah": 62,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 0.9,
+      "annotation": "Allah is the Creator of all things",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 6,
+      "ayah": 102,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 0.9,
+      "annotation": "No deity except Him, Creator of all things",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 35,
+      "ayah": 3,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 0.85,
+      "annotation": "Is there any creator other than Allah?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 10,
+      "ayah": 31,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 0.85,
+      "annotation": "Who provides for you from the heaven and the earth?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 21,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 0.85,
+      "annotation": "O mankind, worship your Lord, who created you",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 23,
+      "ayah": 85,
+      "theme_id": "tawhid-rububiyyah",
+      "relevance_score": 0.8,
+      "annotation": "To whom belongs the earth and whoever is on it?",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 20,
+      "ayah": 14,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 0.95,
+      "annotation": "Worship Me and establish prayer for My remembrance",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 51,
+      "ayah": 56,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 1.0,
+      "annotation": "I did not create jinn and mankind except to worship Me",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 21,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 0.9,
+      "annotation": "O mankind, worship your Lord",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 98,
+      "ayah": 5,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 0.95,
+      "annotation": "They were not commanded except to worship Allah alone",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 6,
+      "ayah": 162,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 0.9,
+      "annotation": "My prayer, my rites, my life, and my death are for Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 41,
+      "ayah": 37,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 0.85,
+      "annotation": "Do not prostrate to the sun or to the moon; prostrate to Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 36,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 0.85,
+      "annotation": "Worship Allah and avoid Taghut",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 21,
+      "ayah": 25,
+      "theme_id": "tawhid-uluhiyyah",
+      "relevance_score": 0.9,
+      "annotation": "There is no deity except Me, so worship Me",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 59,
+      "ayah": 22,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.95,
+      "annotation": "He is Allah — the Knower of the unseen and the witnessed",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 59,
+      "ayah": 23,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.95,
+      "annotation": "The Sovereign, the Pure, the Perfector, the Almighty",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 59,
+      "ayah": 24,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.95,
+      "annotation": "He is Allah, the Creator, the Evolver; to Him belong the best names",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 20,
+      "ayah": 8,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.9,
+      "annotation": "Allah — there is no deity except Him; to Him belong the best names",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 7,
+      "ayah": 180,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.9,
+      "annotation": "To Allah belong the best names; invoke Him by them",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 255,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.9,
+      "annotation": "The Ever-Living, the Sustainer of all existence",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 17,
+      "ayah": 110,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.8,
+      "annotation": "Call upon Allah or call upon the Most Merciful",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 57,
+      "ayah": 3,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.85,
+      "annotation": "He is the First and the Last, the Most High and the Most Near",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 112,
+      "ayah": 2,
+      "theme_id": "tawhid-asma-sifat",
+      "relevance_score": 0.85,
+      "annotation": "Allah us-Samad",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 33,
+      "ayah": 40,
+      "theme_id": "prophethood",
+      "relevance_score": 1.0,
+      "annotation": "Muhammad is not the father of any of your men, but the Messenger of Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 144,
+      "theme_id": "prophethood",
+      "relevance_score": 0.9,
+      "annotation": "Muhammad is not but a messenger",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 48,
+      "ayah": 29,
+      "theme_id": "prophethood",
+      "relevance_score": 0.9,
+      "annotation": "Muhammad is the Messenger of Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 21,
+      "ayah": 107,
+      "theme_id": "prophethood",
+      "relevance_score": 0.95,
+      "annotation": "We have not sent you except as a mercy to the worlds",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 33,
+      "ayah": 21,
+      "theme_id": "prophethood",
+      "relevance_score": 0.9,
+      "annotation": "In the Messenger of Allah you have an excellent example",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 164,
+      "theme_id": "prophethood",
+      "relevance_score": 0.9,
+      "annotation": "Allah conferred a great favor upon the believers by sending a Messenger",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 151,
+      "theme_id": "prophethood",
+      "relevance_score": 0.9,
+      "annotation": "Just as We have sent among you a Messenger from yourselves",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 36,
+      "theme_id": "prophethood",
+      "relevance_score": 0.85,
+      "annotation": "We have sent to every nation a messenger",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 10,
+      "ayah": 47,
+      "theme_id": "prophethood",
+      "relevance_score": 0.85,
+      "annotation": "For every nation is a messenger",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 35,
+      "ayah": 24,
+      "theme_id": "prophethood",
+      "relevance_score": 0.8,
+      "annotation": "There was no nation but that a warner had passed within it",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 62,
+      "ayah": 2,
+      "theme_id": "prophethood",
+      "relevance_score": 0.85,
+      "annotation": "He has sent among the unlettered a Messenger from themselves",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 7,
+      "ayah": 158,
+      "theme_id": "prophethood",
+      "relevance_score": 0.85,
+      "annotation": "O mankind, I am the Messenger of Allah to you all",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 281,
+      "theme_id": "afterlife",
+      "relevance_score": 0.95,
+      "annotation": "Fear a Day when you will be returned to Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 185,
+      "theme_id": "afterlife",
+      "relevance_score": 0.95,
+      "annotation": "Every soul will taste death, and you will only be given your compensation on the Day of Resurrection",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 21,
+      "ayah": 47,
+      "theme_id": "afterlife",
+      "relevance_score": 0.9,
+      "annotation": "We place the scales of justice for the Day of Resurrection",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 99,
+      "ayah": 1,
+      "theme_id": "afterlife",
+      "relevance_score": 0.9,
+      "annotation": "When the earth is shaken with its [final] earthquake",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 99,
+      "ayah": 6,
+      "theme_id": "afterlife",
+      "relevance_score": 0.9,
+      "annotation": "So whoever does an atom's weight of good will see it",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 101,
+      "ayah": 1,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "The Striking Calamity",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 81,
+      "ayah": 1,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "When the sun is wrapped up [in darkness]",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 82,
+      "ayah": 1,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "When the sky breaks apart",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 39,
+      "ayah": 68,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "The Horn will be blown, and whoever is in the heavens and earth will fall unconscious",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 67,
+      "ayah": 2,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "He who created death and life to test you — which of you is best in deed",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 18,
+      "ayah": 49,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "The record [of deeds] will be placed, and you will see the criminals fearful",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 50,
+      "ayah": 20,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "The Horn is blown; that is the Day of the Threat",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 36,
+      "ayah": 51,
+      "theme_id": "afterlife",
+      "relevance_score": 0.85,
+      "annotation": "The Horn will be blown, and suddenly they will rush from their graves",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 25,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.95,
+      "annotation": "Give good tidings to those who believe and do righteous deeds — gardens beneath which rivers flow",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 133,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.9,
+      "annotation": "Race to forgiveness from your Lord and a Garden as wide as the heavens and the earth",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 57,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.9,
+      "annotation": "We will admit them to gardens beneath which rivers flow, abiding therein forever",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 47,
+      "ayah": 15,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.9,
+      "annotation": "The example of Paradise promised to the righteous — rivers of water, milk, wine, and honey",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 76,
+      "ayah": 12,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.9,
+      "annotation": "Gardens and silk for the patient",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 88,
+      "ayah": 8,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.85,
+      "annotation": "Faces that Day will be pleasant, with their effort satisfied",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 55,
+      "ayah": 46,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.9,
+      "annotation": "For whoever fears the standing of his Lord are two gardens",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 13,
+      "ayah": 23,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.85,
+      "annotation": "Gardens of perpetual residence; they will enter them with the righteous among their fathers",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 56,
+      "ayah": 10,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.85,
+      "annotation": "The forerunners — those are the ones brought near [to Allah]",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 15,
+      "theme_id": "afterlife-paradise",
+      "relevance_score": 0.85,
+      "annotation": "For the righteous are gardens with their Lord beneath which rivers flow",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 24,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.9,
+      "annotation": "Fear the Fire whose fuel is people and stones",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 131,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.9,
+      "annotation": "Fear the Fire prepared for the disbelievers",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 56,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.9,
+      "annotation": "Indeed, those who disbelieve in Our verses, We will drive them into a Fire",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 9,
+      "ayah": 63,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.85,
+      "annotation": "The Fire of Hell; abide therein forever",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 22,
+      "ayah": 19,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.85,
+      "annotation": "Garments of fire will be cut out for them, and scalding water poured over their heads",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 74,
+      "ayah": 26,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.9,
+      "annotation": "I will drive him into Saqar",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 78,
+      "ayah": 21,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.85,
+      "annotation": "Indeed, Hell has been lying in wait",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 66,
+      "ayah": 6,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.85,
+      "annotation": "Protect yourselves and your families from a Fire whose fuel is people and stones",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 25,
+      "ayah": 11,
+      "theme_id": "afterlife-hellfire",
+      "relevance_score": 0.8,
+      "annotation": "We have prepared for those who deny the Hour a Blaze",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 1,
+      "ayah": 4,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 1.0,
+      "annotation": "Sovereign of the Day of Recompense",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 281,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 0.95,
+      "annotation": "Fear a Day when you will be returned to Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 36,
+      "ayah": 51,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 0.85,
+      "annotation": "The Horn will be blown, and they will rush from their graves",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 82,
+      "ayah": 15,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 0.9,
+      "annotation": "They will [enter to] burn therein on the Day of Recompense",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 99,
+      "ayah": 6,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 0.9,
+      "annotation": "The people will depart separated into categories to be shown their deeds",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 21,
+      "ayah": 47,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 0.9,
+      "annotation": "The scales of justice for the Day of Resurrection",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 40,
+      "ayah": 17,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 0.85,
+      "annotation": "Every soul will be recompensed that Day for what it earned",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 75,
+      "ayah": 6,
+      "theme_id": "afterlife-judgment",
+      "relevance_score": 0.8,
+      "annotation": "He asks: when is the Day of Resurrection?",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 51,
+      "ayah": 56,
+      "theme_id": "worship",
+      "relevance_score": 0.95,
+      "annotation": "I did not create jinn and mankind except to worship Me",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 20,
+      "ayah": 14,
+      "theme_id": "worship",
+      "relevance_score": 0.9,
+      "annotation": "Establish prayer for My remembrance",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 98,
+      "ayah": 5,
+      "theme_id": "worship",
+      "relevance_score": 0.9,
+      "annotation": "They were not commanded except to worship Allah, being sincere to Him",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 43,
+      "theme_id": "worship",
+      "relevance_score": 0.85,
+      "annotation": "Establish prayer and give zakah and bow with those who bow",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 6,
+      "ayah": 162,
+      "theme_id": "worship",
+      "relevance_score": 0.85,
+      "annotation": "My prayer, my rites, my life, and my death are for Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 83,
+      "theme_id": "worship",
+      "relevance_score": 0.8,
+      "annotation": "Worship none but Allah; be dutiful to parents",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 2,
+      "ayah": 21,
+      "theme_id": "worship",
+      "relevance_score": 0.85,
+      "annotation": "O mankind, worship your Lord",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 43,
+      "theme_id": "worship-salah",
+      "relevance_score": 1.0,
+      "annotation": "Establish prayer and give zakah and bow with those who bow",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 238,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.95,
+      "annotation": "Maintain the prayers and the middle prayer",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 103,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.95,
+      "annotation": "Indeed, prayer has been decreed upon the believers at specified times",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 17,
+      "ayah": 78,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.9,
+      "annotation": "Establish prayer at the decline of the sun until the darkness of the night",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 20,
+      "ayah": 14,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.9,
+      "annotation": "Establish prayer for My remembrance",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 29,
+      "ayah": 45,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.95,
+      "annotation": "Recite what has been revealed to you of the Book and establish prayer; prayer prohibits immorality and wrongdoing",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 87,
+      "ayah": 14,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.85,
+      "annotation": "He has succeeded who purifies himself and mentions the name of his Lord and prays",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 5,
+      "ayah": 6,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.85,
+      "annotation": "When you rise to prayer, wash your faces and hands",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 45,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.85,
+      "annotation": "Seek help through patience and prayer",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 50,
+      "ayah": 40,
+      "theme_id": "worship-salah",
+      "relevance_score": 0.8,
+      "annotation": "And [part] of the night, exalt Him and after the prostrations",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 2,
+      "ayah": 43,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.9,
+      "annotation": "Establish prayer and give zakah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 110,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.95,
+      "annotation": "Establish prayer and give zakah; whatever good you put forward for yourselves",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 177,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.9,
+      "annotation": "Righteousness is to believe in Allah... and give zakah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 277,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.9,
+      "annotation": "Those who believe and do righteous deeds and establish prayer and give zakah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 9,
+      "ayah": 60,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.95,
+      "annotation": "Zakah expenditures are only for the poor and the needy",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 9,
+      "ayah": 103,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.9,
+      "annotation": "Take from their wealth a charity by which you purify them",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 30,
+      "ayah": 39,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.85,
+      "annotation": "Whatever you give for interest to increase within the wealth of people will not increase with Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 58,
+      "ayah": 13,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.8,
+      "annotation": "Establish prayer and give zakah and obey Allah and His Messenger",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 73,
+      "ayah": 20,
+      "theme_id": "worship-zakah",
+      "relevance_score": 0.8,
+      "annotation": "Establish prayer and give zakah and loan Allah a goodly loan",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 2,
+      "ayah": 183,
+      "theme_id": "worship-sawm",
+      "relevance_score": 1.0,
+      "annotation": "O you who believe, fasting has been decreed upon you as it was decreed upon those before you",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 184,
+      "theme_id": "worship-sawm",
+      "relevance_score": 0.95,
+      "annotation": "A limited number of days; whoever is ill or on a journey, then an equal number of other days",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 185,
+      "theme_id": "worship-sawm",
+      "relevance_score": 0.95,
+      "annotation": "The month of Ramadan, in which the Quran was revealed; so whoever sights the month, let him fast it",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 187,
+      "theme_id": "worship-sawm",
+      "relevance_score": 0.9,
+      "annotation": "It has been made permissible for you the night preceding fasting",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 33,
+      "ayah": 35,
+      "theme_id": "worship-sawm",
+      "relevance_score": 0.85,
+      "annotation": "The men who fast and the women who fast — Allah has prepared forgiveness and a great reward",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 19,
+      "ayah": 26,
+      "theme_id": "worship-sawm",
+      "relevance_score": 0.7,
+      "annotation": "I have vowed a fast to the Most Merciful, so I will not speak today to any human",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 66,
+      "ayah": 5,
+      "theme_id": "worship-sawm",
+      "relevance_score": 0.6,
+      "annotation": "Contextual mention of fasting among righteous women",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 2,
+      "ayah": 158,
+      "theme_id": "worship-hajj",
+      "relevance_score": 0.9,
+      "annotation": "Indeed, as-Safa and al-Marwah are among the symbols of Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 196,
+      "theme_id": "worship-hajj",
+      "relevance_score": 0.95,
+      "annotation": "Complete the hajj and the umrah for Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 197,
+      "theme_id": "worship-hajj",
+      "relevance_score": 0.95,
+      "annotation": "Hajj is [during] well-known months",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 97,
+      "theme_id": "worship-hajj",
+      "relevance_score": 1.0,
+      "annotation": "Pilgrimage to the House is a duty upon mankind for Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 22,
+      "ayah": 27,
+      "theme_id": "worship-hajj",
+      "relevance_score": 0.9,
+      "annotation": "Proclaim to the people the hajj; they will come to you on foot and on every lean camel",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 22,
+      "ayah": 28,
+      "theme_id": "worship-hajj",
+      "relevance_score": 0.85,
+      "annotation": "That they may witness benefits for themselves and mention the name of Allah on known days",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 5,
+      "ayah": 2,
+      "theme_id": "worship-hajj",
+      "relevance_score": 0.85,
+      "annotation": "Do not violate the rites of Allah or the sacred month",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 189,
+      "theme_id": "worship-hajj",
+      "relevance_score": 0.8,
+      "annotation": "Enter houses from their doors and fear Allah",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 16,
+      "ayah": 90,
+      "theme_id": "ethics",
+      "relevance_score": 0.95,
+      "annotation": "Allah commands justice, good conduct, and giving to relatives",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 135,
+      "theme_id": "ethics",
+      "relevance_score": 0.9,
+      "annotation": "Be persistently standing firm in justice, witnesses for Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 49,
+      "ayah": 13,
+      "theme_id": "ethics",
+      "relevance_score": 0.9,
+      "annotation": "O mankind, We created you from male and female and made you peoples and tribes that you may know one another",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 49,
+      "ayah": 11,
+      "theme_id": "ethics",
+      "relevance_score": 0.85,
+      "annotation": "Do not let a people ridicule another people",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 49,
+      "ayah": 12,
+      "theme_id": "ethics",
+      "relevance_score": 0.85,
+      "annotation": "Avoid much assumption; do not spy or backbite",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 17,
+      "ayah": 23,
+      "theme_id": "ethics",
+      "relevance_score": 0.9,
+      "annotation": "Your Lord has decreed that you worship none but Him and be dutiful to parents",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 83,
+      "theme_id": "ethics",
+      "relevance_score": 0.85,
+      "annotation": "Speak to people good words",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 103,
+      "ayah": 1,
+      "theme_id": "ethics",
+      "relevance_score": 0.9,
+      "annotation": "By time — mankind is in loss, except those who believe and do righteous deeds",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 33,
+      "ayah": 70,
+      "theme_id": "ethics",
+      "relevance_score": 0.85,
+      "annotation": "Speak words of appropriate justice",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 58,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.95,
+      "annotation": "Allah commands you to render trusts to their owners and judge with justice",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 135,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.95,
+      "annotation": "Be persistently standing firm in justice, even against yourselves or parents",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 5,
+      "ayah": 8,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.95,
+      "annotation": "Let not hatred of a people prevent you from being just; be just; it is nearer to righteousness",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 90,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.9,
+      "annotation": "Allah commands justice and good conduct",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 49,
+      "ayah": 9,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.85,
+      "annotation": "If two factions among the believers fight, make peace between them with justice",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 55,
+      "ayah": 9,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.85,
+      "annotation": "Establish weight in justice and do not make deficient the balance",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 57,
+      "ayah": 25,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.85,
+      "annotation": "We sent Our messengers with clear proofs and the Book and the balance that people may maintain justice",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 6,
+      "ayah": 152,
+      "theme_id": "ethics-justice",
+      "relevance_score": 0.85,
+      "annotation": "When you speak, be just, even if it should be to a near relative",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 45,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.95,
+      "annotation": "Seek help through patience and prayer",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 153,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.95,
+      "annotation": "O you who believe, seek help through patience and prayer; indeed, Allah is with the patient",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 155,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.9,
+      "annotation": "We will surely test you with something of fear, hunger, and loss of wealth; give good tidings to the patient",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 200,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.9,
+      "annotation": "O you who believe, persevere and endure and remain stationed and fear Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 126,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.85,
+      "annotation": "If you punish, punish with an equivalent; but if you are patient, it is better for the patient",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 39,
+      "ayah": 10,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.9,
+      "annotation": "The patient will be given their reward without account",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 90,
+      "ayah": 17,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.85,
+      "annotation": "Then he is among those who believed and advised one another to patience",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 103,
+      "ayah": 3,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.9,
+      "annotation": "Except those who believe, do righteous deeds, and advise one another to truth and patience",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 11,
+      "ayah": 11,
+      "theme_id": "ethics-patience",
+      "relevance_score": 0.85,
+      "annotation": "Except those who are patient and do righteous deeds; those will have forgiveness and great reward",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 152,
+      "theme_id": "ethics-gratitude",
+      "relevance_score": 0.95,
+      "annotation": "Remember Me; I will remember you. Be grateful to Me and do not deny Me",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 172,
+      "theme_id": "ethics-gratitude",
+      "relevance_score": 0.9,
+      "annotation": "Eat of the good things We have provided for you and be grateful to Allah",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 14,
+      "ayah": 7,
+      "theme_id": "ethics-gratitude",
+      "relevance_score": 0.95,
+      "annotation": "If you are grateful, I will surely increase you [in favor]",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 18,
+      "theme_id": "ethics-gratitude",
+      "relevance_score": 0.9,
+      "annotation": "If you should count the favors of Allah, you could not enumerate them",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 31,
+      "ayah": 12,
+      "theme_id": "ethics-gratitude",
+      "relevance_score": 0.9,
+      "annotation": "Whoever is grateful is grateful for the benefit of himself",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 55,
+      "ayah": 13,
+      "theme_id": "ethics-gratitude",
+      "relevance_score": 0.85,
+      "annotation": "So which of the favors of your Lord would you deny?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 29,
+      "ayah": 17,
+      "theme_id": "ethics-gratitude",
+      "relevance_score": 0.8,
+      "annotation": "Seek provision from Allah and worship Him and be grateful to Him",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 4,
+      "ayah": 1,
+      "theme_id": "social",
+      "relevance_score": 0.95,
+      "annotation": "O mankind, fear your Lord who created you from one soul",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 49,
+      "ayah": 13,
+      "theme_id": "social",
+      "relevance_score": 0.95,
+      "annotation": "We made you peoples and tribes that you may know one another; the most noble of you is the most righteous",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 33,
+      "ayah": 56,
+      "theme_id": "social",
+      "relevance_score": 0.85,
+      "annotation": "Indeed, Allah and His angels send blessings upon the Prophet; send blessings upon him and greet him with peace",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 32,
+      "theme_id": "social",
+      "relevance_score": 0.8,
+      "annotation": "Do not wish for what Allah has given some of you over others",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 5,
+      "ayah": 2,
+      "theme_id": "social",
+      "relevance_score": 0.85,
+      "annotation": "Cooperate in righteousness and piety, and do not cooperate in sin and aggression",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 90,
+      "theme_id": "social",
+      "relevance_score": 0.85,
+      "annotation": "Allah commands justice, good conduct, and giving to relatives",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 83,
+      "theme_id": "social",
+      "relevance_score": 0.85,
+      "annotation": "Be dutiful to parents, relatives, orphans, and the needy, and speak to people good words",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 24,
+      "ayah": 27,
+      "theme_id": "social",
+      "relevance_score": 0.8,
+      "annotation": "Do not enter houses other than your own until you ask permission",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 49,
+      "ayah": 10,
+      "theme_id": "social",
+      "relevance_score": 0.85,
+      "annotation": "The believers are but brothers, so make peace between your brothers",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 60,
+      "ayah": 8,
+      "theme_id": "social",
+      "relevance_score": 0.85,
+      "annotation": "Allah does not forbid you from being righteous and just toward those who have not fought you",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 17,
+      "ayah": 26,
+      "theme_id": "social",
+      "relevance_score": 0.85,
+      "annotation": "Give the relative his right, and the poor and the traveler",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 11,
+      "ayah": 25,
+      "theme_id": "history",
+      "relevance_score": 0.9,
+      "annotation": "We sent Noah to his people — the story of Nuh",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 7,
+      "ayah": 65,
+      "theme_id": "history",
+      "relevance_score": 0.9,
+      "annotation": "We sent to 'Ad their brother Hud — the story of Hud",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 7,
+      "ayah": 73,
+      "theme_id": "history",
+      "relevance_score": 0.9,
+      "annotation": "We sent to Thamud their brother Salih — the story of Salih",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 11,
+      "ayah": 84,
+      "theme_id": "history",
+      "relevance_score": 0.9,
+      "annotation": "We sent to Madyan their brother Shu'ayb — the story of Shu'ayb",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 7,
+      "ayah": 103,
+      "theme_id": "history",
+      "relevance_score": 0.9,
+      "annotation": "Then We sent Moses with Our signs to Pharaoh — the story of Musa",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 15,
+      "ayah": 80,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "The companions of al-Hijr denied the messengers — the story of Thamud's stone dwellings",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 25,
+      "ayah": 38,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "And 'Ad and Thamud and the companions of the well and many generations between them",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 29,
+      "ayah": 14,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "We sent Noah to his people, and he remained among them a thousand years minus fifty",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 18,
+      "ayah": 9,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "The Companions of the Cave — story of the youths of the cave",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 27,
+      "ayah": 15,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "We gave David and Solomon knowledge — the story of Dawud and Sulayman",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 12,
+      "ayah": 4,
+      "theme_id": "history",
+      "relevance_score": 0.9,
+      "annotation": "When Joseph said to his father: I saw eleven stars — the story of Yusuf",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 37,
+      "ayah": 99,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "And he said: Indeed, I will go to my Lord — the story of Ibrahim's sacrifice",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 124,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "When his Lord tested Abraham with words — the trials of Ibrahim",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 20,
+      "ayah": 9,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "Has the story of Moses reached you?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 79,
+      "ayah": 15,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "Has there reached you the story of Moses?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 85,
+      "ayah": 17,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "Has there reached you the story of the soldiers?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 89,
+      "ayah": 6,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "Did you not consider how your Lord dealt with 'Ad?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 105,
+      "ayah": 1,
+      "theme_id": "history",
+      "relevance_score": 0.85,
+      "annotation": "Have you not considered how your Lord dealt with the companions of the elephant?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 164,
+      "theme_id": "creation",
+      "relevance_score": 0.95,
+      "annotation": "Indeed, in the creation of the heavens and the earth and the alternation of night and day are signs",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 3,
+      "ayah": 190,
+      "theme_id": "creation",
+      "relevance_score": 0.95,
+      "annotation": "In the creation of the heavens and the earth and the alternation of night and day are signs for those of understanding",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 45,
+      "ayah": 3,
+      "theme_id": "creation",
+      "relevance_score": 0.9,
+      "annotation": "Indeed, within the heavens and the earth are signs for the believers",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 51,
+      "ayah": 20,
+      "theme_id": "creation",
+      "relevance_score": 0.9,
+      "annotation": "On the earth are signs for the certain, and in yourselves — do you not see?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 67,
+      "ayah": 3,
+      "theme_id": "creation",
+      "relevance_score": 0.9,
+      "annotation": "He who created the seven heavens in layers",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 88,
+      "ayah": 17,
+      "theme_id": "creation",
+      "relevance_score": 0.9,
+      "annotation": "Do they not look at the camels — how they were created?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 29,
+      "ayah": 20,
+      "theme_id": "creation",
+      "relevance_score": 0.9,
+      "annotation": "Travel through the land and observe how He began creation",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 35,
+      "ayah": 27,
+      "theme_id": "creation",
+      "relevance_score": 0.85,
+      "annotation": "Do you not see that Allah sends down rain from the sky, producing fruits of varying colors?",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 7,
+      "ayah": 54,
+      "theme_id": "creation",
+      "relevance_score": 0.85,
+      "annotation": "Your Lord is Allah, who created the heavens and the earth in six days",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 41,
+      "ayah": 11,
+      "theme_id": "creation",
+      "relevance_score": 0.85,
+      "annotation": "Then He directed Himself to the heaven while it was smoke",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 30,
+      "ayah": 22,
+      "theme_id": "creation",
+      "relevance_score": 0.85,
+      "annotation": "Among His signs is the creation of the heavens and the earth and the diversity of your languages and colors",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 36,
+      "ayah": 33,
+      "theme_id": "creation",
+      "relevance_score": 0.85,
+      "annotation": "A sign for them is the dead earth — We brought it to life",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 68,
+      "theme_id": "creation",
+      "relevance_score": 0.8,
+      "annotation": "Your Lord inspired the bee to take homes in the mountains",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    },
+    {
+      "surah": 1,
+      "ayah": 6,
+      "theme_id": "guidance",
+      "relevance_score": 1.0,
+      "annotation": "Guide us to the straight path",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 2,
+      "theme_id": "guidance",
+      "relevance_score": 0.95,
+      "annotation": "This is the Book about which there is no doubt, a guidance for the righteous",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 185,
+      "theme_id": "guidance",
+      "relevance_score": 0.9,
+      "annotation": "The month of Ramadan in which was revealed the Quran, a guidance for the people",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 17,
+      "ayah": 9,
+      "theme_id": "guidance",
+      "relevance_score": 0.9,
+      "annotation": "Indeed, this Quran guides to that which is most suitable",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 6,
+      "ayah": 125,
+      "theme_id": "guidance",
+      "relevance_score": 0.9,
+      "annotation": "Whoever Allah wants to guide — He expands his breast to Islam",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 20,
+      "ayah": 123,
+      "theme_id": "guidance",
+      "relevance_score": 0.85,
+      "annotation": "Whoever follows My guidance will not go astray nor suffer",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 39,
+      "ayah": 23,
+      "theme_id": "guidance",
+      "relevance_score": 0.85,
+      "annotation": "Allah has sent down the best statement, a Book consistent in its verses",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 31,
+      "ayah": 2,
+      "theme_id": "guidance",
+      "relevance_score": 0.85,
+      "annotation": "These are verses of the wise Book, a guidance and mercy for the doers of good",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 38,
+      "theme_id": "guidance",
+      "relevance_score": 0.85,
+      "annotation": "When guidance comes to you from Me, whoever follows My guidance will have no fear",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 10,
+      "ayah": 57,
+      "theme_id": "guidance",
+      "relevance_score": 0.85,
+      "annotation": "O mankind, there has come to you instruction from your Lord and healing for what is in the breasts",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 16,
+      "ayah": 89,
+      "theme_id": "guidance",
+      "relevance_score": 0.85,
+      "annotation": "We have sent down to you the Book as clarification for all things and as guidance and mercy",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 59,
+      "theme_id": "law",
+      "relevance_score": 0.9,
+      "annotation": "O you who believe, obey Allah and obey the Messenger and those in authority among you",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 5,
+      "ayah": 44,
+      "theme_id": "law",
+      "relevance_score": 0.9,
+      "annotation": "Whoever does not judge by what Allah has revealed — those are the disbelievers",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 6,
+      "ayah": 151,
+      "theme_id": "law",
+      "relevance_score": 0.95,
+      "annotation": "Come, I will recite what your Lord has prohibited to you — do not associate anything with Him",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 17,
+      "ayah": 23,
+      "theme_id": "law",
+      "relevance_score": 0.9,
+      "annotation": "Your Lord has decreed that you worship none but Him and be dutiful to parents",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 24,
+      "ayah": 2,
+      "theme_id": "law",
+      "relevance_score": 0.9,
+      "annotation": "The fornicatress and fornicator — lash each one of them a hundred lashes",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 11,
+      "theme_id": "law",
+      "relevance_score": 0.9,
+      "annotation": "Allah instructs you concerning your children's inheritance",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 229,
+      "theme_id": "law",
+      "relevance_score": 0.9,
+      "annotation": "Divorce is twice; then keep them in reasonable honor or release them with kindness",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 275,
+      "theme_id": "law",
+      "relevance_score": 0.95,
+      "annotation": "Allah has permitted trade and has forbidden interest (riba)",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 5,
+      "ayah": 90,
+      "theme_id": "law",
+      "relevance_score": 0.9,
+      "annotation": "Intoxicants, gambling, idols, and divining arrows are abomination of Satan's work; avoid them",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 4,
+      "ayah": 29,
+      "theme_id": "law",
+      "relevance_score": 0.85,
+      "annotation": "Do not consume one another's wealth unjustly",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 2,
+      "ayah": 282,
+      "theme_id": "law",
+      "relevance_score": 0.85,
+      "annotation": "O you who believe, when you contract a debt for a specified term, write it down",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 5,
+      "ayah": 38,
+      "theme_id": "law",
+      "relevance_score": 0.85,
+      "annotation": "The thief, male and female, amputate their hands in recompense for what they committed",
+      "scholarly_notes": null,
+      "context_type": "primary"
+    },
+    {
+      "surah": 49,
+      "ayah": 9,
+      "theme_id": "law",
+      "relevance_score": 0.8,
+      "annotation": "If two factions fight, make peace between them with justice",
+      "scholarly_notes": null,
+      "context_type": "secondary"
+    }
+  ]
+}

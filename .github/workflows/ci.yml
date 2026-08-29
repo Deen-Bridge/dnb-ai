@@ -125,6 +125,15 @@ jobs:
       - name: Run Swahili language processing tests
         run: pytest -q tests/test_swahili.py
 
+      - name: Run thematic Quran retrieval tests
+        run: pytest -q tests/test_thematic_quran.py
+
+      - name: Run Quranic concordance tests
+        run: pytest -q tests/test_concordance.py
+
+      - name: Validate theme-verse concordance dataset
+        run: python scripts/build_theme_mappings.py --check
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 

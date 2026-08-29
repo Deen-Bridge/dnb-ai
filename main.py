@@ -60,6 +60,7 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
+from concordance import router as concordance_router
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -312,6 +313,9 @@ app.include_router(stellar_router)
 app.include_router(faraid_router)
 app.include_router(learning_router)
 app.include_router(worship_router)
+# Quranic concordance: topic-based ayat discovery with hierarchical navigation,
+# multi-topic AND/OR queries, and per-surah frequency statistics (#125)
+app.include_router(concordance_router)
 
 app.include_router(reasoning_router)
 app.include_router(study_router)
