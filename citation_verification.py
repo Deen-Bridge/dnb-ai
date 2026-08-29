@@ -57,9 +57,7 @@ _STRING_FIELDS = ("work", "author", "detail", "volume", "edition", "publisher")
 # Volume/page/edition fields that must be internally consistent when present.
 _VOLUME_PATTERN = re.compile(r"^\s*(?:vol\.?\s*)?\d+\s*$", re.IGNORECASE)
 _PAGE_PATTERN = re.compile(r"^\s*\d+\s*(?:-\s*\d+)?\s*$")
-_EDITION_PATTERN = re.compile(
-    r"^\s*\d+\s*(?:st|nd|rd|th)?\s*(?:edition|ed\.?)?\s*$", re.IGNORECASE
-)
+_EDITION_PATTERN = re.compile(r"^\s*\d+\s*(?:st|nd|rd|th)?\s*(?:edition|ed\.?)?\s*$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
