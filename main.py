@@ -44,6 +44,7 @@ from slowapi.util import get_remote_address
 import metrics
 import telemetry
 from adhkar import corpus as adhkar_corpus
+from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
@@ -94,6 +95,7 @@ from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_ha
 from hadith_context import router as hadith_context_router
 from history import router as history_router
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
+from image_analysis import router as image_analysis_router
 from learning import router as learning_router
 from manuscript_ocr import (
     ManuscriptAnalysis,
@@ -119,6 +121,7 @@ from memory.extraction import (
     summarize_conversation_turns,
 )
 from model_router import router as model_routing_router
+from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
 from prompts import (
     ExperimentConfig,
@@ -316,6 +319,9 @@ app.include_router(worship_router)
 # Quranic concordance: topic-based ayat discovery with hierarchical navigation,
 # multi-topic AND/OR queries, and per-surah frequency statistics (#125)
 app.include_router(concordance_router)
+# Research agent orchestration: multi-agent query decomposition, DAG execution,
+# synthesis and observability (#126)
+app.include_router(orchestration_router)
 
 app.include_router(reasoning_router)
 app.include_router(study_router)
@@ -343,10 +349,16 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Image content analysis: canonical verse extraction, hadith detection, translation,
+# structured metadata and batch processing for scanned Islamic content (#135)
+app.include_router(image_analysis_router)
 # Context manager: session-based user preferences, topic continuity, and follow-up detection
 app.include_router(context_router)
 # Swahili: language processing and response enhancement
 app.include_router(swahili_router)
+# Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
+# normalization and dialectal terminology lexicon (#136)
+app.include_router(arabic_dialect_router)
 # Factual consistency: cross-session contradiction prevention and reconciliation
 app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
