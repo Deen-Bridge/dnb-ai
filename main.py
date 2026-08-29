@@ -93,6 +93,7 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from hadith_context import router as hadith_context_router
+from hadith_search import router as hadith_search_router
 from history import router as history_router
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from image_analysis import router as image_analysis_router
@@ -337,6 +338,8 @@ app.include_router(calligraphy_router)
 app.include_router(review_router)
 # Question reformulation: deterministic quality assessment + rewrite suggestions
 app.include_router(reformulation_router)
+# Hadith search: topic and keyword search with authenticity grading
+app.include_router(hadith_search_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
