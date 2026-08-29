@@ -54,8 +54,9 @@ def _register(entries: list[MisconceptionEntry]) -> None:
         MISCONCEPTION_DB[e.id] = e
 
 
-_register([
-    MisconceptionEntry(
+_register(
+    [
+        MisconceptionEntry(
         id="shirk-tawassul",
         category="tawheed",
         severity=MisconceptionSeverity.HIGH,
@@ -427,8 +428,9 @@ _register([
         ),
         authoritative_source="Quran 2:184-185, Hadith",
         source_reference="Quran 2:184, Bukhari 1956",
-    ),
-])
+        ),
+    ]
+)
 
 
 # ---------------------------------------------------------------------------

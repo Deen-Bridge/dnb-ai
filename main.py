@@ -538,7 +538,11 @@ answer_snapshots: "OrderedDict[tuple, dict[str, str]]" = OrderedDict()
 # Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
 # control; otherwise any client can rotate the header to mint a fresh rate-limit
 # bucket on every request and defeat the only control on the write endpoint.
-TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 def _record_answer(chat_id: str, prompt: str, answer: str) -> str:
