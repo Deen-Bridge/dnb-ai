@@ -51,6 +51,7 @@ import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from async_runtime import http_client_pool
 from errors import APIException
 from semantic_cache import get_keyed_cache
 
@@ -619,15 +620,21 @@ class QuranComTafsirSource(TafsirSource):
     failing the whole request.
     """
 
-    def __init__(self, base_url: str = QURAN_API_BASE, timeout: float = QURAN_API_TIMEOUT):
+    def __init__(
+        self,
+        base_url: str = QURAN_API_BASE,
+        timeout: float = QURAN_API_TIMEOUT,
+        client: httpx.AsyncClient | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.client = client
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         url = f"{self.base_url}/{path.lstrip('/')}"
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, params=params)
+            client = self.client or http_client_pool.get()
+            response = await client.get(url, params=params, timeout=self.timeout)
         except httpx.HTTPError as exc:
             logger.warning("Quran API request failed for %s: %s", path, exc)
             return None

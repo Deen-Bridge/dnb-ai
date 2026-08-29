@@ -120,8 +120,12 @@ jobs:
       - name: Run chat request validation tests
         run: pytest -q tests/test_chat_validation.py
 
+      - name: Run async runtime tests
+        run: pytest -q tests/test_async_runtime.py
+
       - name: Run factual consistency tests
         run: pytest -q tests/test_factual_consistency.py
+
       - name: Run Swahili language processing tests
         run: pytest -q tests/test_swahili.py
 
