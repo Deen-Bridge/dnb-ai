@@ -431,7 +431,7 @@ def detect_temporal_errors(text: str) -> list[HallucinationFlag]:
     """Detect incorrect dates and chronological errors for Islamic historical events."""
     flags: list[HallucinationFlag] = []
 
-    for event_key, event_info in HISTORICAL_EVENTS.items():
+    for event_info in HISTORICAL_EVENTS.values():
         event_desc = event_info["description"]
         expected_year = event_info["year_ce"]
 
