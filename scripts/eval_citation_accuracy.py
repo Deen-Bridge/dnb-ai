@@ -51,8 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from citations import extract_citations  # noqa: E402
-from hadith import COLLECTION_NAMES, normalize_collection  # noqa: E402
-from tafsir import surah_by_number  # noqa: E402
+from hadith import normalize_collection  # noqa: E402
 
 DEFAULT_DATASET = ROOT / "data" / "eval" / "citation_accuracy_benchmark.jsonl"
 
@@ -304,9 +303,6 @@ def evaluate_single_record(record: dict, answer: str | None = None) -> dict:
 
     # Critical errors.
     critical_errors = [c for c in citations if _is_critical_error(c, gt_keys)]
-
-    # Completeness for multi-source questions.
-    completeness = recall if record.get("requires_multiple_sources") else None
 
     return {
         "id": record["id"],

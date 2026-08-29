@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
-import google.generativeai as genai
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
@@ -32,6 +31,7 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
+import google.generativeai as genai
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded

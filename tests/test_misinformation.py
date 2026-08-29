@@ -1,7 +1,5 @@
 """Tests for the religious misinformation flagging system (#181)."""
 
-import pytest
-
 from misinformation import (
     MISCONCEPTION_DB,
     MisconceptionSeverity,

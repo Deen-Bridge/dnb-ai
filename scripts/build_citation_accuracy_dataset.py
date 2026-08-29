@@ -223,7 +223,7 @@ def generate() -> list[dict]:
     idx = 0
 
     # --- Quran-only records (60) ---
-    for i, (surah, ayah, ayah_end, topic) in enumerate(_QURAN_REFERENCES):
+    for _i, (surah, ayah, ayah_end, topic) in enumerate(_QURAN_REFERENCES):
         for template in _QUESTION_TEMPLATES["quran"][:3]:
             question = template.format(topic=topic)
             gt = [_quran_citation(surah, ayah, ayah_end)]
@@ -234,7 +234,7 @@ def generate() -> list[dict]:
             idx += 1
 
     # --- Hadith-only records (60) ---
-    for i, (coll, number, topic) in enumerate(_HADITH_REFERENCES):
+    for _i, (coll, number, topic) in enumerate(_HADITH_REFERENCES):
         for template in _QUESTION_TEMPLATES["hadith"][:3]:
             question = template.format(topic=topic)
             gt = [_hadith_citation(coll, number)]
@@ -278,7 +278,7 @@ def generate() -> list[dict]:
         (_QURAN_REFERENCES[18], _HADITH_REFERENCES[18], "aqeedah"),  # way out + seeking knowledge
         (_QURAN_REFERENCES[19], _HADITH_REFERENCES[19], "aqeedah"),  # hardship ease + best families
     ]
-    for i, ((q_surah, q_ayah, q_end, q_topic), (h_coll, h_num, h_topic), domain) in enumerate(mixed_pairs):
+    for _i, ((q_surah, q_ayah, q_end, q_topic), (h_coll, h_num, _h_topic), domain) in enumerate(mixed_pairs):
         for template in _QUESTION_TEMPLATES["mixed"][:3]:
             question = template.format(topic=q_topic)
             gt = [
@@ -355,7 +355,7 @@ def generate() -> list[dict]:
             "contemporary",
         ),
     ]
-    for i, (q_refs, h_refs, s_refs, domain) in enumerate(multi_sets):
+    for _i, (q_refs, h_refs, s_refs, domain) in enumerate(multi_sets):
         for template in _QUESTION_TEMPLATES["multi_source"][:6]:
             topic = q_refs[0][3]
             question = template.format(topic=topic)
