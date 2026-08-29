@@ -157,9 +157,7 @@ class TestCitationGraph:
 
 class TestParseIntegration:
     def test_parse_populates_verification(self):
-        extraction = parse_citations(
-            '{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}'
-        )
+        extraction = parse_citations('{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}')
         assert extraction.verification
         assert extraction.verification["total_citations"] == 1
         assert extraction.verification["compliant"] is True

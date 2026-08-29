@@ -32,7 +32,7 @@ class MisconceptionSeverity(str, Enum):
     LOW = "low"           # Minor inaccuracy
     MEDIUM = "medium"     # Notable error, may mislead
     HIGH = "high"         # Significant theological error
-    CRITICAL = "critical" # Potentially dangerous misinformation
+    CRITICAL = "critical"  # Potentially dangerous misinformation
 
 
 class MisconceptionEntry(BaseModel):

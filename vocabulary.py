@@ -45,7 +45,9 @@ VOCAB_DATA: dict[str, Any] = _load_vocabulary_data()
 _PREFIXES = ["ال", "و", "ف", "ب", "ل", "ك", "س"]
 _SUFFIXES = ["ه", "ها", "هم", "هن", "هما", "ون", "ين", "ان", "ات", "ية", "ي"]
 
-_TASHKEEL = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7\u06E8\u06EA-\u06ED]")
+_TASHKEEL = re.compile(
+    r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7\u06E8\u06EA-\u06ED]"
+)
 
 
 def strip_tashkeel(word: str) -> str:
