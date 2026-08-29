@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 # real environment variables.
 load_dotenv()
 
+import google.generativeai as genai
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
@@ -31,7 +32,6 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
-import google.generativeai as genai
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -237,9 +237,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         if hint:
             content["hint"] = hint
 
-    return JSONResponse(
-        status_code=exc.status_code, content=jsonable_encoder(content), headers=headers
-    )
+    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(content), headers=headers)
 
 
 @app.exception_handler(RequestValidationError)
@@ -323,6 +321,7 @@ async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
         "matches": matches,
         "message": message,
     }
+
 
 # Configure CORS
 app.add_middleware(
