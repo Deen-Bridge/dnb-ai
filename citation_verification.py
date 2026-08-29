@@ -254,11 +254,7 @@ def _check_scholarly(citation: ScholarlyReference, index: int) -> CitationFindin
                     f"page range {pages!r} does not match known edition pages "
                     f"{record.pages!r}"
                 )
-            if (
-                edition is not None
-                and record.edition
-                and str(edition) != record.edition
-            ):
+            if edition is not None and record.edition and str(edition) != record.edition:
                 finding.drift_detected = True
                 finding.issues.append(
                     f"edition {edition!r} does not match known edition "
