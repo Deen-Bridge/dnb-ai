@@ -74,8 +74,12 @@ jobs:
 
       - name: Run contextual hadith interpretation tests
         run: pytest -q tests/test_hadith_context.py
+
       - name: Run model routing tests
         run: pytest -q tests/test_model_router.py
+
+      - name: Run multi-agent orchestration tests
+        run: pytest -q tests/test_orchestration.py
 
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
@@ -112,6 +116,7 @@ jobs:
 
       - name: Validate Islamic QA Benchmark dataset integrity
         run: python scripts/eval_islamic_qa.py --validate-only
+
       - name: Run page analysis tests
         run: pytest -q tests/test_page_analysis.py
 
