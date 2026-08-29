@@ -73,7 +73,12 @@ from fiqh import (
     classify_fiqh,
     normalize_madhhab,
 )
-from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from hadith import (
+    HADITH_ADAB_CONTEXT,
+    HadithReference,
+    annotate as annotate_hadith,
+    build_caution_note,
+)
 from hadith_context import router as hadith_context_router
 from history import router as history_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context

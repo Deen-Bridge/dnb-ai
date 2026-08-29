@@ -100,10 +100,15 @@ class TestMisinformationDetection:
     def test_correction_summary_provided(self):
         result = detect_misinformation("Women are not allowed to drive in Islam.")
         assert result.correction_summary is not None
-        assert "driving" in result.correction_summary.lower() or "source" in result.correction_summary.lower()
+        assert (
+            "driving" in result.correction_summary.lower()
+            or "source" in result.correction_summary.lower()
+        )
 
     def test_overall_severity_is_highest(self):
-        result = detect_misinformation("The Shahada includes Ali. Women are not allowed to drive.")
+        result = detect_misinformation(
+            "The Shahada includes Ali. Women are not allowed to drive."
+        )
         assert result.overall_severity == MisconceptionSeverity.CRITICAL
 
 
