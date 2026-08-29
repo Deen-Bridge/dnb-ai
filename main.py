@@ -44,6 +44,7 @@ from slowapi.util import get_remote_address
 import metrics
 import telemetry
 from adhkar import corpus as adhkar_corpus
+from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
@@ -347,6 +348,9 @@ app.include_router(image_analysis_router)
 app.include_router(context_router)
 # Swahili: language processing and response enhancement
 app.include_router(swahili_router)
+# Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
+# normalization and dialectal terminology lexicon (#136)
+app.include_router(arabic_dialect_router)
 # Factual consistency: cross-session contradiction prevention and reconciliation
 app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
