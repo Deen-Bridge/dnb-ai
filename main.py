@@ -119,6 +119,7 @@ from memory.extraction import (
     summarize_conversation_turns,
 )
 from model_router import router as model_routing_router
+from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
 from prompts import (
     ExperimentConfig,
@@ -313,6 +314,9 @@ app.include_router(stellar_router)
 app.include_router(faraid_router)
 app.include_router(learning_router)
 app.include_router(worship_router)
+# Research agent orchestration: multi-agent query decomposition, DAG execution,
+# synthesis and observability (#126)
+app.include_router(orchestration_router)
 
 app.include_router(reasoning_router)
 app.include_router(study_router)
