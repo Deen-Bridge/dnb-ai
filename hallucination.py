@@ -132,7 +132,7 @@ class BenchmarkResult(BaseModel):
 # Known Scholar Positions (for misattribution detection)
 # ---------------------------------------------------------------------------
 
-KNOWN_SCHOLAR_POSITIONS: dict[str, dict[str, list[str]]] = {
+KNOWN_SCHOLAR_POSITIONS: dict[str, dict[str, Any]] = {
     "imam_abu_hanifa": {
         "known_positions": [
             "wiping over leather socks is permissible",
@@ -327,8 +327,10 @@ def detect_misattributions(text: str) -> list[HallucinationFlag]:
 
     for scholar_key, info in KNOWN_SCHOLAR_POSITIONS.items():
         scholar_name = scholar_key.replace("_", " ").title()
-        era = info.get("era", "")
-        school = info.get("school", "")
+        era_val = info.get("era", "")
+        school_val = info.get("school", "")
+        era = era_val if isinstance(era_val, str) else ""
+        school = school_val if isinstance(school_val, str) else ""
 
         # Check for anachronistic attributions
         if era:
