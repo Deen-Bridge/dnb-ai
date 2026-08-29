@@ -38,6 +38,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
@@ -296,6 +297,9 @@ app.include_router(arabic_ocr_router)
 app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
+# Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
+# normalization and dialectal terminology lexicon (#136)
+app.include_router(arabic_dialect_router)
 # Religious misinformation flagging: detection, correction, and blocking of misinformation
 app.include_router(misinformation_router)
 
