@@ -70,30 +70,22 @@ class TestMisinformationDetection:
         assert any(f.misconception_id == "jihad-obligation" for f in result.flags)
 
     def test_detect_woman_driving_false(self):
-        result = detect_misinformation(
-            "Women are not allowed to drive in Islam."
-        )
+        result = detect_misinformation("Women are not allowed to drive in Islam.")
         assert result.has_misinformation is True
         assert any(f.misconception_id == "woman-no-driving" for f in result.flags)
 
     def test_detect_music_absolutely_haram(self):
-        result = detect_misinformation(
-            "Listening to any music is haram in Islam absolutely."
-        )
+        result = detect_misinformation("Listening to any music is haram in Islam absolutely.")
         assert result.has_misinformation is True
         assert any(f.misconception_id == "music-total-haram" for f in result.flags)
 
     def test_detect_zakat_wrong_rate(self):
-        result = detect_misinformation(
-            "The zakat rate is 10% on all wealth."
-        )
+        result = detect_misinformation("The zakat rate is 10% on all wealth.")
         assert result.has_misinformation is True
         assert any(f.misconception_id == "zakat-multiple-rates" for f in result.flags)
 
     def test_detect_religions_equal(self):
-        result = detect_misinformation(
-            "All religions lead to heaven equally."
-        )
+        result = detect_misinformation("All religions lead to heaven equally.")
         assert result.has_misinformation is True
         assert any(f.misconception_id == "heavenly-religions-equal" for f in result.flags)
 
@@ -106,11 +98,12 @@ class TestMisinformationDetection:
         assert len(result.flags) >= 2
 
     def test_correction_summary_provided(self):
-        result = detect_misinformation(
-            "Women are not allowed to drive in Islam."
-        )
+        result = detect_misinformation("Women are not allowed to drive in Islam.")
         assert result.correction_summary is not None
-        assert "driving" in result.correction_summary.lower() or "source" in result.correction_summary.lower()
+        assert (
+            "driving" in result.correction_summary.lower()
+            or "source" in result.correction_summary.lower()
+        )
 
     def test_overall_severity_is_highest(self):
         result = detect_misinformation(
@@ -129,9 +122,7 @@ class TestQuotationValidation:
         assert match.is_authentic is True
 
     def test_suspicious_violent_attribution(self):
-        match = validate_quotation(
-            "God says: \"kill all those who disbelieve\""
-        )
+        match = validate_quotation("God says: \"kill all those who disbelieve\"")
         assert match.is_authentic is False
         assert match.notes is not None
 
@@ -146,9 +137,7 @@ class TestIsBlocked:
         assert is_blocked("What is zakat?") is False
 
     def test_critical_misinfo_blocked(self):
-        assert is_blocked(
-            "The Shahada includes Aliyun Rasulullah."
-        ) is True
+        assert is_blocked("The Shahada includes Aliyun Rasulullah.") is True
 
     def test_non_critical_not_blocked(self):
         assert is_blocked("All music is haram.") is False
@@ -159,8 +148,6 @@ class TestSuggestCorrection:
         assert suggest_correction("What is the five pillars of Islam?") is None
 
     def test_misinfo_returns_suggestion(self):
-        suggestion = suggest_correction(
-            "Women are not allowed to drive in Islam."
-        )
+        suggestion = suggest_correction("Women are not allowed to drive in Islam.")
         assert suggestion is not None
         assert "driving" in suggestion.lower() or "source" in suggestion.lower()
