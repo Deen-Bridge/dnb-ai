@@ -57,24 +57,24 @@ def _register(entries: list[MisconceptionEntry]) -> None:
 _register(
     [
         MisconceptionEntry(
-        id="shirk-tawassul",
-        category="tawheed",
-        severity=MisconceptionSeverity.HIGH,
-        false_claim_patterns=[
-            r"tawassul\s+is\s+(shirk|polytheism|associating\s+partners)",
-            r"asking\s+(the\s+prophet|all[ahy]|saints)\s+is\s+(shirk|haram)",
-            r"visiting\s+graves?\s+is\s+(shirk|bid'ah|forbidden)",
-            r"intercession\s+(is\s+)?(shirk|not\s+permitted)",
-        ],
-        correction=(
-            "Tawassul (seeking intercession) through the Prophet ﷺ or righteous "
-            "people is permitted in Islam when done correctly, as supported by "
-            "authentic hadith. It is not shirk. Visiting graves is sunnah and "
-            "encouraged for remembrance of death."
+            id="shirk-tawassul",
+            category="tawheed",
+            severity=MisconceptionSeverity.HIGH,
+            false_claim_patterns=[
+                r"tawassul\s+is\s+(shirk|polytheism|associating\s+partners)",
+                r"asking\s+(the\s+prophet|all[ahy]|saints)\s+is\s+(shirk|haram)",
+                r"visiting\s+graves?\s+is\s+(shirk|bid'ah|forbidden)",
+                r"intercession\s+(is\s+)?(shirk|not\s+permitted)",
+            ],
+            correction=(
+                "Tawassul (seeking intercession) through the Prophet ﷺ or righteous "
+                "people is permitted in Islam when done correctly, as supported by "
+                "authentic hadith. It is not shirk. Visiting graves is sunnah and "
+                "encouraged for remembrance of death."
+            ),
+            authoritative_source="Sahih al-Bukhari, Sahih Muslim",
+            source_reference="Bukhari 1014, Muslim 710",
         ),
-        authoritative_source="Sahih al-Bukhari, Sahih Muslim",
-        source_reference="Bukhari 1014, Muslim 710",
-    ),
     MisconceptionEntry(
         id="shahada-addition",
         category="aqeedah",
@@ -428,7 +428,7 @@ _register(
         ),
         authoritative_source="Quran 2:184-185, Hadith",
         source_reference="Quran 2:184, Bukhari 1956",
-        ),
+    ),
     ]
 )
 
@@ -486,10 +486,7 @@ _SEVERITY_ACTION_MAP: dict[MisconceptionSeverity, FlagSeverity] = {
     MisconceptionSeverity.CRITICAL: FlagSeverity.BLOCK,
 }
 
-_QURAN_QUOTE_PATTERN = re.compile(
-    r"[\"\'«\"\u201C\u201D](.*?)[\"\'»\"\u201C\u201D]",
-    re.DOTALL,
-)
+_QURAN_QUOTE_PATTERN = re.compile(r"[\"\'«\"\u201C\u201D](.*?)[\"\'»\"\u201C\u201D]", re.DOTALL)
 
 _HADITH_QUOTE_PATTERN = re.compile(
     r"(?:hadith|narrated|reported|said|the\s+prophet)\s*[:\-]?\s*[\"\'«\"\u201C\u201D](.*?)[\"\'»\"\u201C\u201D]",
@@ -526,8 +523,12 @@ def detect_misinformation(text: str) -> MisinfoScanResult:
     has_misinfo = len(flags) > 0
     should_block = any(f.action == FlagSeverity.BLOCK for f in flags)
 
-    severity_order = [MisconceptionSeverity.CRITICAL, MisconceptionSeverity.HIGH,
-                      MisconceptionSeverity.MEDIUM, MisconceptionSeverity.LOW]
+    severity_order = [
+        MisconceptionSeverity.CRITICAL,
+        MisconceptionSeverity.HIGH,
+        MisconceptionSeverity.MEDIUM,
+        MisconceptionSeverity.LOW,
+    ]
     overall_severity = None
     if flags:
         for s in severity_order:
