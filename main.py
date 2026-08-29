@@ -25,13 +25,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
+import google.generativeai as genai
 from google.api_core.exceptions import (
     DeadlineExceeded,
     InvalidArgument,
     ResourceExhausted,
     ServiceUnavailable,
 )
-import google.generativeai as genai
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
