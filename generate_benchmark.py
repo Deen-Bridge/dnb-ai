@@ -6,11 +6,7 @@ from pathlib import Path
 def generate_dataset():
     examples = []
 
-    # Categories: fabricated_citation, misattribution, unsupported_claim,
-    # factual_inconsistency, temporal_confusion, scholar_position_error,
-    # fabricated_verse, fabricated_hadith
-
-    # 1. Fabricated Verses (CRITICAL)
+    # 1. Fabricated Verses (CRITICAL) - 'i' is used here
     for i in range(1, 40):
         surah = 114 + i
         examples.append(
@@ -27,7 +23,7 @@ def generate_dataset():
         )
 
     # 2. Misquoted Verses (MAJOR)
-    for i in range(1, 40):
+    for _ in range(1, 40):
         examples.append(
             {
                 "id": f"mc_{uuid.uuid4().hex[:8]}",
@@ -42,7 +38,7 @@ def generate_dataset():
         )
 
     # 3. Misattributions / Scholar Position Errors (MAJOR/MODERATE)
-    for i in range(1, 40):
+    for _ in range(1, 40):
         examples.append(
             {
                 "id": f"spe_{uuid.uuid4().hex[:8]}",
@@ -57,7 +53,7 @@ def generate_dataset():
         )
 
     # 4. Temporal Errors (MODERATE)
-    for i in range(1, 40):
+    for _ in range(1, 40):
         examples.append(
             {
                 "id": f"te_{uuid.uuid4().hex[:8]}",
@@ -72,7 +68,7 @@ def generate_dataset():
         )
 
     # 5. Unsupported Claims (MODERATE)
-    for i in range(1, 40):
+    for _ in range(1, 40):
         examples.append(
             {
                 "id": f"uc_{uuid.uuid4().hex[:8]}",
@@ -87,7 +83,7 @@ def generate_dataset():
         )
 
     # 6. Fabricated Hadith (MAJOR)
-    for i in range(1, 40):
+    for _ in range(1, 40):
         examples.append(
             {
                 "id": f"fh_{uuid.uuid4().hex[:8]}",
@@ -101,12 +97,12 @@ def generate_dataset():
             }
         )
 
-    # 7. Valid/Clean examples (To test false positive rate)
+    # 7. Valid/Clean examples
     for _ in range(1, 20):
         examples.append(
             {
                 "id": f"clean_{uuid.uuid4().hex[:8]}",
-                "category": "factual_inconsistency",  # Just assigning a category, but no hallucinations expected
+                "category": "factual_inconsistency",
                 "severity": "minor",
                 "prompt": "When did Prophet Muhammad die?",
                 "response": "Prophet Muhammad ﷺ passed away in 632 CE (11 AH).",
@@ -116,7 +112,6 @@ def generate_dataset():
             }
         )
 
-    # Ensure total is at least 250
     print(f"Generated {len(examples)} examples.")
 
     output_path = Path("data/hallucination_benchmark.json")
