@@ -4,19 +4,13 @@ Covers format validation, completeness checking, cross-reference validation,
 volume/page/edition verification, and citation drift detection.
 """
 
-import pytest
-
+from citation_verification import CitationGraph, verify_citations
 from citations import (
+    CitationExtraction,
     HadithCitation,
     QuranCitation,
     ScholarlyReference,
-    CitationExtraction,
     parse_citations,
-)
-from citation_verification import (
-    CitationGraph,
-    CitationVerification,
-    verify_citations,
 )
 
 
