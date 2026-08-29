@@ -84,6 +84,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from misinformation_api import router as misinformation_router
 from model_router import router as model_routing_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
@@ -118,7 +119,6 @@ from stellar import (
 )
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
-from misinformation_api import router as misinformation_router
 from swahili import (
     analyze_swahili,
     router as swahili_router,
