@@ -93,6 +93,7 @@ from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_ha
 from hadith_context import router as hadith_context_router
 from history import router as history_router
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
+from image_analysis import router as image_analysis_router
 from learning import router as learning_router
 from manuscript_ocr import (
     ManuscriptAnalysis,
@@ -339,6 +340,9 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Image content analysis: canonical verse extraction, hadith detection, translation,
+# structured metadata and batch processing for scanned Islamic content (#135)
+app.include_router(image_analysis_router)
 # Context manager: session-based user preferences, topic continuity, and follow-up detection
 app.include_router(context_router)
 # Swahili: language processing and response enhancement

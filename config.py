@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     manuscripts_max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
     manuscripts_min_confidence: float = Field(default=0.35, ge=0.0, le=1.0)
 
+    # Image content analysis (#135): translation/explanation provider.
+    image_analysis_provider: str = Field(default="gemini")
+
     # --- Hybrid retrieval (#226) ---
     hybrid_enabled: bool = True
     hybrid_rrf_k: int = Field(default=60, ge=1)
