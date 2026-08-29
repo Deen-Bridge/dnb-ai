@@ -231,7 +231,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         if hint:
             content["hint"] = hint
 
-    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(content), headers=headers)
+    return JSONResponse(
+        status_code=exc.status_code, content=jsonable_encoder(content), headers=headers
+    )
 
 
 @app.exception_handler(RequestValidationError)
