@@ -120,6 +120,9 @@ jobs:
       - name: Run Islamic QA Benchmark dataset tests
         run: pytest -q tests/test_islamic_qa_benchmark.py
 
+      - name: Run intent classification tests
+        run: pytest -q tests/test_intent.py
+
       - name: Validate Islamic QA Benchmark dataset integrity
         run: python scripts/eval_islamic_qa.py --validate-only
 

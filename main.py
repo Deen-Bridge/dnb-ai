@@ -82,6 +82,7 @@ from hadith import (
 )
 from hadith_context import router as hadith_context_router
 from history import router as history_router
+from intent import accuracy_tracker as intent_accuracy_tracker, classify_intent
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -924,6 +925,12 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
+            # Hierarchical multi-label intent classification (#203). Offline and
+            # deterministic; recorded for accuracy tracking and structured logs.
+            intent = classify_intent(prompt)
+            intent_accuracy_tracker.record_prediction(intent)
+            logger.info("intent=%s", {"chat_id": chat_id, **intent.model_dump()})
+
             # --- Swahili analysis ---
             is_swahili = effective_language == "sw"
             swahili_analysis = None
@@ -1485,6 +1492,12 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
+
+            # Hierarchical multi-label intent classification (#203). Offline and
+            # deterministic; recorded for accuracy tracking and structured logs.
+            intent = classify_intent(prompt)
+            intent_accuracy_tracker.record_prediction(intent)
+            logger.info("intent=%s", {"chat_id": chat_id, **intent.model_dump()})
 
         # --- Tafsir and zakat retrieval ---
         with trace.span("retrieval"):
