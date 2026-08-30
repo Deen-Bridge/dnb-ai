@@ -96,6 +96,9 @@ jobs:
       - name: Run religious sentiment tests
         run: pytest -q tests/test_sentiment.py
 
+      - name: Run Quran accuracy benchmark tests
+        run: pytest -q tests/test_quran_benchmark.py
+
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
 
