@@ -38,6 +38,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import telemetry
+from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
@@ -73,7 +74,12 @@ from fiqh import (
     classify_fiqh,
     normalize_madhhab,
 )
-from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
+from hadith import (
+    HADITH_ADAB_CONTEXT,
+    HadithReference,
+    annotate as annotate_hadith,
+    build_caution_note,
+)
 from hadith_context import router as hadith_context_router
 from history import router as history_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
@@ -289,6 +295,9 @@ app.include_router(arabic_ocr_router)
 app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
+# Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
+# normalization and dialectal terminology lexicon (#136)
+app.include_router(arabic_dialect_router)
 # Religious misinformation flagging: detection, correction, and blocking of misinformation
 app.include_router(misinformation_router)
 
@@ -537,7 +546,11 @@ answer_snapshots: "OrderedDict[tuple, dict[str, str]]" = OrderedDict()
 # Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
 # control; otherwise any client can rotate the header to mint a fresh rate-limit
 # bucket on every request and defeat the only control on the write endpoint.
-TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 def _record_answer(chat_id: str, prompt: str, answer: str) -> str:

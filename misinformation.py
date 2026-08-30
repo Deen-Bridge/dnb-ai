@@ -489,10 +489,7 @@ _SEVERITY_ACTION_MAP: dict[MisconceptionSeverity, FlagSeverity] = {
     MisconceptionSeverity.CRITICAL: FlagSeverity.BLOCK,
 }
 
-_QURAN_QUOTE_PATTERN = re.compile(
-    r"[\"\'«\"\u201C\u201D](.*?)[\"\'»\"\u201C\u201D]",
-    re.DOTALL,
-)
+_QURAN_QUOTE_PATTERN = re.compile(r"[\"\'«\"\u201C\u201D](.*?)[\"\'»\"\u201C\u201D]", re.DOTALL)
 
 _HADITH_QUOTE_PATTERN = re.compile(
     r"(?:hadith|narrated|reported|said|the\s+prophet)\s*[:\-]?\s*[\"\'«\"\u201C\u201D](.*?)[\"\'»\"\u201C\u201D]",
