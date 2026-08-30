@@ -139,6 +139,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from video_analysis import router as video_analysis_router
 from vocabulary import router as vocabulary_router
 
 logger = logging.getLogger(__name__)
@@ -298,6 +299,7 @@ app.include_router(arabic_ocr_router)
 app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
+app.include_router(video_analysis_router)
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
 # normalization and dialectal terminology lexicon (#136)
 app.include_router(arabic_dialect_router)
