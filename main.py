@@ -81,6 +81,7 @@ from hadith import (
     build_caution_note,
 )
 from hadith_context import router as hadith_context_router
+from hadith_research import router as hadith_research_router
 from history import router as history_router
 from intent import accuracy_tracker as intent_accuracy_tracker, classify_intent
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
@@ -287,6 +288,9 @@ app.include_router(reformulation_router)
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
 app.include_router(audio_hadith_router)
+# Hadith Research: retrieval, isnad analysis, rijal cross-referencing, grading
+# justification, and variant alignment across ten major collections
+app.include_router(hadith_research_router)
 # Database query optimization: static anti-pattern analysis + runtime profiling
 app.include_router(query_optimizer_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
@@ -831,11 +835,7 @@ def verify_evidence_claims(
 ) -> EvidenceVerificationResult:
     """Deterministic claim-evidence audit using already-verified citations."""
     result = EvidenceVerificationResult()
-    claims = [
-        s.strip()
-        for s in response_text.replace("\n", " ").split(".")
-        if len(s.strip()) >= 25
-    ]
+    claims = [s.strip() for s in response_text.replace("\n", " ").split(".") if len(s.strip()) >= 25]
     evidence: list[tuple[str, str, bool]] = []
 
     for c in citation_extraction.citations:

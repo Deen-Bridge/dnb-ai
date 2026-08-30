@@ -42,10 +42,10 @@ import json
 import logging
 import os
 import re
-from collections.abc import Awaitable, Callable
 from collections import defaultdict, deque
-from itertools import combinations
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
+from itertools import combinations
 from pathlib import Path
 from typing import Any, cast
 
@@ -64,6 +64,13 @@ DATA_PATH = Path(__file__).resolve().parent / "data" / "quran" / "surah_index.js
 
 QURAN_API_BASE = os.getenv("QURAN_API_BASE", "https://api.quran.com/api/v4")
 QURAN_API_TIMEOUT = float(os.getenv("QURAN_API_TIMEOUT", "15"))
+
+# Static JSON collection of tafsirs (spa5k/tafsir_api) served from the jsDelivr
+# CDN. Quran.com's API no longer carries some classical works (Tafsir
+# al-Jalalayn among them); this dataset mirrors the altafsir.com texts and is
+# the retrieval backend for the works registered with ``source="tafsir_api"``.
+TAFSIR_API_BASE = os.getenv("TAFSIR_API_BASE", "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir")
+TAFSIR_API_TIMEOUT = float(os.getenv("TAFSIR_API_TIMEOUT", "15"))
 
 # Quran.com translation resource ids, by language.
 TRANSLATION_IDS: dict[str, int] = {
@@ -254,10 +261,19 @@ _BUILTIN_THEME_CLUSTERS: dict[str, list[str]] = {
 
 _SCHOLARLY_NOTES: dict[tuple[str, str], str] = {
     ("112:1", "2:255"): "Both verses affirm Allah's absolute oneness, self-subsistence, and freedom from need.",
-    ("2:153", "2:45"): "Classical mufassirun link these verses: the earlier command to seek help through patience and prayer is restated with the promise that Allah is with the patient.",
-    ("20:14", "2:45"): "The Qur'an consistently ties constancy in prayer to consciousness of Allah; al-Tabari notes the connection in explanation of 20:14.",
+    (
+        "2:153",
+        "2:45",
+    ): "Classical mufassirun link these verses: the earlier command to seek help through patience and prayer is restated with the promise that Allah is with the patient.",
+    (
+        "20:14",
+        "2:45",
+    ): "The Qur'an consistently ties constancy in prayer to consciousness of Allah; al-Tabari notes the connection in explanation of 20:14.",
     ("57:18", "64:16"): "Both passages pair faith with spending in Allah's cause and promise multiplied reward.",
-    ("2:264", "2:265"): "The two verses are often read together: one warns against reproachful charity, the other commends sincere giving.",
+    (
+        "2:264",
+        "2:265",
+    ): "The two verses are often read together: one warns against reproachful charity, the other commends sincere giving.",
 }
 
 _CONTRAST_PAIRS: list[tuple[str, str]] = [
@@ -266,7 +282,8 @@ _CONTRAST_PAIRS: list[tuple[str, str]] = [
 
 
 def _scholarly_note_for(source: str, target: str) -> str | None:
-    return _SCHOLARLY_NOTES.get(tuple(sorted((source, target))))
+    key = (min(source, target), max(source, target))
+    return _SCHOLARLY_NOTES.get(key)
 
 
 def _thematic_similarity(source: str, target: str) -> float:
@@ -323,7 +340,17 @@ def _build_relationship_graph() -> RelationshipGraph:
     for source, target, rel_type, strength, note in seeds.get("explicit_relationships", []):
         graph.add_relationship(source, target, rel_type, strength, scholarly_note=note)
 
-    for source, target in _CONTRAST_PAIRS
+    for source, target in _CONTRAST_PAIRS:
+        graph.add_relationship(
+            source,
+            target,
+            "contrast",
+            _relationship_strength(source, target, "contrast"),
+            scholarly_note=_scholarly_note_for(source, target),
+        )
+
+    return graph
+
 
 # ---------------------------------------------------------------------------
 # Tafsir registry
@@ -336,12 +363,17 @@ class TafsirWork(BaseModel):
     ``name`` and ``author`` are for *display before retrieval* — listing
     available works, and saying which work was unavailable for an ayah. Text
     that is actually returned is labelled from the source response instead.
+
+    ``source`` names the retrieval backend for the work's slugs: ``"quran.com"``
+    (the default, the live Quran.com v4 API) or ``"tafsir_api"`` (the static
+    spa5k/tafsir_api collection on the jsDelivr CDN).
     """
 
     key: str
     name: str
     author: str
-    slugs: dict[str, str] = Field(..., description="Language code -> Quran.com tafsir slug")
+    source: str = "quran.com"
+    slugs: dict[str, str] = Field(..., description="Language code -> source slug for this tafsir")
 
     def slug_for(self, language: str) -> str | None:
         return self.slugs.get(language)
@@ -388,6 +420,15 @@ TAFSIR_REGISTRY: dict[str, TafsirWork] = {
             name="Ma'alim al-Tanzil (Tafsir al-Baghawi)",
             author="Al-Baghawi (d. 516 AH)",
             slugs={"ar": "ar-tafsir-al-baghawi"},
+        ),
+        TafsirWork(
+            key="jalalayn",
+            name="Tafsir al-Jalalayn",
+            author="Jalal al-Din al-Mahalli and Jalal al-Din al-Suyuti (d. 911 AH)",
+            # Quran.com's API no longer carries this work; it is served from
+            # the free spa5k/tafsir_api collection (mirroring altafsir.com).
+            source="tafsir_api",
+            slugs={"en": "en-al-jalalayn", "ar": "ar-tafsir-al-jalalayn"},
         ),
         TafsirWork(
             key="muyassar",
@@ -454,6 +495,16 @@ TAFSIR_ALIASES: dict[str, str] = {
     "al-saadi": "saadi",
     "saedi": "saadi",
     "al-baghawi": "baghawi",
+    "jalalayn": "jalalayn",
+    "al-jalalayn": "jalalayn",
+    "al jalalayn": "jalalayn",
+    "tafsir al-jalalayn": "jalalayn",
+    "tafsir-al-jalalayn": "jalalayn",
+    "tafsir al jalalayn": "jalalayn",
+    "jalalain": "jalalayn",
+    "al-jalalain": "jalalayn",
+    "al jalalain": "jalalayn",
+    "tafsir al-jalalain": "jalalayn",
     "maarif": "maarif-ul-quran",
     "maariful-quran": "maarif-ul-quran",
     "ma'arif al-qur'an": "maarif-ul-quran",
@@ -887,6 +938,74 @@ class QuranComTafsirSource(TafsirSource):
         )
 
 
+class TafsirApiSource(TafsirSource):
+    """Reads tafsir from the free spa5k/tafsir_api static JSON collection.
+
+    The dataset is served as plain JSON files from the jsDelivr CDN; a single
+    ayah lives at ``{base}/{slug}/{surah}/{ayah}.json`` and the dataset marks
+    coverage gaps by serving a 404 for them (and listing them in a per-surah
+    ``empty_ayahs.json``). ``fetch_tafsir`` returns ``None`` for a gap, so one
+    missing passage degrades to "unavailable" exactly like the Quran.com
+    source instead of failing the whole request.
+
+    Attribution follows the same rule as the Quran.com source: the name shown
+    on a passage is the dataset's own edition name from ``editions.json``
+    (fetched once and cached), never this service's recollection.
+    """
+
+    def __init__(self, base_url: str = TAFSIR_API_BASE, timeout: float = TAFSIR_API_TIMEOUT):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self._editions: list[dict[str, Any]] | None = None
+
+    async def _get(self, path: str) -> Any | None:
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url)
+        except httpx.HTTPError as exc:
+            logger.warning("Tafsir API request failed for %s: %s", path, exc)
+            return None
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            logger.warning("Tafsir API returned %s for %s", response.status_code, path)
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            logger.warning("Tafsir API returned non-JSON for %s", path)
+            return None
+
+    async def _edition(self, slug: str) -> dict[str, Any] | None:
+        """The dataset's own metadata record for an edition slug."""
+        if self._editions is None:
+            payload = await self._get("editions.json")
+            self._editions = payload if isinstance(payload, list) else []
+        for edition in self._editions:
+            if edition.get("slug") == slug:
+                return edition
+        return None
+
+    async def fetch_tafsir(self, slug: str, verse_key: str) -> dict[str, Any] | None:
+        surah, _, ayah = verse_key.partition(":")
+        payload = await self._get(f"{slug}/{surah}/{ayah}.json")
+        if not payload:
+            return None
+        text = payload.get("text")
+        if not text:
+            return None
+        edition = await self._edition(slug)
+        result: dict[str, Any] = {"text": text}
+        if edition is not None and edition.get("name"):
+            result["resource_name"] = edition["name"]
+        return result
+
+    async def fetch_verse(self, verse_key: str, language: str) -> VerseText:
+        """The Tafsir API serves commentary only; verse text comes from the Quran.com source."""
+        raise NotImplementedError("Tafsir API source serves tafsir only; fetch verse text from the Quran.com source.")
+
+
 class FakeTafsirSource(TafsirSource):
     """Offline source for tests: serves canned payloads, records calls."""
 
@@ -910,6 +1029,7 @@ class FakeTafsirSource(TafsirSource):
 
 
 _source: TafsirSource = QuranComTafsirSource()
+_tafsir_api_source: TafsirSource = TafsirApiSource()
 
 
 def get_source() -> TafsirSource:
@@ -920,6 +1040,21 @@ def set_source(source: TafsirSource) -> None:
     """Swap the retrieval backend (used by tests to stay offline)."""
     global _source
     _source = source
+
+
+def get_tafsir_api_source() -> TafsirSource:
+    """The CDN-backed source serving works registered with ``source="tafsir_api"``."""
+    return _tafsir_api_source
+
+
+def _source_for(work: TafsirWork, injected: TafsirSource | None) -> TafsirSource:
+    """Pick the backend for one work: an injected source (tests) serves every
+    work, otherwise the registry's ``source`` decides."""
+    if injected is not None:
+        return injected
+    if work.source == "tafsir_api":
+        return get_tafsir_api_source()
+    return get_source()
 
 
 def _tafsir_cache():
@@ -988,7 +1123,7 @@ async def fetch_tafsirs_for_ayah(
     # Resolve which edition of each work to fetch first, then fetch them
     # concurrently: four works fetched one after another would stack four
     # timeouts on a slow upstream, and they do not depend on each other.
-    plans: list[tuple[TafsirWork, str, str]] = []
+    plans: list[tuple[TafsirWork, str, str, TafsirSource]] = []
     for key in keys:
         work = TAFSIR_REGISTRY.get(key)
         if work is None:
@@ -1010,11 +1145,14 @@ async def fetch_tafsirs_for_ayah(
             used_language = work.languages[0]
             # `languages` are exactly the keys of `slugs`, so this always hits.
             slug = cast(str, work.slug_for(used_language))
-        plans.append((work, used_language, slug))
+        fetch_source = _source_for(work, src)
+        plans.append((work, used_language, slug, fetch_source))
 
-    payloads = await asyncio.gather(*(_fetch_tafsir_cached(src, slug, ref) for _, _, slug in plans))
+    payloads = await asyncio.gather(
+        *(_fetch_tafsir_cached(fetch_source, slug, ref) for _, _, slug, fetch_source in plans)
+    )
 
-    for (work, used_language, _), payload in zip(plans, payloads, strict=True):
+    for (work, used_language, _, _), payload in zip(plans, payloads, strict=True):
         if payload is None:
             unavailable.append(
                 TafsirUnavailable(

@@ -3,6 +3,14 @@ scholar_referral_disclaimer: >-
   This information is general educational guidance, not a personal ruling.
   Please consult a qualified local Islamic scholar who can consider your full circumstances.
 
+ikhtilaf_acknowledgement: >-
+  Islamic scholarship recognizes legitimate differences of opinion (ikhtilaf
+  mu'tabar) on this matter; respected scholars hold more than one valid view.
+
+absolutist_qualifier: >-
+  This reflects one scholarly position; other views are held by respected
+  scholars and may be equally valid.
+
 benign_near_miss_patterns:
   - "\\b(?:academic|historical|comparative|textbook|research|overview|essay|class)\\b.{0,80}\\b(?:fiqh|talaq|divorce|inheritance|takfir|sect)\\b"
   - "\\bwhat (?:do|did) (?:scholars|the madhhabs) (?:generally )?(?:say|teach)\\b"

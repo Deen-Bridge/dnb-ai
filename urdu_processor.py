@@ -183,9 +183,16 @@ class UrduTerminology:
         matches = [
             term
             for term in self.terms
-            if key in normalize_urdu(
+            if key
+            in normalize_urdu(
                 " ".join(
-                    [term.urdu_term, term.arabic_original, term.transliteration, term.english_equivalent, *term.variants]
+                    [
+                        term.urdu_term,
+                        term.arabic_original,
+                        term.transliteration,
+                        term.english_equivalent,
+                        *term.variants,
+                    ]
                 ),
                 preserve_diacritics=False,
             ).casefold()
@@ -243,13 +250,30 @@ def analyze_script(text: str) -> ScriptProfile:
     )
 
 
+def _marker_for(index: int) -> str:
+    """Encode a phrase index as a letter-only marker.
+
+    The tokenizer splits Latin letters from digits, so a marker containing a
+    digit (e.g. ``ZZURDUTERM0ZZ``) would be fragmented and never restored to
+    the protected phrase.  Encoding the index in bijective base-26 keeps the
+    marker a single token.
+    """
+    encoded = ""
+    n = index + 1
+    while n:
+        n -= 1
+        encoded = chr(ord("A") + n % 26) + encoded
+        n //= 26
+    return f"ZZURDUTERM{encoded}ZZ"
+
+
 def _protect_phrases(text: str, terminology: UrduTerminology) -> tuple[str, dict[str, str]]:
     protected = text
     replacements: dict[str, str] = {}
     for index, phrase in enumerate(terminology.phrases):
         pattern = re.compile(r"(?<![\w\u0600-\u06ff])" + re.escape(phrase) + r"(?![\w\u0600-\u06ff])", re.IGNORECASE)
         if pattern.search(protected):
-            marker = f"ZZURDUTERM{index}ZZ"
+            marker = _marker_for(index)
             protected = pattern.sub(marker, protected)
             replacements[marker] = phrase
     return protected, replacements

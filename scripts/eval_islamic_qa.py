@@ -244,7 +244,7 @@ def evaluate_single_response(record: dict[str, Any], candidate_answer: str) -> d
     return {
         "id": record["id"],
         "domain": record["domain"],
-        "difficulty": record["difficulty"],
+        "difficulty": record.get("difficulty", "unknown"),
         "composite_score": round(composite_score, 3),
         "passed": is_pass,
         "must_include_precision": round(must_include_precision, 3),
@@ -263,11 +263,11 @@ def evaluate_with_llm_judge(record: dict[str, Any], candidate_answer: str) -> di
 
     prompt = f"""You are an expert Islamic scholar and evaluator. Assess the following answer against the expected criteria.
 
-Question: {record.get('question', '')}
-Expected answer: {record.get('expected_answer', '')}
+Question: {record.get("question", "")}
+Expected answer: {record.get("expected_answer", "")}
 Candidate answer: {candidate_answer}
 
-Evaluation criteria: {json.dumps(record.get('evaluation_criteria', {}))}
+Evaluation criteria: {json.dumps(record.get("evaluation_criteria", {}))}
 
 Score the candidate on these dimensions (0-1 each):
 - accuracy
@@ -278,12 +278,14 @@ Score the candidate on these dimensions (0-1 each):
 
 Also provide a composite score (0-1) and a pass/fail verdict (pass if >= 0.7). Respond in JSON only with keys: accuracy, completeness, appropriateness, citation_quality, tone, composite_score, passed, reasoning."""
 
-    payload = json.dumps({
-        "model": "gpt-4",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "model": "gpt-4",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+    ).encode("utf-8")
     req = urllib.request.Request(
         "https://api.openai.com/v1/chat/completions",
         data=payload,
@@ -298,7 +300,7 @@ Also provide a composite score (0-1) and a pass/fail verdict (pass if >= 0.7). R
             data = json.loads(resp.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
             judge_res = json.loads(content)
-    except Exception as e:
+    except Exception:
         # On any error, fall back to offline scoring
         return evaluate_single_response(record, candidate_answer)
 
@@ -308,7 +310,7 @@ Also provide a composite score (0-1) and a pass/fail verdict (pass if >= 0.7). R
     judge_res["passed"] = judge_res.get("composite_score", 0.0) >= 0.7
     judge_res["id"] = record["id"]
     judge_res["domain"] = record["domain"]
-    judge_res["difficulty"] = record["difficulty"]
+    judge_res["difficulty"] = record.get("difficulty", "unknown")
     judge_res["reasoning"] = judge_res.get("reasoning", "")
     return judge_res
 

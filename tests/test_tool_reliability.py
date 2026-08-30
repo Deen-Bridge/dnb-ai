@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from tool_reliability import (
     ToolDescription,
-    ToolReliabilityEngine,
     router,
     tool_reliability_engine,
 )
@@ -20,7 +19,11 @@ def client() -> TestClient:
 
 
 @pytest.fixture(autouse=True)
-py_engine_reset = lambda: tool_reliability_engine._registry.clear() or tool_reliability_engine._handlers.clear() or tool_reliability_engine._traces.clear() or tool_reliability_engine._cache.clear()
+def py_engine_reset() -> None:
+    tool_reliability_engine._registry.clear()
+    tool_reliability_engine._handlers.clear()
+    tool_reliability_engine._traces.clear()
+    tool_reliability_engine._cache.clear()
 
 
 def test_tool_registration_and_listing(client) -> None:
@@ -48,12 +51,12 @@ def test_tool_selection_logic() -> None:
         name="hadith_lookup",
         description="Looks up hadith texts by reference",
         capabilities=["hadith", "sunnah"],
-    );
+    )
     desc2 = ToolDescription(
         name="zakat_calculator",
         description="Calculates nisab and zakat obligations",
         capabilities=["finance", "zakat"],
-    );
+    )
     tool_reliability_engine.register_tool(desc1, lambda ref: ref)
     tool_reliability_engine.register_tool(desc2, lambda amt: amt)
 
@@ -76,19 +79,18 @@ def test_parameter_validation_failure() -> None:
     # Missing required parameter
     valid, err = tool_reliability_engine.validate_parameters("fetch_data", {})
     assert valid is False
-    assert "Missing required parameter 'id'" in err
+    assert err is not None and "Missing required parameter 'id'" in err
 
     # Invalid type
-    valid2, err2 = tool_reliability_engine.validate_parameters(
-        "fetch_data", {"id": "not-an-int"}
-    )
+    valid2, err2 = tool_reliability_engine.validate_parameters("fetch_data", {"id": "not-an-int"})
     assert valid2 is False
-    assert "must be numeric" in err2
+    assert err2 is not None and "must be numeric" in err2
 
 
 @pytest.mark.asyncio
 async def test_tool_invocation_success_and_caching() -> None:
     call_count = 0
+
     def mock_tool(x: int):
         nonlocal call_count
         call_count += 1
@@ -121,6 +123,7 @@ async def test_tool_invocation_success_and_caching() -> None:
 @pytest.mark.asyncio
 async def test_tool_retry_and_error_handling() -> None:
     attempts = 0
+
     def flaky_tool():
         nonlocal attempts
         attempts += 1
@@ -143,6 +146,7 @@ async def test_tool_retry_and_error_handling() -> None:
 
 def test_tool_call_optimization_sequence() -> None:
     from tool_reliability import ToolCallRequest
+
     reqs = [
         ToolCallRequest(tool_name="t1", parameters={"a": 1}),
         ToolCallRequest(tool_name="t1", parameters={"a": 1}),  # Duplicate

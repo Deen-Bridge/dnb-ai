@@ -303,54 +303,53 @@ def _infer_type(entry: dict[str, Any]) -> str:
 def parse_citations(payload: str | None) -> CitationExtraction:
     """Parse the JSON payload of a citation block. Never raises."""
     extraction = CitationExtraction()
-    if not payload or not payload.strip():
-        return extraction
 
-    try:
-        data = json.loads(payload)
-    except (TypeError, ValueError) as exc:
-        logger.info("Citation block was not valid JSON; returning no citations: %s", exc)
-        return extraction
-
-    if isinstance(data, dict):
-        items = data.get("citations")
-    elif isinstance(data, list):
-        items = data
-    else:
-        items = None
-    if not isinstance(items, list):
-        return extraction
-
-    seen = set()
-    for entry in items[:MAX_CITATIONS]:
-        extraction.attempted += 1
-        if not isinstance(entry, dict):
-            extraction.rejected.append("citation entry was not an object")
-            continue
-
-        kind = _clean_str(entry.get("type"))
-        kind = kind.lower() if kind else _infer_type(entry)
-        builder = _BUILDERS.get(kind)
-        if builder is None:
-            extraction.rejected.append(f"unknown citation type {kind!r}")
-            continue
-
+    items = None
+    if payload and payload.strip():
         try:
-            citation, reason = builder(entry)
-        except Exception as exc:  # noqa: BLE001 - a bad citation is never fatal
-            citation, reason = None, f"citation rejected: {exc}"
+            data = json.loads(payload)
+        except (TypeError, ValueError) as exc:
+            logger.info("Citation block was not valid JSON; returning no citations: %s", exc)
+            data = None
 
-        if citation is None:
-            extraction.rejected.append(reason or "citation rejected")
-            continue
+        if isinstance(data, dict):
+            items = data.get("citations")
+        elif isinstance(data, list):
+            items = data
 
-        fingerprint = json.dumps(citation.model_dump(), sort_keys=True)
-        if fingerprint in seen:
-            continue
-        seen.add(fingerprint)
-        extraction.citations.append(citation)
+        if isinstance(items, list):
+            seen = set()
+            for entry in items[:MAX_CITATIONS]:
+                extraction.attempted += 1
+                if not isinstance(entry, dict):
+                    extraction.rejected.append("citation entry was not an object")
+                    continue
 
-    # Run advanced verification (format, completeness, cross-reference, drift).
+                kind = _clean_str(entry.get("type"))
+                kind = kind.lower() if kind else _infer_type(entry)
+                builder = _BUILDERS.get(kind)
+                if builder is None:
+                    extraction.rejected.append(f"unknown citation type {kind!r}")
+                    continue
+
+                try:
+                    citation, reason = builder(entry)
+                except Exception as exc:  # noqa: BLE001 - a bad citation is never fatal
+                    citation, reason = None, f"citation rejected: {exc}"
+
+                if citation is None:
+                    extraction.rejected.append(reason or "citation rejected")
+                    continue
+
+                fingerprint = json.dumps(citation.model_dump(), sort_keys=True)
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                extraction.citations.append(citation)
+
+    # Run advanced verification (format, completeness, cross-reference, drift)
+    # on whatever survived parsing — including the empty extraction, so
+    # callers always see defaults rather than a missing key.
     # Imported lazily to avoid a circular import: citation_verification imports
     # the Citation models from this module at module load time.
     try:
@@ -433,10 +432,7 @@ def verify_evidence(text: str | None) -> EvidenceVerificationReport:
                 )
             )
             continue
-        weak = any(
-            isinstance(c, HadithCitation) and c.grading and "sahih" not in c.grading
-            for c in matched
-        )
+        weak = any(isinstance(c, HadithCitation) and c.grading and "sahih" not in c.grading for c in matched)
         report.claims.append(
             ClaimVerification(
                 claim=claim,
@@ -447,9 +443,7 @@ def verify_evidence(text: str | None) -> EvidenceVerificationReport:
             )
         )
     if report.claims:
-        report.overall_score = round(
-            sum(1 for c in report.claims if c.supported) / len(report.claims), 4
-        )
+        report.overall_score = round(sum(1 for c in report.claims if c.supported) / len(report.claims), 4)
     return report
 
 
@@ -612,12 +606,10 @@ class AnswerQualityJudge:
             threshold=self.threshold,
         )
 
-    def _accuracy(
-        self, answer: str, citations: CitationExtraction | None
-    ) -> QualityScore:
+    def _accuracy(self, answer: str, citations: CitationExtraction | None) -> QualityScore:
         if citations is not None and citations.score is not None:
             score = citations.score
-            feedback = "Verified citation ratio is {:.0%}.".format(score)
+            feedback = f"Verified citation ratio is {score:.0%}."
         else:
             score = 0.75
             feedback = "No verifiable citations; accuracy is assumed pending review."
@@ -639,9 +631,7 @@ class AnswerQualityJudge:
     def _clarity(self, answer: str) -> QualityScore:
         sentences = [s for s in re.split(r"[.!?]+", answer) if s.strip()]
         if not sentences:
-            return QualityScore(
-                dimension="clarity", score=0.0, feedback="No readable content."
-            )
+            return QualityScore(dimension="clarity", score=0.0, feedback="No readable content.")
         words = answer.split()
         avg_sentence = len(words) / len(sentences)
         avg_word = sum(len(word) for word in words) / len(words)
@@ -654,12 +644,10 @@ class AnswerQualityJudge:
         return QualityScore(
             dimension="clarity",
             score=score,
-            feedback="Average sentence length is {:.1f} words.".format(avg_sentence),
+            feedback=f"Average sentence length is {avg_sentence:.1f} words.",
         )
 
-    def _scholarly_rigor(
-        self, answer: str, citations: CitationExtraction | None
-    ) -> QualityScore:
+    def _scholarly_rigor(self, answer: str, citations: CitationExtraction | None) -> QualityScore:
         lower = answer.lower()
         markers = sum(1 for marker in _SCHOLARLY_MARKERS if marker in lower)
         score = 0.4
@@ -669,7 +657,7 @@ class AnswerQualityJudge:
         return QualityScore(
             dimension="scholarly_rigor",
             score=score,
-            feedback="Scholarly markers found: {}.".format(markers),
+            feedback=f"Scholarly markers found: {markers}.",
         )
 
     def _appropriateness(self, answer: str) -> QualityScore:
@@ -683,9 +671,7 @@ class AnswerQualityJudge:
         else:
             score = 0.6
             feedback = "Answer may be overlong; consider tightening."
-        return QualityScore(
-            dimension="appropriateness", score=score, feedback=feedback
-        )
+        return QualityScore(dimension="appropriateness", score=score, feedback=feedback)
 
     def _balance(self, answer: str) -> QualityScore:
         lower = answer.lower()
@@ -708,12 +694,10 @@ class AnswerQualityJudge:
         return QualityScore(
             dimension="objectivity",
             score=score,
-            feedback="Subjective markers found: {}.".format(markers),
+            feedback=f"Subjective markers found: {markers}.",
         )
 
-    def _citation_quality(
-        self, citations: CitationExtraction | None
-    ) -> QualityScore:
+    def _citation_quality(self, citations: CitationExtraction | None) -> QualityScore:
         if citations is None or not citations.citations:
             return QualityScore(
                 dimension="citation_quality",
@@ -721,10 +705,8 @@ class AnswerQualityJudge:
                 feedback="No citations provided; scholarly verification is limited.",
             )
         score = citations.score if citations.score is not None else 0.5
-        feedback = "{} verified citation(s).".format(len(citations.citations))
-        return QualityScore(
-            dimension="citation_quality", score=score, feedback=feedback
-        )
+        feedback = f"{len(citations.citations)} verified citation(s)."
+        return QualityScore(dimension="citation_quality", score=score, feedback=feedback)
 
     def _find_gaps(self, answer: str) -> list[str]:
         gaps: list[str] = []
@@ -739,15 +721,11 @@ class AnswerQualityJudge:
             gaps.append("A concluding synthesis is missing.")
         return gaps
 
-    def _recommendations(
-        self, scores: list[QualityScore], gaps: list[str]
-    ) -> list[str]:
+    def _recommendations(self, scores: list[QualityScore], gaps: list[str]) -> list[str]:
         recommendations = list(gaps)
         for item in scores:
             if item.score < 0.5:
-                recommendations.append(
-                    "Improve {}: {}".format(item.dimension.replace("_", " "), item.feedback)
-                )
+                recommendations.append("Improve {}: {}".format(item.dimension.replace("_", " "), item.feedback))
         return recommendations[:5]
 
 

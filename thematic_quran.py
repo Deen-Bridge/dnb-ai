@@ -312,16 +312,123 @@ SUB_THEMES = [
     ),
 ]
 
-# Surah revelation periods (partial list - expand as needed)
+# Surah revelation periods for all 114 surahs, matching the classification
+# in scripts/build_surah_index.py (single source of truth).
 SURAH_PERIODS: dict[int, RevelationPeriod] = {
-    1: RevelationPeriod.MECCAN,  # Al-Fatiha
+    1: RevelationPeriod.MECCAN,  # Al-Fatihah
     2: RevelationPeriod.MEDINAN,  # Al-Baqarah
     3: RevelationPeriod.MEDINAN,  # Ali 'Imran
     4: RevelationPeriod.MEDINAN,  # An-Nisa
     5: RevelationPeriod.MEDINAN,  # Al-Ma'idah
     6: RevelationPeriod.MECCAN,  # Al-An'am
     7: RevelationPeriod.MECCAN,  # Al-A'raf
-    # ... (would be expanded for all 114 surahs)
+    8: RevelationPeriod.MEDINAN,  # Al-Anfal
+    9: RevelationPeriod.MEDINAN,  # At-Tawbah
+    10: RevelationPeriod.MECCAN,  # Yunus
+    11: RevelationPeriod.MECCAN,  # Hud
+    12: RevelationPeriod.MECCAN,  # Yusuf
+    13: RevelationPeriod.MEDINAN,  # Ar-Ra'd
+    14: RevelationPeriod.MECCAN,  # Ibrahim
+    15: RevelationPeriod.MECCAN,  # Al-Hijr
+    16: RevelationPeriod.MECCAN,  # An-Nahl
+    17: RevelationPeriod.MECCAN,  # Al-Isra
+    18: RevelationPeriod.MECCAN,  # Al-Kahf
+    19: RevelationPeriod.MECCAN,  # Maryam
+    20: RevelationPeriod.MECCAN,  # Taha
+    21: RevelationPeriod.MECCAN,  # Al-Anbiya
+    22: RevelationPeriod.MEDINAN,  # Al-Hajj
+    23: RevelationPeriod.MECCAN,  # Al-Mu'minun
+    24: RevelationPeriod.MEDINAN,  # An-Nur
+    25: RevelationPeriod.MECCAN,  # Al-Furqan
+    26: RevelationPeriod.MECCAN,  # Ash-Shu'ara
+    27: RevelationPeriod.MECCAN,  # An-Naml
+    28: RevelationPeriod.MECCAN,  # Al-Qasas
+    29: RevelationPeriod.MECCAN,  # Al-'Ankabut
+    30: RevelationPeriod.MECCAN,  # Ar-Rum
+    31: RevelationPeriod.MECCAN,  # Luqman
+    32: RevelationPeriod.MECCAN,  # As-Sajdah
+    33: RevelationPeriod.MEDINAN,  # Al-Ahzab
+    34: RevelationPeriod.MECCAN,  # Saba
+    35: RevelationPeriod.MECCAN,  # Fatir
+    36: RevelationPeriod.MECCAN,  # Ya-Sin
+    37: RevelationPeriod.MECCAN,  # As-Saffat
+    38: RevelationPeriod.MECCAN,  # Sad
+    39: RevelationPeriod.MECCAN,  # Az-Zumar
+    40: RevelationPeriod.MECCAN,  # Ghafir
+    41: RevelationPeriod.MECCAN,  # Fussilat
+    42: RevelationPeriod.MECCAN,  # Ash-Shura
+    43: RevelationPeriod.MECCAN,  # Az-Zukhruf
+    44: RevelationPeriod.MECCAN,  # Ad-Dukhan
+    45: RevelationPeriod.MECCAN,  # Al-Jathiyah
+    46: RevelationPeriod.MECCAN,  # Al-Ahqaf
+    47: RevelationPeriod.MEDINAN,  # Muhammad
+    48: RevelationPeriod.MEDINAN,  # Al-Fath
+    49: RevelationPeriod.MEDINAN,  # Al-Hujurat
+    50: RevelationPeriod.MECCAN,  # Qaf
+    51: RevelationPeriod.MECCAN,  # Adh-Dhariyat
+    52: RevelationPeriod.MECCAN,  # At-Tur
+    53: RevelationPeriod.MECCAN,  # An-Najm
+    54: RevelationPeriod.MECCAN,  # Al-Qamar
+    55: RevelationPeriod.MEDINAN,  # Ar-Rahman
+    56: RevelationPeriod.MECCAN,  # Al-Waqi'ah
+    57: RevelationPeriod.MEDINAN,  # Al-Hadid
+    58: RevelationPeriod.MEDINAN,  # Al-Mujadila
+    59: RevelationPeriod.MEDINAN,  # Al-Hashr
+    60: RevelationPeriod.MEDINAN,  # Al-Mumtahanah
+    61: RevelationPeriod.MEDINAN,  # As-Saff
+    62: RevelationPeriod.MEDINAN,  # Al-Jumu'ah
+    63: RevelationPeriod.MEDINAN,  # Al-Munafiqun
+    64: RevelationPeriod.MEDINAN,  # At-Taghabun
+    65: RevelationPeriod.MEDINAN,  # At-Talaq
+    66: RevelationPeriod.MEDINAN,  # At-Tahrim
+    67: RevelationPeriod.MECCAN,  # Al-Mulk
+    68: RevelationPeriod.MECCAN,  # Al-Qalam
+    69: RevelationPeriod.MECCAN,  # Al-Haqqah
+    70: RevelationPeriod.MECCAN,  # Al-Ma'arij
+    71: RevelationPeriod.MECCAN,  # Nuh
+    72: RevelationPeriod.MECCAN,  # Al-Jinn
+    73: RevelationPeriod.MECCAN,  # Al-Muzzammil
+    74: RevelationPeriod.MECCAN,  # Al-Muddaththir
+    75: RevelationPeriod.MECCAN,  # Al-Qiyamah
+    76: RevelationPeriod.MEDINAN,  # Al-Insan
+    77: RevelationPeriod.MECCAN,  # Al-Mursalat
+    78: RevelationPeriod.MECCAN,  # An-Naba
+    79: RevelationPeriod.MECCAN,  # An-Nazi'at
+    80: RevelationPeriod.MECCAN,  # 'Abasa
+    81: RevelationPeriod.MECCAN,  # At-Takwir
+    82: RevelationPeriod.MECCAN,  # Al-Infitar
+    83: RevelationPeriod.MECCAN,  # Al-Mutaffifin
+    84: RevelationPeriod.MECCAN,  # Al-Inshiqaq
+    85: RevelationPeriod.MECCAN,  # Al-Buruj
+    86: RevelationPeriod.MECCAN,  # At-Tariq
+    87: RevelationPeriod.MECCAN,  # Al-A'la
+    88: RevelationPeriod.MECCAN,  # Al-Ghashiyah
+    89: RevelationPeriod.MECCAN,  # Al-Fajr
+    90: RevelationPeriod.MECCAN,  # Al-Balad
+    91: RevelationPeriod.MECCAN,  # Ash-Shams
+    92: RevelationPeriod.MECCAN,  # Al-Layl
+    93: RevelationPeriod.MECCAN,  # Ad-Duha
+    94: RevelationPeriod.MECCAN,  # Ash-Sharh
+    95: RevelationPeriod.MECCAN,  # At-Tin
+    96: RevelationPeriod.MECCAN,  # Al-'Alaq
+    97: RevelationPeriod.MECCAN,  # Al-Qadr
+    98: RevelationPeriod.MEDINAN,  # Al-Bayyinah
+    99: RevelationPeriod.MEDINAN,  # Az-Zalzalah
+    100: RevelationPeriod.MECCAN,  # Al-'Adiyat
+    101: RevelationPeriod.MECCAN,  # Al-Qari'ah
+    102: RevelationPeriod.MECCAN,  # At-Takathur
+    103: RevelationPeriod.MECCAN,  # Al-'Asr
+    104: RevelationPeriod.MECCAN,  # Al-Humazah
+    105: RevelationPeriod.MECCAN,  # Al-Fil
+    106: RevelationPeriod.MECCAN,  # Quraysh
+    107: RevelationPeriod.MECCAN,  # Al-Ma'un
+    108: RevelationPeriod.MECCAN,  # Al-Kawthar
+    109: RevelationPeriod.MECCAN,  # Al-Kafirun
+    110: RevelationPeriod.MEDINAN,  # An-Nasr
+    111: RevelationPeriod.MECCAN,  # Al-Masad
+    112: RevelationPeriod.MECCAN,  # Al-Ikhlas
+    113: RevelationPeriod.MECCAN,  # Al-Falaq
+    114: RevelationPeriod.MECCAN,  # An-Nas
 }
 
 
