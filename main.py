@@ -148,6 +148,8 @@ GEMINI_API_KEY = settings.gemini_api_key
 
 genai.configure(api_key=GEMINI_API_KEY)
 
+EVIDENCE_VERIFICATION_ENABLED = os.getenv("EVIDENCE_VERIFICATION_ENABLED", "true").lower() not in {"0", "false", "off"}
+
 app = FastAPI(title="DeenBridge AI API")
 
 # --- Service API-key authentication ---
@@ -344,6 +346,26 @@ class CitationVerificationResult(BaseModel):
     reason: str | None = None
 
 
+class EvidenceClaim(BaseModel):
+    claim: str
+    evidence: list[str] = Field(default_factory=list)
+    source_type: str | None = None
+    verification_status: str = "unverified"
+    confidence: float | None = None
+    reason: str | None = None
+    alternative_evidence: list[str] = Field(default_factory=list)
+
+
+class EvidenceVerificationResult(BaseModel):
+    claims: list[EvidenceClaim] = Field(default_factory=list)
+    overall_score: float = 0.0
+    audit_trail: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EvidenceVerifyRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=30000)
+
+
 class ChatRequest(BaseModel):
     prompt: str = Field(..., max_length=CHAT_PROMPT_MAX_LENGTH)
     chat_id: str | None = None
@@ -387,6 +409,8 @@ class ChatResponse(BaseModel):
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
+    # Evidence verification agent audit (#evidence-verification).
+    evidence_verification: EvidenceVerificationResult | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -781,6 +805,87 @@ async def run_strict_corrective_loop(
     return safe_text or original_text
 
 
+def _citation_to_dict(item: Any) -> dict[str, Any]:
+    if hasattr(item, "model_dump"):
+        return item.model_dump()
+    if hasattr(item, "dict"):
+        return item.dict()
+    return {}
+
+
+def _evidence_label(d: dict[str, Any]) -> str:
+    if d.get("source") == "quran" and d.get("surah") is not None:
+        return f"Quran {d['surah']}:{d.get('ayah', '')}"
+    if d.get("collection"):
+        return f"{d['collection']} {d.get('number', '')}".strip()
+    return str(d.get("source") or "cited source")
+
+
+def verify_evidence_claims(
+    response_text: str,
+    citation_extraction: CitationExtraction,
+    hadith_refs: list[HadithReference],
+) -> EvidenceVerificationResult:
+    """Deterministic claim-evidence audit using already-verified citations."""
+    result = EvidenceVerificationResult()
+    claims = [
+        s.strip()
+        for s in response_text.replace("\n", " ").split(".")
+        if len(s.strip()) >= 25
+    ]
+    evidence: list[tuple[str, str, bool]] = []
+
+    for c in citation_extraction.citations:
+        d = _citation_to_dict(c)
+        label = _evidence_label(d)
+        status = str(d.get("status") or d.get("verification") or "unverified")
+        evidence.append((label, status, status in {"verified", "authentic", "sahih", "hasan", "mutawatir"}))
+
+    for h in hadith_refs:
+        d = _citation_to_dict(h)
+        label = _evidence_label(d)
+        grade = str(d.get("grade") or d.get("authenticity") or d.get("status") or "unverified").lower()
+        evidence.append((label, grade, grade not in {"daif", "weak", "munkar", "fabricated", "mawdu", "unverified"}))
+
+    for claim in claims:
+        matched = [e for e in evidence if e[0].lower() in claim.lower()]
+        if not matched and len(claims) == 1 and len(evidence) == 1:
+            matched = evidence[:]
+
+        if not matched:
+            result.claims.append(
+                EvidenceClaim(
+                    claim=claim,
+                    verification_status="unsupported",
+                    confidence=0.1,
+                    reason="No verifiable citation is present for this claim.",
+                    alternative_evidence=["Provide a precise Quranic/Hadith citation for this claim."],
+                )
+            )
+            result.audit_trail.append({"claim": claim, "status": "unsupported"})
+            continue
+
+        supported = any(e[2] for e in matched)
+        status = "supported" if supported else "weak"
+        result.claims.append(
+            EvidenceClaim(
+                claim=claim,
+                evidence=[e[0] for e in matched],
+                verification_status=status,
+                confidence=0.9 if supported else 0.4,
+                reason="Evidence linked and verified." if supported else "Evidence cited but could not be verified.",
+            )
+        )
+        result.audit_trail.append({"claim": claim, "evidence": [e[0] for e in matched], "status": status})
+
+    result.overall_score = (
+        sum(1 for c in result.claims if c.verification_status == "supported") / len(result.claims)
+        if result.claims
+        else 0.0
+    )
+    return result
+
+
 @app.post("/chat", response_model=ChatResponse)
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
@@ -1080,6 +1185,13 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         # Baked into response_text *before* the cache write so a cached hit
         # replays the same caution the user originally saw.
         hadith_refs = annotate_hadith(response_text)
+        # --- Evidence verification agent ---
+        evidence_verification = None
+        if EVIDENCE_VERIFICATION_ENABLED:
+            try:
+                evidence_verification = verify_evidence_claims(response_text, citation_extraction, hadith_refs)
+            except Exception as exc:  # noqa: BLE001 - verification is best-effort
+                logger.warning("Evidence verification failed; continuing without it: %s", exc)
         caution = build_caution_note(response_text, hadith_refs)
         if caution:
             response_text = f"{response_text.rstrip()}\n\n{caution}"
@@ -1202,6 +1314,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             purchases=purchase_info,
             language=effective_language,
             citations=citation_extraction.citations,
+            evidence_verification=evidence_verification,
         )
         _finalize()
         _succeeded = True
@@ -1526,6 +1639,12 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
                 # --- Hadith authenticity grading ---
                 hadith_refs = annotate_hadith(combined_text)
+                evidence_verification = None
+                if EVIDENCE_VERIFICATION_ENABLED:
+                    try:
+                        evidence_verification = verify_evidence_claims(combined_text, citation_extraction, hadith_refs)
+                    except Exception as exc:  # noqa: BLE001 - verification is best-effort
+                        logger.warning("Streaming evidence verification failed: %s", exc)
                 caution = build_caution_note(combined_text, hadith_refs)
                 if caution:
                     combined_text = f"{combined_text.rstrip()}\n\n{caution}"
@@ -1604,6 +1723,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
+                        "evidence_verification": evidence_verification.model_dump() if evidence_verification else None,
                     },
                     ensure_ascii=False,
                 )
@@ -1785,6 +1905,26 @@ async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str
             detail="Internal server error",
             hint="Failed to delete chat session. Please retry.",
         ) from e
+
+
+@app.post("/evidence/verify", response_model=EvidenceVerificationResult)
+async def verify_evidence_endpoint(body: EvidenceVerifyRequest) -> EvidenceVerificationResult:
+    """Run the evidence verification agent on a generated answer.
+
+    Extracts any citation block, parses Quran/Hadith references, links them to
+    claims, and returns a structured audit of support strength.
+    """
+    try:
+        cleaned_text, citation_extraction = extract_citations(body.text)
+        hadith_refs = annotate_hadith(cleaned_text)
+        return verify_evidence_claims(cleaned_text, citation_extraction, hadith_refs)
+    except Exception as exc:
+        logger.error("Evidence verification endpoint failed: %s", exc)
+        raise APIException(
+            status_code=500,
+            detail="Evidence verification failed.",
+            hint="The evidence verification agent could not process the supplied text. Verify the text is well-formed and retry.",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

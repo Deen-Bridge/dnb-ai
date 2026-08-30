@@ -153,6 +153,23 @@ class CitationExtraction(BaseModel):
         return round(len(self.citations) / self.attempted, 4)
 
 
+class ClaimVerification(BaseModel):
+    """Verification result for a single extracted claim."""
+
+    claim: str
+    matched_citations: list[Citation] = []
+    supported: bool = False
+    strength: Literal["strong", "moderate", "weak", "unsupported"] = "unsupported"
+    reasons: list[str] = []
+
+
+class EvidenceVerificationReport(BaseModel):
+    """Claims checked and the citations that supported them."""
+
+    claims: list[ClaimVerification] = []
+    overall_score: float | None = None
+
+
 def _coerce_int(value: Any) -> int | None:
     """Accept 2 and "2" alike; reject everything else without raising."""
     if isinstance(value, bool):
@@ -367,6 +384,73 @@ def extract_citations(text: str | None) -> tuple[str, CitationExtraction]:
         return prose, parse_citations(payload)
 
     return text, CitationExtraction()
+
+
+_CLAIM_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _extract_claims(prose: str) -> list[str]:
+    """Split prose into candidate claims, keeping sentences that cite anything."""
+    claims = []
+    for sentence in _CLAIM_SENTENCE_RE.split(prose):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if re.search(r"(Qur'?an|hadith|surah|Surah|reported|narrated|said|wrote|states?)\b", sentence):
+            claims.append(sentence)
+    return claims
+
+
+def _match_citations(claim: str, citations: list[Citation]) -> list[Citation]:
+    """Link a claim to the citations whose references appear in its text."""
+    matched = []
+    for citation in citations:
+        ref = citation.reference if isinstance(citation, QuranCitation) else None
+        if ref and ref in claim:
+            matched.append(citation)
+            continue
+        if isinstance(citation, HadithCitation) and citation.collection and citation.collection in claim:
+            matched.append(citation)
+            continue
+        if isinstance(citation, ScholarlyReference) and citation.work and citation.work in claim:
+            matched.append(citation)
+            continue
+    return matched
+
+
+def verify_evidence(text: str | None) -> EvidenceVerificationReport:
+    """Verify claims in *text* against the citations it carries."""
+    prose, extraction = extract_citations(text)
+    report = EvidenceVerificationReport()
+    for claim in _extract_claims(prose):
+        matched = _match_citations(claim, extraction.citations)
+        if not matched:
+            report.claims.append(
+                ClaimVerification(
+                    claim=claim,
+                    supported=False,
+                    reasons=["no structured citation found for this claim"],
+                )
+            )
+            continue
+        weak = any(
+            isinstance(c, HadithCitation) and c.grading and "sahih" not in c.grading
+            for c in matched
+        )
+        report.claims.append(
+            ClaimVerification(
+                claim=claim,
+                matched_citations=matched,
+                supported=True,
+                strength="moderate" if weak else "strong",
+                reasons=[f"matched {len(matched)} structured citation(s)"],
+            )
+        )
+    if report.claims:
+        report.overall_score = round(
+            sum(1 for c in report.claims if c.supported) / len(report.claims), 4
+        )
+    return report
 
 
 class CitationStreamFilter:
