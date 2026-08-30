@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -253,6 +254,65 @@ def evaluate_single_response(record: dict[str, Any], candidate_answer: str) -> d
     }
 
 
+def evaluate_with_llm_judge(record: dict[str, Any], candidate_answer: str) -> dict[str, Any]:
+    """Evaluate a response using an LLM judge (OpenAI-compatible API)."""
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        # Fallback to offline scoring if no API key
+        return evaluate_single_response(record, candidate_answer)
+
+    prompt = f"""You are an expert Islamic scholar and evaluator. Assess the following answer against the expected criteria.
+
+Question: {record.get('question', '')}
+Expected answer: {record.get('expected_answer', '')}
+Candidate answer: {candidate_answer}
+
+Evaluation criteria: {json.dumps(record.get('evaluation_criteria', {}))}
+
+Score the candidate on these dimensions (0-1 each):
+- accuracy
+- completeness
+- appropriateness
+- citation_quality
+- tone
+
+Also provide a composite score (0-1) and a pass/fail verdict (pass if >= 0.7). Respond in JSON only with keys: accuracy, completeness, appropriateness, citation_quality, tone, composite_score, passed, reasoning."""
+
+    payload = json.dumps({
+        "model": "gpt-4",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+            judge_res = json.loads(content)
+    except Exception as e:
+        # On any error, fall back to offline scoring
+        return evaluate_single_response(record, candidate_answer)
+
+    # Ensure all fields exist
+    for dim in ["accuracy", "completeness", "appropriateness", "citation_quality", "tone", "composite_score"]:
+        judge_res.setdefault(dim, 0.0)
+    judge_res["passed"] = judge_res.get("composite_score", 0.0) >= 0.7
+    judge_res["id"] = record["id"]
+    judge_res["domain"] = record["domain"]
+    judge_res["difficulty"] = record["difficulty"]
+    judge_res["reasoning"] = judge_res.get("reasoning", "")
+    return judge_res
+
+
 def query_live_api(base_url: str, question: str) -> str:
     """Send query to the live API endpoint."""
     url = f"{base_url.rstrip('/')}/chat"
@@ -276,6 +336,7 @@ def run_benchmark_eval(
     live_url: str | None = None,
     domain_filter: str | None = None,
     limit: int | None = None,
+    judge: bool = False,
 ) -> dict[str, Any]:
     if domain_filter:
         records = [r for r in records if r.get("domain") == domain_filter]
@@ -293,7 +354,10 @@ def run_benchmark_eval(
             # Offline mock: evaluate against ground truth expected answer for baseline calibration
             answer = r["expected_answer"]
 
-        res = evaluate_single_response(r, answer)
+        if judge:
+            res = evaluate_with_llm_judge(r, answer)
+        else:
+            res = evaluate_single_response(r, answer)
         results.append(res)
         domain_scores[r["domain"]].append(res["composite_score"])
         domain_passes[r["domain"]].append(res["passed"])
@@ -330,6 +394,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Limit number of items to evaluate")
     parser.add_argument("--live", action="store_true", help="Run against a live API endpoint")
     parser.add_argument("--url", type=str, default="http://localhost:8000", help="Live API server base URL")
+    parser.add_argument("--judge", action="store_true", help="Use LLM-as-judge for evaluation")
     parser.add_argument("--output", type=Path, default=None, help="Path to save evaluation output report")
 
     args = parser.parse_args()
