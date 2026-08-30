@@ -7,8 +7,24 @@
 - License: [The Unlicense](https://github.com/fawazahmed0/hadith-api/blob/1/LICENSE) — public domain
 - Fetched: see the `source.fetched` field in each `data/hadith/<collection>.json` file
 - Collections bundled: Sahih al-Bukhari, Sahih Muslim, Sunan Abu Dawud, Jami
-  at-Tirmidhi, Sunan an-Nasai, Sunan Ibn Majah, Muwatta Malik (the two
-  Sahihs, the four Sunan, and the Muwatta)
+  at-Tirmidhi, Sunan an-Nasai, Sunan Ibn Majah, Muwatta Malik, the Forty
+  Hadith of an-Nawawi, the Forty Hadith Qudsi, and the Forty Hadith of Shah
+  Waliullah al-Dehlawi — ten collections in all (the two Sahihs, the four
+  Sunan, the Muwatta, and three famous compilations of forty)
+
+## Why the Forty collections carry a consensus grade
+
+Al-Nawawi's Forty and the Forty Hadith Qudsi have no per-hadith grade in the
+source data, for the same reason Bukhari and Muslim do not: both were compiled
+as selections of authentic narrations and are treated by the scholarly
+community as authenticated in their entirety. They are therefore recorded with
+grade `SAHIH` and a grader label that names the basis explicitly
+("Scholarly consensus (al-Nawawi's Forty are an authentic selection)" /
+"Scholarly consensus (Forty Hadith Qudsi are individually authentic
+narrations)"). The Forty Hadith of Shah Waliullah al-Dehlawi is a modern
+selection with no established collective grading, so its records carry grade
+`UNKNOWN` and the research agent reports them as unverified by the bundled
+dataset rather than inventing a grade.
 
 ## What is bundled, and why
 
@@ -95,6 +111,25 @@ graders said.
 `n` is the global sequential hadith number (the number most citations use,
 e.g. "Sunan Abu Dawud 3"); `book`/`bn` are the book number and book-local
 hadith number, used when a citation explicitly names a book.
+
+## Variant references (`variants.json`)
+
+`variants.json` maps famous narrations that appear in more than one collection
+to their cross-collection references (collection, global number, and book
+number). Every reference was verified against the text of the pinned
+`fawazahmed0/hadith-api` edition files, so each one resolves through the
+bundled grading dataset. The narration titles are one-line glosses, not
+reproductions of translated texts, consistent with the no-text bundling policy
+above.
+
+## Rijal (narrator biography) knowledge base
+
+`data/rijal/narrators.json` is a curated starter subset of well-known
+narrators (Companions, prominent Successors, and the compilers of the major
+collections) with generation, death year, and a cautious reliability reading
+sourced from standard rijāl references (Ibn Hajar's Taqrib al-Tahdhib,
+al-Dhahabi's Siyar and Mizan al-I'tidal). It is advisory and deliberately not
+exhaustive; see the file's own provenance header for details.
 
 ## Update process
 
