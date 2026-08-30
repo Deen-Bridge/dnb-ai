@@ -124,6 +124,9 @@ jobs:
       - name: Run Swahili language processing tests
         run: pytest -q tests/test_swahili.py
 
+      - name: Run Arabic dialect support tests
+        run: pytest -q tests/test_arabic_dialect.py
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 
