@@ -84,6 +84,9 @@ jobs:
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
 
+      - name: Run asbab al-nuzul tests
+        run: pytest -q tests/test_asbab.py
+
       - name: Run purchase history chat tests
         run: pytest -q tests/test_purchases.py
 
