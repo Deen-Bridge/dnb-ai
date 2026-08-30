@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     quality_regeneration_threshold: float = Field(default=0.7, ge=0, le=1)
     quality_regeneration_max_attempts: int = Field(default=2, ge=1)
 
-    geminy_timeout: int = Field(default=30, ge=1)
+    gemini_timeout: int = Field(default=30, ge=1)
 
     cors_origins: list[str] = Field(
         default_factory=lambda: [
@@ -87,4 +87,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Setting'"
+    return Settings()
