@@ -594,6 +594,82 @@ class ThemeVerseStore:
             json.dump(data, f, indent=2)
 
 
+class ReferenceType(str, Enum):
+    """Type of cross-surah reference."""
+
+    REPEATED_STORY = "repeated_story"
+    RELATED_RULING = "related_ruling"
+    SIMILAR_TEACHING = "similar_teaching"
+    PARALLEL_NARRATIVE = "parallel_narrative"
+    THEMATIC_PARALLEL = "thematic_parallel"
+    SCHOLARLY_CROSS_REFERENCE = "scholarly_cross_reference"
+
+
+@dataclass
+class CrossReference:
+    """A bidirectional cross-surah reference between two verses."""
+
+    source_surah: int
+    source_ayah: int
+    target_surah: int
+    target_ayah: int
+    reference_type: ReferenceType = ReferenceType.THEMATIC_PARALLEL
+    context: str | None = None
+    commentary: str | None = None
+    source: str = "manual"
+    weight: float = 1.0
+
+    def key(self) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Canonical key so A->B and B->A are treated as the same reference."""
+        first = (self.source_surah, self.source_ayah)
+        second = (self.target_surah, self.target_ayah)
+        return (first, second) if first < second else (second, first)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_surah": self.source_surah,
+            "source_ayah": self.source_ayah,
+            "target_surah": self.target_surah,
+            "target_ayah": self.target_ayah,
+            "reference_type": self.reference_type.value,
+            "context": self.context,
+            "commentary": self.commentary,
+            "source": self.source,
+            "weight": self.weight,
+        }
+
+
+class CrossReferenceStore:
+    """Stores and indexes cross-surah references for efficient retrieval."""
+
+    DEFAULT_REFERENCES = [
+        CrossReference(
+            source_surah=2,
+            source_ayah=255,
+            target_surah=112,
+            target_ayah=1,
+            reference_type=ReferenceType.SIMILAR_TEACHING,
+            context="Both verses affirm Allah's absolute oneness and perfect attributes.",
+            commentary="Classical tafsir literature links Ayat al-Kursi and Surah Al-Ikhlas as complementary statements of tawhid.",
+            source="tafsir",
+        ),
+        CrossReference(
+            source_surah=1,
+            source_ayah=5,
+            target_surah=2,
+            target_ayah=21,
+            reference_type=ReferenceType.THEMATIC_PARALLEL,
+            context="The call to worship Allah alone is repeated throughout the Quran.",
+            commentary="Ibn Kathir notes the parallel between the opening chapter's petition and the explicit command to worship.",
+            source="tafsir",
+        ),
+        CrossReference(
+            source_surah=2,
+            source_ayah=183,
+            target_surah=2,
+            target_ayah=187,
+            reference_type=ReferenceType.RELATED_RULING
+
 class ThematicRetriever:
     """Main API for thematic Quran retrieval."""
 
