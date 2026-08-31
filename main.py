@@ -54,6 +54,7 @@ from async_runtime import (
     http_client_pool,
     llm_limiter,
 )
+from audio_analysis import router as audio_analysis_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
 from calligraphy_ocr import (
@@ -365,6 +366,8 @@ app.include_router(hadith_search_router)
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
 app.include_router(audio_hadith_router)
+# Audio analysis: voice-note transcription, recitation detection and terminology
+app.include_router(audio_analysis_router)
 # Database query optimization: static anti-pattern analysis + runtime profiling
 app.include_router(query_optimizer_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
