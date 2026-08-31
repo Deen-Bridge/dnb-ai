@@ -50,6 +50,13 @@ The platform is composed of three services:
 
 All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Limiting](#authentication--rate-limiting)).
 
+**Interactive reference:** run the service and open **[`/docs`](http://localhost:8000/docs)**
+(Swagger UI) or [`/redoc`](http://localhost:8000/redoc). Every route there is tagged
+(`chat`, `health`), carries a summary and the session semantics, and documents its
+error responses with example bodies; the raw schema is at
+[`/openapi.json`](http://localhost:8000/openapi.json). On a deployed instance,
+substitute the service host for `localhost:8000`.
+
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `POST` | `/chat` | Start or continue a chat session |
@@ -75,6 +82,61 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `POST` | `/feedback` | Rate a specific answer and flag failure categories |
 | `GET` | `/feedback/stats` | Aggregate answer-quality metrics (admin token) |
 | `GET` | `/feedback/records` | Browse flagged records, filterable (admin token) |
+
+### Holding a conversation (two-step `curl`)
+
+Sessions are implicit. **Omit `chat_id` to start one** — the response tells you the
+`chat_id` that was minted — then **send that same `chat_id` back** on every follow-up
+so the previous turns stay in context.
+
+**1. Start a new session** (no `chat_id`):
+
+```bash
+curl -s -X POST "http://localhost:8000/chat" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $SERVICE_API_KEY" \
+  -d '{"prompt": "How do I calculate zakat on my savings?"}'
+```
+
+The reply carries the new session id:
+
+```json
+{
+  "response": "Zakat is due at 2.5% on savings you have held for a full lunar year...",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message_id": "3f6a1c2e9b7d4a58",
+  "history": [{"role": "user", "content": "How do I calculate zakat on my savings?"}, "..."]
+}
+```
+
+**2. Continue that conversation** — reuse the returned `chat_id`, and the follow-up
+resolves against the earlier turn ("that" = zakat on savings):
+
+```bash
+curl -s -X POST "http://localhost:8000/chat" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $SERVICE_API_KEY" \
+  -d '{
+        "prompt": "Does that change if I only held it for six months?",
+        "chat_id": "550e8400-e29b-41d4-a716-446655440000"
+      }'
+```
+
+**3. End the session** when you are done, discarding its turns and stored history:
+
+```bash
+curl -s -X DELETE "http://localhost:8000/chat/550e8400-e29b-41d4-a716-446655440000" \
+  -H "X-API-Key: $SERVICE_API_KEY"
+# {"message":"Chat session deleted successfully"}
+```
+
+`POST /chat` persists history in a background task after it has answered, and the
+delete route does not coordinate with that task — a delete issued in the same
+instant as a just-completed answer can be overtaken by that pending write.
+Re-issue the delete if it must be certain.
+
+A `chat_id` the service does not recognise (an expired session, or one you generated
+yourself) starts a new conversation under that id rather than failing.
 
 ### Learning-path contract (for `dnb-backend`)
 
