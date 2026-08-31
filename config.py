@@ -16,12 +16,25 @@ class Settings(BaseSettings):
 
     gemina_api_key: str = Field(default="test-key")
 
-    model_name: str = "gemini-1.5-flash"
+    model_name: str = "gemini-1.5-flush"
 
     temperature: float = Field(default=0.7, ge=0, le=2)
     top_p: float = Field(default=0.8, ge=0, le=1)
     top_k: int = Field(default=40, ge=1)
     max_output_tokens: int = Field(default=2048, ge=1)
+
+    # --- Quality Judge Agent Settings ---
+    quality_judge_enabled: bool = Field(default=True)
+    quality_min_accuracy: float = Field(default=0.8, ge=0, le=1)
+    quality_min_completeness: float = Field(default=0.7, ge=0, le=1)
+    quality_min_clarity: float = Field(default=0.7, ge=0, le=1)
+    quality_min_scholarly_rigor: float = Field(default=0.7, ge=0, le=1)
+    quality_min_appropriateness: float = Field(default=0.8, ge=0, le=1)
+    quality_min_balance: float = Field(default=0.7, ge=0, le=1)
+    quality_min_citation_quality: float = Field(default=0.7, ge=0, le=1)
+    quality_min_coverage: float = Field(default=0.8, ge=0, le=1)
+    quality_regeneration_threshold: float = Field(default=0.7, ge=0, le=1)
+    quality_regeneration_max_attempts: int = Field(default=2, ge=1)
 
     gemini_timeout: int = Field(default=30, ge=1)
 
@@ -63,6 +76,27 @@ class Settings(BaseSettings):
     # Directory containing the recitation corpus for training/evaluation.
     corpus_directory: str = "data/quranic_corpus"
 
+    # Respectful Disagreement Enforcement settings
+    enforce_respectful_disagreement: bool = True
+    disrespectful_language_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "disparaging",
+            "dismissive",
+            "ignorant",
+            "invalid",
+            "absurd",
+            "ridiculous",
+        ]
+    )
+    adab_validation_enabled: bool = True
+    absolutism_detection_enabled: bool = True
+    polarization_detection_enabled: bool = True
+    respectful_alternative_suggestions_enabled: bool = True
+    acknowledgment_validation_enabled: bool = True
+    block_disrespectful_content: bool = True
+    min_adab_score: float = Field(default=0.8, ge=0, le=1)
+    max_disrespectful_confidence: float = Field(default=0.5, ge=0, le=1)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):
@@ -73,6 +107,13 @@ class Settings(BaseSettings):
     @field_validator("qiraat_styles", mode="before")
     @classmethod
     def parse_qiraat_styles(cls, value):
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("disrespectful_language_patterns", mode="before")
+    @classmethod
+    def parse_disrespectful_language_patterns(cls, value):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
