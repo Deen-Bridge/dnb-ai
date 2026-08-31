@@ -42,8 +42,11 @@ import json
 import logging
 import os
 import re
+from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
+from enum import Enum
 from functools import lru_cache
+from itertools import combinations
 from pathlib import Path
 from typing import Any, cast
 
@@ -62,6 +65,13 @@ DATA_PATH = Path(__file__).resolve().parent / "data" / "quran" / "surah_index.js
 
 QURAN_API_BASE = os.getenv("QURAN_API_BASE", "https://api.quran.com/api/v4")
 QURAN_API_TIMEOUT = float(os.getenv("QURAN_API_TIMEOUT", "15"))
+
+# Static JSON collection of tafsirs (spa5k/tafsir_api) served from the jsDelivr
+# CDN. Quran.com's API no longer carries some classical works (Tafsir
+# al-Jalalayn among them); this dataset mirrors the altafsir.com texts and is
+# the retrieval backend for the works registered with ``source="tafsir_api"``.
+TAFSIR_API_BASE = os.getenv("TAFSIR_API_BASE", "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir")
+TAFSIR_API_TIMEOUT = float(os.getenv("TAFSIR_API_TIMEOUT", "15"))
 
 # Quran.com translation resource ids, by language.
 TRANSLATION_IDS: dict[str, int] = {
@@ -103,6 +113,405 @@ DISCLAIMER = (
     "interpretation."
 )
 
+# ---------------------------------------------------------------------------
+# Ayah relationship graph
+# ---------------------------------------------------------------------------
+
+RELATIONSHIP_TYPES = {
+    "parallel_teaching": "Parallel teaching",
+    "elaboration": "Elaboration",
+    "example": "Example",
+    "contrast": "Contrast",
+    "complement": "Complement",
+}
+RELATIONSHIP_TYPE_LABELS = RELATIONSHIP_TYPES
+DEFAULT_MAX_RELATED_AYAT = 20
+DEFAULT_GRAPH_DEPTH = 2
+RELATIONSHIP_DATA_PATH = Path(__file__).resolve().parent / "data" / "relationships.json"
+
+
+class AyahRelationship(BaseModel):
+    """A related ayah and the nature of its connection to the source ayah."""
+
+    target: str
+    relationship_type: str
+    strength: float
+    scholarly_note: str | None = None
+
+
+class RelatedAyahResponse(BaseModel):
+    source: str
+    direct: list[AyahRelationship]
+    indirect: list[list[str]] = []
+    disclaimer: str = DISCLAIMER
+
+
+class RelationshipGraphResponse(BaseModel):
+    source: str
+    nodes: list[str]
+    edges: list[dict[str, Any]]
+
+
+class RelationshipGraph:
+    """In-memory bi-directional graph of ayah relationships.
+
+    The graph is read-heavy and small enough to remain resident; lookups are
+    O(neighbors) and never touch the network, keeping related-ayah queries
+    comfortably inside the 500ms real-time budget.
+    """
+
+    def __init__(self) -> None:
+        self._edges: dict[str, dict[str, AyahRelationship]] = defaultdict(dict)
+
+    def add_relationship(
+        self,
+        source: str,
+        target: str,
+        relationship_type: str,
+        strength: float,
+        scholarly_note: str | None = None,
+    ) -> None:
+        rel = AyahRelationship(
+            target=target,
+            relationship_type=relationship_type,
+            strength=strength,
+            scholarly_note=scholarly_note,
+        )
+        self._edges[source][target] = rel
+        reverse = AyahRelationship(
+            target=source,
+            relationship_type=relationship_type,
+            strength=strength,
+            scholarly_note=scholarly_note,
+        )
+        self._edges[target][source] = reverse
+
+    def related(
+        self,
+        key: str,
+        relationship_types: set[str] | None = None,
+        min_strength: float = 0.0,
+        max_results: int = DEFAULT_MAX_RELATED_AYAT,
+    ) -> list[AyahRelationship]:
+        edges = self._edges.get(key, {})
+        filtered = [
+            rel
+            for rel in edges.values()
+            if (relationship_types is None or rel.relationship_type in relationship_types)
+            and rel.strength >= min_strength
+        ]
+        filtered.sort(key=lambda rel: rel.strength, reverse=True)
+        return filtered[:max_results]
+
+    def indirect_connections(
+        self,
+        key: str,
+        max_hops: int = DEFAULT_GRAPH_DEPTH,
+        max_results: int = DEFAULT_MAX_RELATED_AYAT,
+    ) -> list[list[str]]:
+        queue: deque[tuple[str, list[str]]] = deque([(key, [key])])
+        seen = {key}
+        paths: list[list[str]] = []
+        while queue and len(paths) < max_results:
+            current, path = queue.popleft()
+            if len(path) > 1:
+                paths.append(path)
+            if len(path) >= max_hops + 1:
+                continue
+            for neighbor in self._edges.get(current, {}):
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    queue.append((neighbor, path + [neighbor]))
+        return paths[:max_results]
+
+    def to_visualization(self, key: str, max_hops: int = DEFAULT_GRAPH_DEPTH) -> RelationshipGraphResponse:
+        nodes = {key}
+        edges: list[dict[str, Any]] = []
+        for neighbor, rel in self._edges.get(key, {}).items():
+            nodes.add(neighbor)
+            edges.append(
+                {
+                    "source": key,
+                    "target": neighbor,
+                    "type": rel.relationship_type,
+                    "strength": rel.strength,
+                }
+            )
+            if max_hops > 1:
+                for second, second_rel in self._edges.get(neighbor, {}).items():
+                    if second != key:
+                        nodes.add(second)
+                        edges.append(
+                            {
+                                "source": neighbor,
+                                "target": second,
+                                "type": second_rel.relationship_type,
+                                "strength": second_rel.strength,
+                            }
+                        )
+        return RelationshipGraphResponse(source=key, nodes=sorted(nodes), edges=edges)
+
+
+_BUILTIN_THEME_CLUSTERS: dict[str, list[str]] = {
+    "tawhid": ["2:255", "3:2", "6:102", "20:14", "23:91", "37:4", "112:1", "112:2", "112:3", "112:4"],
+    "patience": ["2:45", "2:153", "3:200", "8:46", "11:115", "16:127", "20:130", "31:17", "40:55", "103:3"],
+    "prayer": ["2:45", "2:153", "2:238", "4:103", "5:6", "11:114", "17:78", "20:14", "29:45", "31:4", "73:20"],
+    "charity": ["2:261", "2:264", "2:265", "2:267", "2:270", "2:271", "2:274", "3:92", "9:60", "57:18", "64:16"],
+    "judgment": ["1:4", "2:281", "3:9", "3:25", "6:73", "7:187", "19:75", "20:112", "36:51", "50:20", "82:1", "99:1"],
+}
+
+_SCHOLARLY_NOTES: dict[tuple[str, str], str] = {
+    ("112:1", "2:255"): "Both verses affirm Allah's absolute oneness, self-subsistence, and freedom from need.",
+    (
+        "2:153",
+        "2:45",
+    ): "Classical mufassirun link these verses: the earlier command to seek help through patience and prayer is restated with the promise that Allah is with the patient.",
+    (
+        "20:14",
+        "2:45",
+    ): "The Qur'an consistently ties constancy in prayer to consciousness of Allah; al-Tabari notes the connection in explanation of 20:14.",
+    ("57:18", "64:16"): "Both passages pair faith with spending in Allah's cause and promise multiplied reward.",
+    (
+        "2:264",
+        "2:265",
+    ): "The two verses are often read together: one warns against reproachful charity, the other commends sincere giving.",
+}
+
+_CONTRAST_PAIRS: list[tuple[str, str]] = [
+    ("2:264", "2:265"),
+]
+
+
+def _scholarly_note_for(source: str, target: str) -> str | None:
+    key = (min(source, target), max(source, target))
+    return _SCHOLARLY_NOTES.get(key)
+
+
+def _thematic_similarity(source: str, target: str) -> float:
+    source_themes = {theme for theme, members in _BUILTIN_THEME_CLUSTERS.items() if source in members}
+    target_themes = {theme for theme, members in _BUILTIN_THEME_CLUSTERS.items() if target in members}
+    union = source_themes | target_themes
+    if not union:
+        return 0.0
+    return len(source_themes & target_themes) / len(union)
+
+
+def _relationship_strength(source: str, target: str, relationship_type: str) -> float:
+    topical = _thematic_similarity(source, target)
+    base = {
+        "parallel_teaching": 0.70,
+        "elaboration": 0.75,
+        "example": 0.65,
+        "contrast": 0.60,
+        "complement": 0.68,
+    }.get(relationship_type, 0.65)
+    return round(min(0.99, base + topical * 0.25), 3)
+
+
+def _load_relationship_seeds() -> dict[str, Any]:
+    if RELATIONSHIP_DATA_PATH.exists():
+        try:
+            return json.loads(RELATIONSHIP_DATA_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            logger.exception("Failed to load relationship seed data from %s", RELATIONSHIP_DATA_PATH)
+    return {}
+
+
+def _build_relationship_graph() -> RelationshipGraph:
+    graph = RelationshipGraph()
+    seeds = _load_relationship_seeds()
+    clusters = seeds.get("clusters") or _BUILTIN_THEME_CLUSTERS
+    for theme, members in clusters.items():
+        relationship_type = "parallel_teaching"
+        if theme in {"patience", "prayer"}:
+            relationship_type = "complement"
+        elif theme == "charity":
+            relationship_type = "example"
+        elif theme == "judgment":
+            relationship_type = "elaboration"
+        for source, target in combinations(members, 2):
+            graph.add_relationship(
+                source,
+                target,
+                relationship_type,
+                _relationship_strength(source, target, relationship_type),
+                scholarly_note=_scholarly_note_for(source, target),
+            )
+
+    for source, target, rel_type, strength, note in seeds.get("explicit_relationships", []):
+        graph.add_relationship(source, target, rel_type, strength, scholarly_note=note)
+
+    for source, target in _CONTRAST_PAIRS:
+        graph.add_relationship(
+            source,
+            target,
+            "contrast",
+            _relationship_strength(source, target, "contrast"),
+            scholarly_note=_scholarly_note_for(source, target),
+        )
+
+    return graph
+
+
+# ---------------------------------------------------------------------------
+# Cross-Surah Reference System
+# ---------------------------------------------------------------------------
+
+
+class ReferenceType(str, Enum):
+    """Categorisation of a link between two ayahs."""
+
+    REPEATED_STORY = "repeated_story"
+    RELATED_RULING = "related_ruling"
+    SIMILAR_TEACHING = "similar_teaching"
+    THEMATIC_PARALLEL = "thematic_parallel"
+    LINGUISTIC_ECHO = "linguistic_echo"
+
+
+class CrossReference(BaseModel):
+    """A single directed cross-reference between two ayahs."""
+
+    source: str
+    target: str
+    reference_type: ReferenceType
+    context: str
+    commentary: str
+    source_work: str | None = None
+
+
+SEED_CROSS_REFERENCES: list[CrossReference] = [
+    CrossReference(
+        source="2:282",
+        target="65:2",
+        reference_type=ReferenceType.RELATED_RULING,
+        context="Both ayahs establish the requirement of witnesses for binding agreements.",
+        commentary="Classical mufassirun link the documentation of debt with the witnessing of divorce and return.",
+        source_work="Tafsir al-Qurtubi",
+    ),
+    CrossReference(
+        source="1:5",
+        target="5:117",
+        reference_type=ReferenceType.SIMILAR_TEACHING,
+        context="'Ever do we worship You' mirrors the declaration that Allah is the only Lord.",
+        commentary="Ibn Kathir notes this as an affirmation of exclusive worship.",
+        source_work="Tafsir Ibn Kathir",
+    ),
+    CrossReference(
+        source="2:255",
+        target="3:2",
+        reference_type=ReferenceType.REPEATED_STORY,
+        context="Ayat al-Kursi and Aal Imran open with the same divine self-description.",
+        commentary="Both verses are linked by the theme of Allah's eternal self-subsistence.",
+        source_work="Tafsir al-Tabari",
+    ),
+]
+
+CROSS_REFERENCE_DATA_PATH = Path(__file__).resolve().parent / "data" / "quran" / "cross_references.json"
+
+
+def _load_cross_references() -> list[CrossReference]:
+    """Load cross-references from an external JSON file, falling back to the seed list."""
+    if CROSS_REFERENCE_DATA_PATH.exists():
+        with CROSS_REFERENCE_DATA_PATH.open(encoding="utf-8") as f:
+            try:
+                raw = json.load(f)
+                return [CrossReference(**item) for item in raw]
+            except (json.JSONDecodeError, TypeError, ValueError):
+                logger.warning("Could not parse cross-reference database; using seed.")
+                return list(SEED_CROSS_REFERENCES)
+    return list(SEED_CROSS_REFERENCES)
+
+
+CROSS_REFERENCES: list[CrossReference] = _load_cross_references()
+
+# Index references by ayah key for O(1) lookup.
+_REFERENCE_INDEX: dict[str, list[CrossReference]] = {}
+for _ref in CROSS_REFERENCES:
+    _REFERENCE_INDEX.setdefault(_ref.source, []).append(_ref)
+    _REFERENCE_INDEX.setdefault(_ref.target, []).append(_ref)
+
+
+def find_cross_references(
+    ayah_key: str,
+    reference_type: ReferenceType | None = None,
+    target_surah: int | None = None,
+) -> list[CrossReference]:
+    """Return all references linked to `ayah_key`, with optional filters."""
+    results = []
+    for ref in _REFERENCE_INDEX.get(ayah_key, []):
+        if reference_type is not None and ref.reference_type != reference_type:
+            continue
+        counterpart = ref.target if ref.source == ayah_key else ref.source
+        counterpart_number = int(counterpart.split(":")[0])
+        if target_surah is not None and counterpart_number != target_surah:
+            continue
+        results.append(ref)
+    return results
+
+
+def _validate_ayah_key(ayah_key: str) -> tuple[int, int]:
+    """Validate a 'surah:ayah' key against the surah index, returning (surah, ayah)."""
+    try:
+        surah_num, ayah_num = map(int, ayah_key.split(":"))
+    except ValueError:
+        raise APIException(400, "Ayah key must be in the form 'surah:ayah'.")
+    surah = surah_by_number(surah_num)
+    if surah is None:
+        raise APIException(400, f"Unknown surah number: {surah_num}")
+    if not (1 <= ayah_num <= surah.ayah_count):
+        raise APIException(400, f"Ayah {ayah_num} out of range for Surah {surah.name} (1-{surah.ayah_count}).")
+    return surah_num, ayah_num
+
+
+@router.get("/cross-references/{ayah_key}", response_model=list[CrossReference])
+def get_cross_references(
+    ayah_key: str,
+    reference_type: str | None = None,
+    target_surah: int | None = None,
+) -> list[CrossReference]:
+    """Retrieve cross-references for a given ayah.
+
+    Query parameters:
+    - reference_type: filter by `repeated_story`, `related_ruling`, etc.
+    - target_surah: limit results to references pointing into that surah.
+    """
+    _validate_ayah_key(ayah_key)
+    ref_type: ReferenceType | None = None
+    if reference_type:
+        try:
+            ref_type = ReferenceType(reference_type)
+        except ValueError:
+            raise APIException(400, f"Unknown reference_type: {reference_type}")
+    return find_cross_references(ayah_key, ref_type, target_surah)
+
+
+@router.get("/cross-reference-network")
+def cross_reference_network(target_surah: int | None = None) -> dict[str, list]:
+    """Build a network of all stored cross-references for visualisation.
+
+    Optionally restrict to a single surah; every node/edge touching that surah
+    is returned.
+    """
+    nodes: set[str] = set()
+    edges: list[dict[str, str]] = []
+    for ref in CROSS_REFERENCES:
+        source_number = int(ref.source.split(":")[0])
+        target_number = int(ref.target.split(":")[0])
+        if target_surah is not None and source_number != target_surah and target_number != target_surah:
+            continue
+        nodes.add(ref.source)
+        nodes.add(ref.target)
+        edges.append(
+            {
+                "source": ref.source,
+                "target": ref.target,
+                "type": ref.reference_type.value,
+                "context": ref.context,
+            }
+        )
+    return {"nodes": sorted(nodes), "edges": edges}
+
+
 
 # ---------------------------------------------------------------------------
 # Tafsir registry
@@ -115,12 +524,17 @@ class TafsirWork(BaseModel):
     ``name`` and ``author`` are for *display before retrieval* — listing
     available works, and saying which work was unavailable for an ayah. Text
     that is actually returned is labelled from the source response instead.
+
+    ``source`` names the retrieval backend for the work's slugs: ``"quran.com"``
+    (the default, the live Quran.com v4 API) or ``"tafsir_api"`` (the static
+    spa5k/tafsir_api collection on the jsDelivr CDN).
     """
 
     key: str
     name: str
     author: str
-    slugs: dict[str, str] = Field(..., description="Language code -> Quran.com tafsir slug")
+    source: str = "quran.com"
+    slugs: dict[str, str] = Field(..., description="Language code -> source slug for this tafsir")
 
     def slug_for(self, language: str) -> str | None:
         return self.slugs.get(language)
@@ -167,6 +581,15 @@ TAFSIR_REGISTRY: dict[str, TafsirWork] = {
             name="Ma'alim al-Tanzil (Tafsir al-Baghawi)",
             author="Al-Baghawi (d. 516 AH)",
             slugs={"ar": "ar-tafsir-al-baghawi"},
+        ),
+        TafsirWork(
+            key="jalalayn",
+            name="Tafsir al-Jalalayn",
+            author="Jalal al-Din al-Mahalli and Jalal al-Din al-Suyuti (d. 911 AH)",
+            # Quran.com's API no longer carries this work; it is served from
+            # the free spa5k/tafsir_api collection (mirroring altafsir.com).
+            source="tafsir_api",
+            slugs={"en": "en-al-jalalayn", "ar": "ar-tafsir-al-jalalayn"},
         ),
         TafsirWork(
             key="muyassar",
@@ -233,6 +656,16 @@ TAFSIR_ALIASES: dict[str, str] = {
     "al-saadi": "saadi",
     "saedi": "saadi",
     "al-baghawi": "baghawi",
+    "jalalayn": "jalalayn",
+    "al-jalalayn": "jalalayn",
+    "al jalalayn": "jalalayn",
+    "tafsir al-jalalayn": "jalalayn",
+    "tafsir-al-jalalayn": "jalalayn",
+    "tafsir al jalalayn": "jalalayn",
+    "jalalain": "jalalayn",
+    "al-jalalain": "jalalayn",
+    "al jalalain": "jalalayn",
+    "tafsir al-jalalain": "jalalayn",
     "maarif": "maarif-ul-quran",
     "maariful-quran": "maarif-ul-quran",
     "ma'arif al-qur'an": "maarif-ul-quran",
@@ -666,6 +1099,74 @@ class QuranComTafsirSource(TafsirSource):
         )
 
 
+class TafsirApiSource(TafsirSource):
+    """Reads tafsir from the free spa5k/tafsir_api static JSON collection.
+
+    The dataset is served as plain JSON files from the jsDelivr CDN; a single
+    ayah lives at ``{base}/{slug}/{surah}/{ayah}.json`` and the dataset marks
+    coverage gaps by serving a 404 for them (and listing them in a per-surah
+    ``empty_ayahs.json``). ``fetch_tafsir`` returns ``None`` for a gap, so one
+    missing passage degrades to "unavailable" exactly like the Quran.com
+    source instead of failing the whole request.
+
+    Attribution follows the same rule as the Quran.com source: the name shown
+    on a passage is the dataset's own edition name from ``editions.json``
+    (fetched once and cached), never this service's recollection.
+    """
+
+    def __init__(self, base_url: str = TAFSIR_API_BASE, timeout: float = TAFSIR_API_TIMEOUT):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self._editions: list[dict[str, Any]] | None = None
+
+    async def _get(self, path: str) -> Any | None:
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url)
+        except httpx.HTTPError as exc:
+            logger.warning("Tafsir API request failed for %s: %s", path, exc)
+            return None
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            logger.warning("Tafsir API returned %s for %s", response.status_code, path)
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            logger.warning("Tafsir API returned non-JSON for %s", path)
+            return None
+
+    async def _edition(self, slug: str) -> dict[str, Any] | None:
+        """The dataset's own metadata record for an edition slug."""
+        if self._editions is None:
+            payload = await self._get("editions.json")
+            self._editions = payload if isinstance(payload, list) else []
+        for edition in self._editions:
+            if edition.get("slug") == slug:
+                return edition
+        return None
+
+    async def fetch_tafsir(self, slug: str, verse_key: str) -> dict[str, Any] | None:
+        surah, _, ayah = verse_key.partition(":")
+        payload = await self._get(f"{slug}/{surah}/{ayah}.json")
+        if not payload:
+            return None
+        text = payload.get("text")
+        if not text:
+            return None
+        edition = await self._edition(slug)
+        result: dict[str, Any] = {"text": text}
+        if edition is not None and edition.get("name"):
+            result["resource_name"] = edition["name"]
+        return result
+
+    async def fetch_verse(self, verse_key: str, language: str) -> VerseText:
+        """The Tafsir API serves commentary only; verse text comes from the Quran.com source."""
+        raise NotImplementedError("Tafsir API source serves tafsir only; fetch verse text from the Quran.com source.")
+
+
 class FakeTafsirSource(TafsirSource):
     """Offline source for tests: serves canned payloads, records calls."""
 
@@ -689,6 +1190,7 @@ class FakeTafsirSource(TafsirSource):
 
 
 _source: TafsirSource = QuranComTafsirSource()
+_tafsir_api_source: TafsirSource = TafsirApiSource()
 
 
 def get_source() -> TafsirSource:
@@ -699,6 +1201,21 @@ def set_source(source: TafsirSource) -> None:
     """Swap the retrieval backend (used by tests to stay offline)."""
     global _source
     _source = source
+
+
+def get_tafsir_api_source() -> TafsirSource:
+    """The CDN-backed source serving works registered with ``source="tafsir_api"``."""
+    return _tafsir_api_source
+
+
+def _source_for(work: TafsirWork, injected: TafsirSource | None) -> TafsirSource:
+    """Pick the backend for one work: an injected source (tests) serves every
+    work, otherwise the registry's ``source`` decides."""
+    if injected is not None:
+        return injected
+    if work.source == "tafsir_api":
+        return get_tafsir_api_source()
+    return get_source()
 
 
 def _tafsir_cache():
@@ -767,7 +1284,7 @@ async def fetch_tafsirs_for_ayah(
     # Resolve which edition of each work to fetch first, then fetch them
     # concurrently: four works fetched one after another would stack four
     # timeouts on a slow upstream, and they do not depend on each other.
-    plans: list[tuple[TafsirWork, str, str]] = []
+    plans: list[tuple[TafsirWork, str, str, TafsirSource]] = []
     for key in keys:
         work = TAFSIR_REGISTRY.get(key)
         if work is None:
@@ -789,11 +1306,14 @@ async def fetch_tafsirs_for_ayah(
             used_language = work.languages[0]
             # `languages` are exactly the keys of `slugs`, so this always hits.
             slug = cast(str, work.slug_for(used_language))
-        plans.append((work, used_language, slug))
+        fetch_source = _source_for(work, src)
+        plans.append((work, used_language, slug, fetch_source))
 
-    payloads = await asyncio.gather(*(_fetch_tafsir_cached(src, slug, ref) for _, _, slug in plans))
+    payloads = await asyncio.gather(
+        *(_fetch_tafsir_cached(fetch_source, slug, ref) for _, _, slug, fetch_source in plans)
+    )
 
-    for (work, used_language, _), payload in zip(plans, payloads, strict=True):
+    for (work, used_language, _, _), payload in zip(plans, payloads, strict=True):
         if payload is None:
             unavailable.append(
                 TafsirUnavailable(
