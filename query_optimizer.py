@@ -32,13 +32,79 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from threading import Lock
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/db-optimizer", tags=["db-optimizer"])
 
+# Cross-Surah Reference System
+
+class ReferenceType(str, Enum):
+    REPEATED_STORY = "repeated_story"
+    RELATED_RULING = "related_ruling"
+    SIMILAR_TEACHING = "similar_teaching"
+    PROPHET_NARRATIVE = "prophet_narrative"
+    THEOLOGICAL_PARALLEL = "theological_parallel"
+    SCHOLARLY_CROSS_REF = "scholarly_cross_ref"
+
+
+class CrossReferenceRecord(BaseModel):
+    source_surah: int = Field(..., ge=1, le=114)
+    source_ayah: int = Field(..., ge=1)
+    target_surah: int = Field(..., ge=1, le=114)
+    target_ayah: int = Field(..., ge=1)
+    reference_type: ReferenceType
+    context: str = ""
+    commentary: str = ""
+    attributes: list[str] = Field(default_factory=list)
+
+
+class CrossReferenceDatabase:
+    def __init__(self) -> None:
+        self._records: list[CrossReferenceRecord] = []
+        self._by_surah: dict[int, list[int]] = {}
+        self._by_type: dict[str, list[int]] = {}
+        self._by_attribute: dict[str, list[int]] = {}
+
+    def add(self, record: CrossReferenceRecord) -> None:
+        idx = len(self._records)
+        self._records.append(record)
+        for surah in (record.source_surah, record.target_surah):
+            self._by_surah.setdefault(surah, []).append(idx)
+        self._by_type.setdefault(record.reference_type.value, []).append(idx)
+        for attribute in record.attributes:
+            self._by_attribute.setdefault(attribute, []).append(idx)
+
+    def query(self, surah: int | None = None, reference_type: ReferenceType | None = None, attributes: list[str] | None = None) -> list[CrossReferenceRecord]:
+        candidates = set(range(len(self._records)))
+        if surah is not None:
+            candidates &= set(self._by_surah.get(surah, []))
+        if reference_type is not None:
+            candidates &= set(self._by_type.get(reference_type.value, []))
+        if attributes:
+            selected: set[int] = set()
+            for attribute in attributes:
+                selected.update(self._by_attribute.get(attribute, []))
+            candidates &= selected
+        return [self._records[i] for i in sorted(candidates)]
+
+    def references_for(self, surah: int, ayah: int) -> list[CrossReferenceRecord]:
+        found = []
+        for idx in self._by_surah.get(surah, []):
+            record = self._records[idx]
+            if (record.source_surah == surah and record.source_ayah == ayah) or (record.target_surah == surah and record.target_ayah == ayah):
+                found.append(record)
+        return found
+
+
+_STOPWORDS = frozenset({"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "was", "were", "be", "been", "by", "that", "this", "these", "those", "it", "as", "at", "from", "which", "who"})
+
+
+def _tokenize(text: str) -> set[str]:
+    return {token for token in re.findall(r"[a-z0-9']+", text.lower()) if
 # Latency at or above this (milliseconds) counts a query as "slow". Mirrors the
 # issue's "zero queries exceeding 500ms" success criterion.
 DEFAULT_SLOW_QUERY_MS = 500.0
