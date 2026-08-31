@@ -1,3 +1,18 @@
+[project]
+name = "islamic-qa-evaluator"
+version = "0.1.0"
+description = "LLM-as-judge evaluation framework for Islamic Q&A responses"
+requires-python = ">=3.10"
+dependencies = [
+    "litellm>=1.40.0",
+    "openai>=1.30.0",
+    "anthropic>=0.25.0",
+    "pydantic>=2.6.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "pyyaml>=6.0.1",
+]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"
@@ -72,3 +87,11 @@ module = [
     "firebase_admin.*",
 ]
 ignore_missing_imports = true
+
+[tool.evaluation]
+correlation_target = 0.85
+inter_judge_agreement_target = 0.80
+cost_per_eval_limit = 0.05
+throughput_per_hour_target = 100
+false_positive_rate_max = 0.08
+calibration_drift_limit = 0.05

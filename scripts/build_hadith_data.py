@@ -36,10 +36,43 @@ BASE_URL = f"https://cdn.jsdelivr.net/gh/{SOURCE_REPO}@{SOURCE_TAG}/editions"
 
 # Bukhari and Muslim carry no per-hadith grade in the source: classical
 # scholarship treats both as authenticated by consensus (ijma') in full.
-CONSENSUS_COLLECTIONS = {"bukhari", "muslim"}
+# Al-Nawawi's Forty and the Forty Hadith Qudsi were likewise compiled as
+# selections of authentic narrations, so they are graded the same way (the
+# label names the basis for the consensus grading explicitly).
+CONSENSUS_COLLECTIONS = {"bukhari", "muslim", "nawawi", "qudsi"}
 CONSENSUS_GRADER = "Scholarly consensus (Bukhari and Muslim)"
+CONSENSUS_GRADER_NAWAWI = "Scholarly consensus (al-Nawawi's Forty are an authentic selection)"
+CONSENSUS_GRADER_QUDSI = "Scholarly consensus (Forty Hadith Qudsi are individually authentic narrations)"
 
-COLLECTIONS = ["bukhari", "muslim", "abudawud", "tirmidhi", "nasai", "ibnmajah", "malik"]
+# Ten major collections: the two Sahihs, the four Sunan, the Muwatta, and
+# three famous compilations of forty (al-Nawawi, Qudsi, Shah Waliullah).
+COLLECTIONS = [
+    "bukhari",
+    "muslim",
+    "abudawud",
+    "tirmidhi",
+    "nasai",
+    "ibnmajah",
+    "malik",
+    "nawawi",
+    "qudsi",
+    "dehlawi",
+]
+
+# Conventional academic display names (the source metadata spells some names
+# without hyphens, e.g. "Sahih al Bukhari").
+CANONICAL_NAMES = {
+    "bukhari": "Sahih al-Bukhari",
+    "muslim": "Sahih Muslim",
+    "abudawud": "Sunan Abu Dawud",
+    "tirmidhi": "Jami' at-Tirmidhi",
+    "nasai": "Sunan an-Nasai",
+    "ibnmajah": "Sunan Ibn Majah",
+    "malik": "Muwatta Malik",
+    "nawawi": "Forty Hadith of an-Nawawi",
+    "qudsi": "Forty Hadith Qudsi",
+    "dehlawi": "Forty Hadith of Shah Waliullah al-Dehlawi",
+}
 
 OUT_DIR = ROOT / "data" / "hadith"
 
@@ -59,8 +92,13 @@ def build_record(raw_hadith: dict, collection: str) -> dict:
     chain_types = []
 
     if collection in CONSENSUS_COLLECTIONS:
+        grader = {
+            "nawawi": CONSENSUS_GRADER_NAWAWI,
+            "qudsi": CONSENSUS_GRADER_QUDSI,
+        }.get(collection, CONSENSUS_GRADER)
         strength, chain_type = hadith.Strength.SAHIH, hadith.ChainType.MARFU
-        graders.append({"g": CONSENSUS_GRADER, "raw": "Sahih (ijma')", "s": strength.value, "c": chain_type.value})
+        raw_grade = "Sahih (ijma')" if collection in {"bukhari", "muslim"} else "Sahih (consensus)"
+        graders.append({"g": grader, "raw": raw_grade, "s": strength.value, "c": chain_type.value})
         strengths.append(strength)
         chain_types.append(chain_type)
     else:
@@ -95,7 +133,7 @@ def build_collection(collection: str) -> None:
 
     payload = {
         "collection": collection,
-        "name": edition.get("metadata", {}).get("name", collection),
+        "name": CANONICAL_NAMES.get(collection, edition.get("metadata", {}).get("name", collection)),
         "source": {"repo": SOURCE_REPO, "ref": SOURCE_TAG, "fetched": date.today().isoformat()},
         "hadiths": records,
     }

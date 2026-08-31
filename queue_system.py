@@ -257,7 +257,10 @@ class InMemoryJobStore(JobStore):
         pending = [
             j
             for j in self._jobs.values()
-            if j.status == JobStatus.PENDING
+            # Retried jobs are re-queued: a failed job is left in RETRYING with
+            # a future scheduled_at until its backoff elapses, then it must be
+            # picked up again like a fresh PENDING job.
+            if j.status in (JobStatus.PENDING, JobStatus.RETRYING)
             and (j.scheduled_at is None or j.scheduled_at <= now)
             and all(self._jobs.get(dep) and self._jobs[dep].status == JobStatus.COMPLETED for dep in j.depends_on)
         ]
@@ -303,8 +306,10 @@ class RedisJobStore(JobStore):
         await redis.set(key, json.dumps(job.to_dict()))
         # Add to status set
         await redis.sadd(f"{self._prefix}status:{job.status.value}", job.id)
-        # Add to priority sorted set for pending jobs
-        if job.status == JobStatus.PENDING:
+        # Add to priority sorted set for pending jobs (retried jobs are
+        # re-queued the same way so they are picked up once their backoff
+        # elapses).
+        if job.status in (JobStatus.PENDING, JobStatus.RETRYING):
             score = -job.priority.value * 1e12 + job.created_at
             await redis.zadd(f"{self._prefix}pending", {job.id: score})
 

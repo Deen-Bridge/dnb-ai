@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "description": "Curated map of famous narrations that appear in more than one major collection, with their cross-collection references. Used by the Hadith Research Agent to trace variant narrations and to reconcile citations that name different numbers for the same hadith.",
+  "provenance": "Every (collection, number) pair was verified against the text of the pinned fawazahmed0/hadith-api edition files used to build data/hadith/*.json, so each reference resolves through the bundled grading dataset. Narration titles are one-line glosses, not reproductions of translated texts.",
+  "variants": [
+    {
+      "id": "intentions",
+      "title": "Actions are by intentions",
+      "narration": "The reward of deeds depends on intentions, and every person will have what they intended.",
+      "references": [
+        {"collection": "bukhari", "number": 1, "book": 1, "book_number": 1, "note": "Opening hadith of Sahih al-Bukhari"},
+        {"collection": "muslim", "number": 1907, "book": 6, "book_number": 335, "note": "In Kitab al-Imarah"},
+        {"collection": "abudawud", "number": 2201, "book": 13, "book_number": 27, "note": "In Kitab al-Talaq"},
+        {"collection": "tirmidhi", "number": 1647, "book": 22, "book_number": 30, "note": "In Kitab al-Jihad"},
+        {"collection": "nasai", "number": 75, "book": 1, "book_number": 75, "note": "In Kitab al-Taharah"},
+        {"collection": "ibnmajah", "number": 4227, "book": 37, "book_number": 128, "note": "In Kitab al-Zuhd"}
+      ]
+    },
+    {
+      "id": "love-for-brother",
+      "title": "None of you believes until he loves for his brother",
+      "narration": "None of you truly believes until he loves for his brother what he loves for himself.",
+      "references": [
+        {"collection": "bukhari", "number": 13, "book": 2, "book_number": 6, "note": "In Kitab al-Iman"},
+        {"collection": "tirmidhi", "number": 2515, "book": 37, "book_number": 101, "note": "In Kitab al-Zuhd"},
+        {"collection": "nasai", "number": 5039, "book": 47, "book_number": 55, "note": "In Kitab al-Iman"}
+      ]
+    },
+    {
+      "id": "tongue-and-hand",
+      "title": "The Muslim is the one from whose tongue and hand Muslims are safe",
+      "narration": "The Muslim is the one from whose tongue and hand the Muslims are safe.",
+      "references": [
+        {"collection": "bukhari", "number": 10, "book": 2, "book_number": 3, "note": "In Kitab al-Iman"},
+        {"collection": "abudawud", "number": 2481, "book": 15, "book_number": 5, "note": "In Kitab al-Adab"},
+        {"collection": "nasai", "number": 4995, "book": 47, "book_number": 11, "note": "In Kitab al-Iman"}
+      ]
+    },
+    {
+      "id": "lawful-unlawful-clear",
+      "title": "The lawful is clear and the unlawful is clear",
+      "narration": "The lawful is clear and the unlawful is clear, and between them are doubtful matters.",
+      "references": [
+        {"collection": "bukhari", "number": 52, "book": 2, "book_number": 45, "note": "In Kitab al-Iman"},
+        {"collection": "abudawud", "number": 3329, "book": 23, "book_number": 4, "note": "In Kitab al-Buyu'"},
+        {"collection": "tirmidhi", "number": 1205, "book": 14, "book_number": 1, "note": "Opening hadith of Kitab al-Buyu'"},
+        {"collection": "ibnmajah", "number": 3984, "book": 36, "book_number": 59, "note": "In Kitab al-Fitan"}
+      ]
+    },
+    {
+      "id": "seeking-knowledge",
+      "title": "Seeking knowledge is an obligation upon every Muslim",
+      "narration": "Seeking knowledge is an obligation upon every Muslim.",
+      "references": [
+        {"collection": "ibnmajah", "number": 224, "book": 0, "book_number": 224, "note": "Muqaddimah (Introduction)"}
+      ]
+    },
+    {
+      "id": "mercy-prevails",
+      "title": "My mercy prevails over My wrath",
+      "narration": "When Allah completed the creation, He wrote with Him: 'My mercy prevails over My wrath.'",
+      "references": [
+        {"collection": "tirmidhi", "number": 3543, "book": 48, "book_number": 174, "note": "In Kitab al-Da'wat"},
+        {"collection": "ibnmajah", "number": 4295, "book": 37, "book_number": 196, "note": "In Kitab al-Zuhd"},
+        {"collection": "qudsi", "number": 1, "book": 1, "book_number": 1, "note": "First hadith of the Forty Hadith Qudsi"}
+      ]
+    },
+    {
+      "id": "believers-one-body",
+      "title": "The believers are like one body",
+      "narration": "The similitude of believers in mutual love, mercy and affection is like one body.",
+      "references": [
+        {"collection": "muslim", "number": 6586, "book": 45, "book_number": 84, "note": "In Kitab al-Birr"}
+      ]
+    }
+  ]
+}
