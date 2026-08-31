@@ -1,0 +1,227 @@
+{
+  "version": "1.0.0",
+  "language": "ur",
+  "description": "Curated core Islamic terminology for Urdu query processing.",
+  "terms": [
+    {
+      "id": "ur-ibadat-salah",
+      "urdu_term": "نماز",
+      "arabic_original": "صلاة",
+      "transliteration": "namaz / salah",
+      "english_equivalent": "ritual prayer",
+      "category": "ibadat",
+      "definition_ur": "روزانہ مقررہ اوقات میں ادا کی جانے والی فرض عبادت۔",
+      "variants": ["صلوٰۃ", "صلاۃ", "صلاح", "salah", "salat", "namaz"]
+    },
+    {
+      "id": "ur-ibadat-wudu",
+      "urdu_term": "وضو",
+      "arabic_original": "وضوء",
+      "transliteration": "wudu",
+      "english_equivalent": "ritual ablution",
+      "category": "ibadat",
+      "definition_ur": "نماز وغیرہ کے لیے مقررہ طریقے سے حاصل کی جانے والی طہارت۔",
+      "variants": ["وضوء", "وضو کرنا", "wudu", "wudhu"]
+    },
+    {
+      "id": "ur-ibadat-fasting",
+      "urdu_term": "روزہ",
+      "arabic_original": "صوم",
+      "transliteration": "roza / sawm",
+      "english_equivalent": "fasting",
+      "category": "ibadat",
+      "definition_ur": "نیت کے ساتھ فجر سے غروب آفتاب تک مفطرات سے رکنا۔",
+      "variants": ["صوم", "صیام", "roza", "sawm", "siyam"]
+    },
+    {
+      "id": "ur-ibadat-zakat",
+      "urdu_term": "زکوٰۃ",
+      "arabic_original": "زكاة",
+      "transliteration": "zakat",
+      "english_equivalent": "obligatory almsgiving",
+      "category": "ibadat",
+      "definition_ur": "شرائط پوری ہونے پر مال کا مقررہ حصہ مستحقین کو دینا۔",
+      "variants": ["زکات", "زکاۃ", "زكاة", "zakat", "zakah"]
+    },
+    {
+      "id": "ur-ibadat-hajj",
+      "urdu_term": "حج",
+      "arabic_original": "حج",
+      "transliteration": "hajj",
+      "english_equivalent": "pilgrimage to Makkah",
+      "category": "ibadat",
+      "definition_ur": "استطاعت رکھنے والے مسلمان کا مقررہ ایام میں بیت اللہ کا شرعی حج۔",
+      "variants": ["حج بیت اللہ", "hajj"]
+    },
+    {
+      "id": "ur-quran-quran",
+      "urdu_term": "قرآن مجید",
+      "arabic_original": "القرآن الكريم",
+      "transliteration": "Quran Majid",
+      "english_equivalent": "the Noble Quran",
+      "category": "quran",
+      "definition_ur": "اللہ تعالیٰ کی آخری نازل کردہ کتاب۔",
+      "variants": ["قرآن", "قران", "قرآن کریم", "القرآن", "Quran", "Qur'an"]
+    },
+    {
+      "id": "ur-quran-tafsir",
+      "urdu_term": "تفسیر",
+      "arabic_original": "تفسير",
+      "transliteration": "tafsir",
+      "english_equivalent": "Quranic exegesis",
+      "category": "quran",
+      "definition_ur": "قرآن مجید کے معانی اور مطالب کی علمی وضاحت۔",
+      "variants": ["تفسير", "tafsir"]
+    },
+    {
+      "id": "ur-hadith-hadith",
+      "urdu_term": "حدیث",
+      "arabic_original": "حديث",
+      "transliteration": "hadith",
+      "english_equivalent": "Prophetic narration",
+      "category": "hadith",
+      "definition_ur": "رسول اللہ ﷺ کے اقوال، افعال، تقریرات یا اوصاف کی روایت۔",
+      "variants": ["حديث", "احادیث", "hadith", "hadees"]
+    },
+    {
+      "id": "ur-hadith-sunnah",
+      "urdu_term": "سنت",
+      "arabic_original": "سنة",
+      "transliteration": "sunnah",
+      "english_equivalent": "Prophetic practice",
+      "category": "hadith",
+      "definition_ur": "رسول اللہ ﷺ کا منقول طریقہ اور تعلیم۔",
+      "variants": ["سنۃ", "سنة", "sunnah", "sunna"]
+    },
+    {
+      "id": "ur-fiqh-fiqh",
+      "urdu_term": "فقہ",
+      "arabic_original": "فقه",
+      "transliteration": "fiqh",
+      "english_equivalent": "Islamic jurisprudence",
+      "category": "fiqh",
+      "definition_ur": "تفصیلی دلائل سے عملی شرعی احکام جاننے کا علم۔",
+      "variants": ["فقه", "fiqh"]
+    },
+    {
+      "id": "ur-fiqh-fatwa",
+      "urdu_term": "فتویٰ",
+      "arabic_original": "فتوى",
+      "transliteration": "fatwa",
+      "english_equivalent": "formal legal opinion",
+      "category": "fiqh",
+      "definition_ur": "کسی شرعی سوال پر اہل علم کی مدلل رائے۔",
+      "variants": ["فتوی", "فتوى", "فتاویٰ", "fatwa"]
+    },
+    {
+      "id": "ur-fiqh-shariah",
+      "urdu_term": "شریعت",
+      "arabic_original": "شريعة",
+      "transliteration": "shariah",
+      "english_equivalent": "Islamic revealed law and way",
+      "category": "fiqh",
+      "definition_ur": "اسلام کا الٰہی ہدایت پر مبنی مجموعی طریقۂ زندگی۔",
+      "variants": ["شریعہ", "شريعة", "sharia", "shariah"]
+    },
+    {
+      "id": "ur-fiqh-hanafi",
+      "urdu_term": "فقہ حنفی",
+      "arabic_original": "المذهب الحنفي",
+      "transliteration": "Hanafi fiqh",
+      "english_equivalent": "Hanafi school of jurisprudence",
+      "category": "fiqh",
+      "definition_ur": "امام ابو حنیفہؒ سے منسوب اہل سنت کا فقہی مذہب۔",
+      "variants": ["حنفی", "مذہب حنفی", "Hanafi"]
+    },
+    {
+      "id": "ur-belief-tawhid",
+      "urdu_term": "توحید",
+      "arabic_original": "توحيد",
+      "transliteration": "tawhid",
+      "english_equivalent": "oneness of Allah",
+      "category": "aqidah",
+      "definition_ur": "اللہ تعالیٰ کو ذات، صفات اور عبادت میں یکتا ماننا۔",
+      "variants": ["توحيد", "tawhid", "tauheed"]
+    },
+    {
+      "id": "ur-belief-aqidah",
+      "urdu_term": "عقیدہ",
+      "arabic_original": "عقيدة",
+      "transliteration": "aqidah",
+      "english_equivalent": "creed or belief",
+      "category": "aqidah",
+      "definition_ur": "دین کے بنیادی ایمانی تصورات اور پختہ اعتقادات۔",
+      "variants": ["عقیدۂ", "عقائد", "عقيدة", "aqidah", "aqeedah"]
+    },
+    {
+      "id": "ur-ethics-taqwa",
+      "urdu_term": "تقویٰ",
+      "arabic_original": "تقوى",
+      "transliteration": "taqwa",
+      "english_equivalent": "God-consciousness",
+      "category": "akhlaq",
+      "definition_ur": "اللہ کی جواب دہی کا شعور رکھتے ہوئے گناہ سے بچنا۔",
+      "variants": ["تقوی", "تقوى", "taqwa"]
+    },
+    {
+      "id": "ur-ethics-sabr",
+      "urdu_term": "صبر",
+      "arabic_original": "صبر",
+      "transliteration": "sabr",
+      "english_equivalent": "patience and steadfastness",
+      "category": "akhlaq",
+      "definition_ur": "اطاعت، مصیبت اور گناہ سے اجتناب میں ثابت قدمی۔",
+      "variants": ["sabr"]
+    },
+    {
+      "id": "ur-ethics-dua",
+      "urdu_term": "دعا",
+      "arabic_original": "دعاء",
+      "transliteration": "dua",
+      "english_equivalent": "supplication",
+      "category": "ibadat",
+      "definition_ur": "اللہ تعالیٰ سے حاجت اور مدد طلب کرنا۔",
+      "variants": ["دعاء", "دُعا", "dua", "du'a"]
+    },
+    {
+      "id": "ur-family-nikah",
+      "urdu_term": "نکاح",
+      "arabic_original": "نكاح",
+      "transliteration": "nikah",
+      "english_equivalent": "Islamic marriage contract",
+      "category": "family",
+      "definition_ur": "مرد اور عورت کے درمیان شرعی عقد ازدواج۔",
+      "variants": ["نكاح", "nikah", "nikaah"]
+    },
+    {
+      "id": "ur-family-talaq",
+      "urdu_term": "طلاق",
+      "arabic_original": "طلاق",
+      "transliteration": "talaq",
+      "english_equivalent": "divorce",
+      "category": "family",
+      "definition_ur": "شرعی طریقے سے نکاح ختم کرنے کا عمل، جس کے احکام تفصیلی ہیں۔",
+      "variants": ["talaq", "divorce"]
+    },
+    {
+      "id": "ur-honorific-allah",
+      "urdu_term": "اللہ تعالیٰ",
+      "arabic_original": "الله تعالى",
+      "transliteration": "Allah Ta'ala",
+      "english_equivalent": "Allah, the Exalted",
+      "category": "honorific",
+      "definition_ur": "اللہ کے نام کے ساتھ ادب و تعظیم کا معروف اسلوب۔",
+      "variants": ["اللہ", "الله", "اللہ تعالٰی", "Allah"]
+    },
+    {
+      "id": "ur-honorific-prophet",
+      "urdu_term": "رسول اللہ ﷺ",
+      "arabic_original": "رسول الله صلى الله عليه وسلم",
+      "transliteration": "Rasul Allah, sallallahu alayhi wa sallam",
+      "english_equivalent": "Messenger of Allah, peace and blessings be upon him",
+      "category": "honorific",
+      "definition_ur": "نبی کریم محمد ﷺ کے ذکر کا باادب اسلوب۔",
+      "variants": ["رسول اللہ", "نبی کریم ﷺ", "حضرت محمد ﷺ", "صلی اللہ علیہ وسلم", "PBUH"]
+    }
+  ]
+}

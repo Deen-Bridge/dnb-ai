@@ -41,6 +41,7 @@ The platform is composed of three services:
 - 🧠 **Per-user long-term memory** — user profiles (knowledge level, madhhab, topics studied, remembered facts) extracted from conversations and injected across sessions; privacy controls with GET/DELETE endpoints and `remember` opt-out per request
 - 📋 **Conversation summarization** — compaction API ready for token-budget-triggered eviction; merges and recompresses summaries when history exceeds budget
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
+- 🕵️ **Hadith Research Agent** — retrieval, isnad chain analysis, rijal (narrator) cross-referencing, grading justification, and variant alignment across ten major collections
 - 📚 **Structured citations** — Quran and Hadith references returned as validated, typed objects on every answer, bounds-checked against the 114-surah index
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
@@ -61,6 +62,10 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
+| `GET` | `/hadith-research/sources` | Hadith collections the research agent can retrieve |
+| `POST` | `/hadith-research/lookup` | Resolve a hadith citation: grading, justification, and variant membership |
+| `POST` | `/hadith-research/chain` | Isnad analysis: narrator reliability and chain continuity |
+| `POST` | `/hadith-research/variants` | Find variant narrations by matn text or by citation |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
@@ -279,6 +284,8 @@ services:
 | `FEEDBACK_RATE_LIMIT_WINDOW` | Feedback rate-limit window in seconds | `60` |
 | `QURAN_API_BASE` | Base URL for tafsir/ayah retrieval | `https://api.quran.com/api/v4` |
 | `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
+| `TAFSIR_API_BASE` | Base URL for works quran.com no longer carries (Tafsir al-Jalalayn), served from the free spa5k/tafsir_api CDN collection | `https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir` |
+| `TAFSIR_API_TIMEOUT` | Tafsir API (CDN) request timeout in seconds | `15` |
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
@@ -599,6 +606,14 @@ curl -X POST http://localhost:8000/tafsir \
   with it (set `allow_language_fallback: false` to omit it instead).
 - **Degradation**: a work with no entry for the ayah appears under `unavailable`
   with a reason; the rest of the response is unaffected.
+- **Works**: `GET /tafsir/sources` lists every retrievable work. In addition to
+  the Quran.com-hosted works, **Tafsir al-Jalalayn** (`jalalayn`, English and
+  Arabic) is served from the free [`spa5k/tafsir_api`](https://github.com/spa5k/tafsir_api)
+  collection on the jsDelivr CDN (mirroring the altafsir.com text), because
+  Quran.com's API no longer carries it. Jalalayn has near-complete ayah
+  coverage, but like every source its gaps are handled by the same fallback:
+  an ayah the source does not serve is reported under `unavailable` with a
+  reason instead of failing the request.
 - **Latency**: ayat, and the works within an ayah, are fetched concurrently, and
   retrieval inside `/chat` is bounded by `TAFSIR_CHAT_TIMEOUT` — a slow upstream
   costs the turn its grounding, never its response.
@@ -639,6 +654,59 @@ In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
 passages, with the model instructed to attribute each claim to a named mufassir
 and to surface — not flatten — points where the mufassirun differ. The response
 carries a `tafsir` block naming the works whose text actually backed the answer.
+
+### Hadith research agent
+
+`/hadith-research/*` is a specialized, fully-offline agent for studying and
+authenticating hadith narrations:
+
+```bash
+curl -X POST http://localhost:8000/hadith-research/lookup \
+  -H 'Content-Type: application/json' \
+  -d '{"reference": "Sahih al-Bukhari 1"}'
+```
+
+```jsonc
+{
+  "collection": "bukhari",
+  "collection_name": "Sahih al-Bukhari",
+  "hadith_number": 1,
+  "grade": "SAHIH",
+  "chain_type": "MARFU",
+  "disputed": false,
+  "grading": {
+    "strength": "SAHIH",
+    "graders": [{"grader": "Scholarly consensus (Bukhari and Muslim)", "raw_grade": "Sahih (ijma')"}],
+    "justification": "Single named grader: …"
+  },
+  "variants": [/* cross-collection references with their own grades */],
+  "citation": "Sahih al-Bukhari, no. 1 (Book 1, Hadith 1)"
+}
+```
+
+- **Retrieval across ten collections** — the two Sahihs, the four Sunan, the
+  Muwatta, al-Nawawi's Forty, the Forty Qudsi, and Shah Waliullah's Forty
+  (`GET /hadith-research/sources` lists them with hadith counts). Citations
+  may be free text ("Sunan Abu Dawud, Book 13, Hadith 27") or explicit
+  `collection` + `number` fields.
+- **Grading justification** — every named grader's raw verdict is preserved
+  and shown; disagreement between graders is surfaced as `disputed`, and the
+  conservative weakest-wins aggregation is stated explicitly. Bukhari, Muslim,
+  al-Nawawi's Forty and the Forty Qudsi carry the scholarly-consensus grade.
+- **Isnad analysis** (`/hadith-research/chain`) — narrator names are matched
+  against a curated offline rijal reference; unknown and weak (da'if/matruk)
+  transmitters are flagged, and the chain's generation order is checked for
+  continuity (a missing link or an implausible order is reported).
+- **Variant alignment** (`/hadith-research/variants`) — a famous narration's
+  cross-collection references are traced and graded, and a free-text matn can
+  be matched against the curated variant map, so the same hadith cited under
+  different numbers is reconciled rather than presented as unrelated.
+- **Data**: grading records live in `data/hadith/*.json` (see
+  [`data/hadith/PROVENANCE.md`](data/hadith/PROVENANCE.md)), narrators in
+  `data/rijal/narrators.json`, and the variant map in `data/hadith/variants.json`.
+  Like the rest of the hadith layer, only grading *metadata* is bundled — never
+  translated hadith text — so every result is advisory; confirm against a full
+  reference (e.g. Sunnah.com) and a qualified scholar.
 
 ### Zakat (on-chain, with a live nisab)
 

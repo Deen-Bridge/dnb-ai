@@ -27,6 +27,8 @@ class Policy:
     scholar_referral_disclaimer: str
     benign_near_miss_patterns: list[str]
     categories: dict[str, PolicyCategory]
+    ikhtilaf_acknowledgement: str = ""
+    absolutist_qualifier: str = ""
 
 
 @lru_cache(maxsize=1)
@@ -56,4 +58,6 @@ def load_policy(path: str = "") -> Policy:
         scholar_referral_disclaimer=raw["scholar_referral_disclaimer"],
         benign_near_miss_patterns=raw.get("benign_near_miss_patterns", []),
         categories=categories,
+        ikhtilaf_acknowledgement=raw.get("ikhtilaf_acknowledgement", ""),
+        absolutist_qualifier=raw.get("absolutist_qualifier", ""),
     )
