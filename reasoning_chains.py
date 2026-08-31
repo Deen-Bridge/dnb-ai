@@ -212,6 +212,36 @@ class EvidenceRef(BaseModel):
     reference: str = Field(..., description="Category-level pointer, e.g. 'fiqh:worship' or 'Hadith (sunnah.com)'")
     note: str | None = Field(None, description="Optional clarifying note")
 
+class EvidenceStrength(str, Enum):
+    """Strength classification for evidence supporting a claim."""
+
+    STRONG = "strong"
+    MODERATE = "moderate"
+    WEAK = "weak"
+    UNVERIFIED = "unverified"
+
+
+class Claim(BaseModel):
+    """A scholarly claim extracted from a reasoning step."""
+
+    text: str
+    step_id: str | None = None
+    evidence: list[EvidenceRef] = Field(default_factory=list)
+    suggested_evidence: list[EvidenceRef] = Field(default_factory=list)
+
+
+class EvidenceVerificationReport(BaseModel):
+    """Result of tracing a claim's evidence back to primary sources."""
+
+    claims: list[Claim] = Field(default_factory=list)
+    verified_count: int = 0
+    unsupported_count: int = 0
+    weak_evidence_count: int = 0
+    overall_strength: EvidenceStrength = EvidenceStrength.UNVERIFIED
+    audit_trail: list[str] = Field(default_factory=list)
+    attribution_issues: list[str] = Field(default_factory=list)
+    logical_issues: list[str] = Field(default_factory=list)
+
 
 class ReasoningStep(BaseModel):
     """One link in the chain, individually addressable by ``id``."""
@@ -270,6 +300,7 @@ class ReasoningChain(BaseModel):
     branches: list[ReasoningBranch] = Field(default_factory=list)
     conclusion: str
     validation: ValidationReport
+    evidence_verification: EvidenceVerificationReport | None = Field(None, description="Optional evidence verification report")
 
 
 class ReasoningTemplate(BaseModel):
@@ -602,6 +633,148 @@ def validate_chain(steps: list[ReasoningStep], threshold: float = WEAK_CONFIDENC
 
 
 # ---------------------------------------------------------------------------
+# Evidence verification
+# ---------------------------------------------------------------------------
+
+
+def verify_citation(ref: EvidenceRef) -> tuple[bool, str]:
+    """Trace one evidence reference to the primary-source category it points at."""
+    lowered = ref.reference.lower()
+    if ref.source_type == SourceType.QURAN:
+        if "quran.com" in lowered:
+            return True, "Qur'anic source is available at quran.com"
+        return False, "Qur'an citation is not in the verified category-level format"
+    if ref.source_type == SourceType.HADITH:
+        if "sunnah.com" in lowered or "collection" in lowered:
+            return True, "Hadith source is available at sunnah.com"
+        return False, "Hadith citation is not in the verified category-level format"
+    if ref.source_type == SourceType.TAFSIR:
+        if "tafsir" in lowered:
+            return True, "Tafsir source is listed as a secondary scholarly work"
+        return False, "Tafsir citation could not be verified"
+    if ref.source_type == SourceType.FIQH:
+        if "fiqh:" in lowered:
+            return True, "Fiqh reference points to a recognised fiqh category"
+        return False, "Fiqh citation could not be verified"
+    return False, "General reference cannot be traced to a primary source"
+
+
+def evidence_relevance(claim_text: str, ref: EvidenceRef) -> float:
+    """Deterministic relevance score between a claim and an evidence reference."""
+    claim_type = classify_facet(claim_text)
+    if ref.source_type == claim_type:
+        return 0.9
+    if claim_type == SourceType.FIQH and ref.source_type == SourceType.QURAN:
+        return 0.6
+    if claim_type == SourceType.TAFSIR and ref.source_type == SourceType.QURAN:
+        return 0.7
+    if claim_type == SourceType.QURAN and ref.source_type == SourceType.TAFSIR:
+        return 0.7
+    if claim_type == SourceType.HADITH and ref.source_type == SourceType.QURAN:
+        return 0.4
+    overlap = len(_tokens(claim_text) & _tokens(ref.reference))
+    if overlap:
+        return round(min(0.8, 0.3 + (0.1 * overlap)), 4)
+    return 0.2
+
+
+def assess_evidence_strength(scores: list[float]) -> EvidenceStrength:
+    """Classify evidence strength from claim-evidence relevance scores."""
+    if not scores:
+        return EvidenceStrength.UNVERIFIED
+    best = max(scores)
+    if best >= 0.8:
+        return EvidenceStrength.STRONG
+    if best >= 0.5:
+        return EvidenceStrength.MODERATE
+    return EvidenceStrength.WEAK
+
+
+def _attribution_issues(claim: Claim) -> list[str]:
+    """Heuristic check that named scholarly attributions carry a fiqh/tafsir reference."""
+    lowered = claim.text.lower()
+    named_scholars = ("imam", "ibn", "sheikh", "shaykh", "abu hanifa", "ahmad ibn hanbal", "ibn taymiyyah", "ibn qayyim")
+    if any(name in lowered for name in named_scholars) and not any(
+        ref.source_type in (SourceType.FIQH, SourceType.TAFSIR) for ref in claim.evidence
+    ):
+        return [f"{claim.step_id}: scholarly attribution is not supported by a fiqh or tafsir reference"]
+    return []
+
+
+def extract_claims(chain: ReasoningChain) -> list[Claim]:
+    """Extract one claim per reasoning step with its linked evidence."""
+    claims: list[Claim] = []
+    for step in chain.steps:
+        claim = Claim(
+            text=step.intermediate_conclusion,
+            step_id=step.id,
+            evidence=step.evidence,
+        )
+        if not step.evidence:
+            claim.suggested_evidence = _evidence_for(step.source_type, step.facet or step.intermediate_conclusion)
+        claims.append(claim)
+    for branch in chain.branches:
+        for step in branch.steps:
+            claim = Claim(
+                text=step.intermediate_conclusion,
+                step_id=step.id,
+                evidence=step.evidence,
+            )
+            if not step.evidence:
+                claim.suggested_evidence = _evidence_for(step.source_type, step.facet or step.intermediate_conclusion)
+            claims.append(claim)
+    return claims
+
+
+def verify_chain_evidence(chain: ReasoningChain) -> EvidenceVerificationReport:
+    """Return an audit trail of citation checks for every step in the chain."""
+    report = EvidenceVerificationReport()
+    claims = extract_claims(chain)
+    report.claims = claims
+    strengths: list[EvidenceStrength] = []
+    for claim in claims:
+        if not claim.evidence:
+            report.unsupported_count += 1
+            report.audit_trail.append(f"{claim.step_id}: no evidence source attached")
+            continue
+        verified_any = False
+        scores: list[float] = []
+        for ref in claim.evidence:
+            verified, provenance = verify_citation(ref)
+            relevance = evidence_relevance(claim.text, ref)
+            scores.append(relevance)
+            if verified:
+                verified_any = True
+                report.audit_trail.append(
+                    f"{claim.step_id}: verified {ref.source_type.value} '{ref.reference}' -> {provenance}"
+                )
+            else:
+                report.audit_trail.append(
+                    f"{claim.step_id}: unverified {ref.source_type.value} '{ref.reference}' -> {provenance}"
+                )
+        if verified_any:
+            report.verified_count += 1
+        strength = assess_evidence_strength(scores)
+        if strength == EvidenceStrength.WEAK:
+            report.weak_evidence_count += 1
+        if strength == EvidenceStrength.WEAK and not claim.suggested_evidence:
+            claim.suggested_evidence = _evidence_for(classify_facet(claim.text), claim.text)
+        strengths.append(strength)
+        report.attribution_issues.extend(_attribution_issues(claim))
+    for issue in find_contradictions(chain.steps):
+        report.logical_issues.append(issue.detail)
+    if strengths:
+        rank = {
+            EvidenceStrength.STRONG: 3,
+            EvidenceStrength.MODERATE: 2,
+            EvidenceStrength.WEAK: 1,
+            EvidenceStrength.UNVERIFIED: 0,
+        }
+        report.overall_strength = max(strengths, key=lambda strength: rank[strength])
+    return report
+
+
+# ---------------------------------------------------------------------------
 # Assembly and rendering
 # ---------------------------------------------------------------------------
 
@@ -620,7 +793,7 @@ def build_chain(question: str, madhhab: str | None = None) -> ReasoningChain:
     steps = decompose(question, branch=madhhab)
     branches = build_branches(question) if _needs_branching(question, madhhab) else []
     validation = validate_chain(steps)
-    return ReasoningChain(
+    chain = ReasoningChain(
         id=f"chain-{abs(hash(question)) % 1_000_000:06d}",
         question=question,
         madhhab=madhhab,
@@ -629,6 +802,8 @@ def build_chain(question: str, madhhab: str | None = None) -> ReasoningChain:
         conclusion=_summarize_conclusion(steps, branches),
         validation=validation,
     )
+    chain.evidence_verification = verify_chain_evidence(chain)
+    return chain
 
 
 def render_markdown(chain: ReasoningChain) -> str:
@@ -653,6 +828,12 @@ def render_markdown(chain: ReasoningChain) -> str:
     if chain.validation.weak_points:
         weakest = chain.validation.weak_points[0]
         lines.append(f"**Scrutinise first:** {weakest.step_id} — {weakest.reason}")
+    if chain.evidence_verification is not None:
+        verifier = chain.evidence_verification
+        lines.append(
+            f"**Evidence verification:** {verifier.verified_count} verified, "
+            f"{verifier.unsupported_count} unsupported, {verifier.weak_evidence_count} weak"
+        )
     return "\n".join(lines)
 
 
@@ -680,6 +861,12 @@ async def create_chain(request: ChainRequest) -> ChainResponse:
     """Decompose a question into a full multi-step reasoning chain."""
     chain = build_chain(request.question, madhhab=request.madhhab)
     return ChainResponse(chain=chain, outline=render_markdown(chain))
+
+
+@router.post("/verify", response_model=EvidenceVerificationReport)
+async def verify_question(request: ChainRequest) -> EvidenceVerificationReport:
+    """Verify the evidence behind a generated reasoning chain."""
+    return verify_chain_evidence(build_chain(request.question, madhhab=request.madhhab))
 
 
 @router.get("/templates", response_model=TemplatesResponse)

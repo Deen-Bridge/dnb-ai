@@ -130,7 +130,12 @@ def _normalize_work(work: str) -> str:
 def _lookup_editions(work: str) -> list[_EditionRecord]:
     """Return known editions for a work, or an empty list."""
     key = _normalize_work(work)
-    return _CROSS_REFERENCE_DB.get(key, [])
+    for db_key, records in _CROSS_REFERENCE_DB.items():
+        # Normalize the database key too so hyphenation differences (e.g.
+        # "al-Din" vs "al din") never prevent a cross-reference match.
+        if _normalize_work(db_key) == key:
+            return records
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -162,10 +167,7 @@ class CitationVerification(BaseModel):
     cross_reference_rate: float = 0.0
     drift_count: int = 0
     compliant: bool = True
-
-    @property
-    def total_citations(self) -> int:
-        return len(self.findings)
+    total_citations: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -327,4 +329,5 @@ def verify_citations(extraction: CitationExtraction) -> CitationVerification:
         cross_reference_rate=round(cross_referenced / total, 4),
         drift_count=drift_count,
         compliant=format_compliant == total and complete == total,
+        total_citations=total,
     )

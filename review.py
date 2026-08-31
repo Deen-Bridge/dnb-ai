@@ -51,6 +51,271 @@ router = APIRouter(tags=["scholar-review"])
 SCHOLAR_REVIEW_TOKEN = os.getenv("SCHOLAR_REVIEW_TOKEN", "")
 REVIEW_EXPORT_PATH = os.getenv("REVIEW_EXPORT_PATH", "data/review/reviewed.jsonl")
 
+# ---------------------------------------------------------------------------
+# LLM-as-judge evaluation framework
+# ---------------------------------------------------------------------------
+
+LLM_JUDGE_ENABLED = os.getenv("LLM_JUDGE_ENABLED", "true").lower() == "true"
+LLM_JUDGE_MODELS = [
+    m.strip()
+    for m in os.getenv("LLM_JUDGE_MODELS", "gpt-4o,claude-3-5-sonnet,command-r-plus").split(",")
+    if m.strip()
+]
+LLM_JUDGE_TEMPERATURE = float(os.getenv("LLM_JUDGE_TEMPERATURE", "0"))
+LLM_JUDGE_MAX_CONSENSUS_DELTA = float(os.getenv("LLM_JUDGE_MAX_CONSENSUS_DELTA", "0.5"))
+
+JUDGE_DIMENSIONS: tuple[str, ...] = (
+    "accuracy",
+    "completeness",
+    "appropriateness",
+    "citation_quality",
+    "tone",
+    "theological_correctness",
+)
+
+JUDGE_RUBRIC: dict[str, str] = {
+    "accuracy": "factual consistency with Qur'an, Sunnah, and orthodox Islamic sources",
+    "completeness": "covers the question's essential points without material omission",
+    "appropriateness": "suitable for the questioner's context, sensitivity, and intent",
+    "citation_quality": "citations are specific, verifiable, and correctly attributed",
+    "tone": "respectful, compassionate, and scholarly register",
+    "theological_correctness": "alignment with mainstream Aqidah and fiqh methodology",
+}
+
+class LLMJudgeScore(BaseModel):
+    dimension: str
+    score: float = Field(..., ge=0, le=5)
+    rationale: str = ""
+
+class LLMJudgeEvaluation(BaseModel):
+    item_id: str | None = None
+    question: str
+    answer: str
+    reference_answer: str | None = None
+    model: str
+    scores: dict[str, float]
+    overall: float = Field(..., ge=0, le=5)
+    verdict: str
+    reasoning: str
+    duration_ms: int = 0
+
+class LLMJudgeRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    answer: str = Field(..., min_length=1)
+    reference_answer: str | None = None
+    item_id: str | None = None
+    models: list[str] | None = None
+
+class LLMJudgeResponse(BaseModel):
+    evaluations: list[LLMJudgeEvaluation]
+    aggregate: dict[str, Any]
+
+def build_judge_prompt(question: str, answer: str, reference_answer: str | None = None) -> str:
+    rubric_lines = "\n".join(f"- {dim}: {desc}" for dim, desc in JUDGE_RUBRIC.items())
+    reference = reference_answer or "(no reference answer provided)"
+    return f"""You are a senior Islamic scholar and rigorous LLM-as-judge evaluator.
+Evaluate the candidate answer to the Islamic question below.
+
+Question:
+{question}
+
+Candidate answer:
+{answer}
+
+Reference answer:
+{reference}
+
+Rubric:
+{rubric_lines}
+
+First reason step by step about accuracy, completeness, appropriateness,
+citation quality, tone, and theological correctness. Then return ONLY JSON:
+{{
+  "reasoning": "your chain-of-thought reasoning",
+  "scores": {{"accuracy": 0.0, "completeness": 0.0, "appropriateness": 0.0,
+             "citation_quality": 0.0, "tone": 0.0, "theological_correctness": 0.0}},
+  "overall": 0.0,
+  "verdict": "approve|correct|reject"
+}}
+Scores are 0-5. Prefer 'approve' for a strong, complete, correct answer;
+'correct' when important points are missing or a citation is weak; 'reject'
+for materially wrong or misleading content."""
+
+def _extract_json_object(raw: str) -> dict[str, Any]:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:].strip()
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    raise ValueError("LLM judge response did not contain a JSON object")
+
+async def call_judge_model(model: str, prompt: str) -> str:
+    api_url = os.getenv("LLM_JUDGE_API_URL")
+    if api_url:
+        return await _call_openai_compatible(model, prompt, api_url)
+    if model.startswith("gpt-") or model.startswith("o1") or model.startswith("o3"):
+        return await _call_openai(model, prompt)
+    if model.startswith("claude"):
+        return await _call_anthropic(model, prompt)
+    raise RuntimeError(f"No LLM judge provider configured for model {model!r}")
+
+def _post_json_sync(url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    import urllib.request
+
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+async def _call_openai_compatible(model: str, prompt: str, api_url: str) -> str:
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": LLM_JUDGE_TEMPERATURE,
+    }
+    headers = {"Authorization": f"Bearer {os.getenv('LLM_JUDGE_API_KEY', '')}"}
+    data = await asyncio.to_thread(_post_json_sync, api_url, headers, payload)
+    try:
+        return data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"Unexpected judge response shape: {data}") from exc
+
+async def _call_openai(model: str, prompt: str) -> str:
+    import openai
+
+    client = openai.AsyncOpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_API_BASE") or None,
+    )
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=LLM_JUDGE_TEMPERATURE,
+    )
+    return response.choices[0].message.content or ""
+
+async def _call_anthropic(model: str, prompt: str) -> str:
+    import anthropic
+
+    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    response = await client.messages.create(
+        model=model,
+        max_tokens=2048,
+        temperature=LLM_JUDGE_TEMPERATURE,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return "".join(block.text for block in response.content if block.type == "text")
+
+async def run_single_judge(
+    question: str,
+    answer: str,
+    model: str,
+    reference_answer: str | None = None,
+    item_id: str | None = None,
+) -> LLMJudgeEvaluation:
+    import time
+
+    prompt = build_judge_prompt(question, answer, reference_answer)
+    start = time.monotonic()
+    raw = await call_judge_model(model, prompt)
+    data = _extract_json_object(raw)
+    scores = {dim: float(data.get("scores", {}).get(dim, 0.0)) for dim in JUDGE_DIMENSIONS}
+    reasoning = str(data.get("reasoning", ""))
+    overall = float(data.get("overall", sum(scores.values()) / len(scores) if scores else 0.0))
+    verdict = str(data.get("verdict", "reject"))
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return LLMJudgeEvaluation(
+        item_id=item_id,
+        question=question,
+        answer=answer,
+        reference_answer=reference_answer,
+        model=model,
+        scores=scores,
+        overall=overall,
+        verdict=verdict,
+        reasoning=reasoning,
+        duration_ms=duration_ms,
+    )
+
+async def run_judge_ensemble(request: LLMJudgeRequest) -> LLMJudgeResponse:
+    models = request.models or LLM_JUDGE_MODELS
+    evaluations = await asyncio.gather(
+        *(
+            run_single_judge(
+                question=request.question,
+                answer=request.answer,
+                reference_answer=request.reference_answer,
+                item_id=request.item_id,
+                model=model,
+            )
+            for model in models
+        )
+    )
+    dimension_scores = {dim: [] for dim in JUDGE_DIMENSIONS}
+    for evaluation in evaluations:
+        for dim in JUDGE_DIMENSIONS:
+            dimension_scores[dim].append(evaluation.scores.get(dim, 0.0))
+    overall_scores = [evaluation.overall for evaluation in evaluations]
+    disagreement = {
+        dim: (max(values) - min(values))
+        for dim, values in dimension_scores.items()
+        if values
+    }
+    aggregate: dict[str, Any] = {
+        "mean_scores": {dim: sum(values) / len(values) for dim, values in dimension_scores.items() if values},
+        "mean_overall": sum(overall_scores) / len(overall_scores) if overall_scores else 0.0,
+        "consensus": max(overall_scores) - min(overall_scores) if overall_scores else 0.0,
+        "within_consensus_delta": (max(overall_scores) - min(overall_scores) <= LLM_JUDGE_MAX_CONSENSUS_DELTA)
+        if overall_scores
+        else False,
+        "disagreement": disagreement,
+    }
+    return LLMJudgeResponse(evaluations=evaluations, aggregate=aggregate)
+
+@router.get("/review/judge/models")
+async def judge_models(x_review_token: str | None = Header(None)) -> dict[str, Any]:
+    require_reviewer(x_review_token)
+    return {
+        "enabled": LLM_JUDGE_ENABLED,
+        "models": LLM_JUDGE_MODELS,
+        "max_consensus_delta": LLM_JUDGE_MAX_CONSENSUS_DELTA,
+    }
+
+@router.post("/review/judge", response_model=LLMJudgeResponse)
+async def judge_response(
+    request: LLMJudgeRequest,
+    x_review_token: str | None = Header(None),
+) -> LLMJudgeResponse:
+    """Run the LLM-judge ensemble on a candidate answer."""
+    require_reviewer(x_review_token)
+    if not LLM_JUDGE_ENABLED:
+        raise APIException(
+            status_code=503,
+            detail="LLM judge is disabled.",
+            hint="Set LLM_JUDGE_ENABLED=true to enable automatic evaluation.",
+        )
+    return await run_judge_ensemble(request)
+
+
 
 def require_reviewer(token: str | None) -> None:
     """Authorize a reviewer request, or raise.

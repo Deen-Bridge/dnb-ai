@@ -503,6 +503,87 @@ def build_caution_note(text: str, references: list[HadithReference]) -> str | No
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Evidence verification agent
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EvidenceVerdict:
+    claim: str
+    references: list[HadithReference]
+    supported: bool
+    strength: Strength
+    notes: list[str] = field(default_factory=list)
+
+
+class EvidenceVerificationAgent:
+    """Validates scholarly claims by tracing cited hadith evidence to its
+    bundled primary-source grading record.
+    """
+
+    def __init__(self, source: GradingSource | None = None):
+        self._source = source or get_default_source()
+
+    def extract_claims(self, text: str) -> list[str]:
+        """Extract candidate scholarly claims from generated response text."""
+        claims = []
+        for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+            sentence = sentence.strip()
+            if sentence and re.search(
+                r"\b(narrated|reported|said|states|according to)\b",
+                sentence,
+                re.IGNORECASE,
+            ):
+                claims.append(sentence)
+        return claims
+
+    def verify_claims(self, text: str) -> list[EvidenceVerdict]:
+        """Verify each extracted claim, falling back to the full response."""
+        claims = self.extract_claims(text) or [text.strip()]
+        return [self._verify(claim, text) for claim in claims]
+
+    def _verify(self, claim: str, full_text: str) -> EvidenceVerdict:
+        refs = annotate(claim, self._source) or annotate(full_text, self._source)
+        notes: list[str] = []
+        if not refs:
+            return EvidenceVerdict(claim, [], False, Strength.UNKNOWN, ["no primary-source evidence cited"])
+        if not any(ref.raw.lower() in claim.lower() for ref in refs):
+            notes.append("cited evidence is not explicitly connected to this claim")
+        verified = [ref for ref in refs if ref.verified]
+        if not verified:
+            notes.append("cited references could not be verified against primary sources")
+            return EvidenceVerdict(claim, refs, False, Strength.UNKNOWN, notes)
+        strengths = [Strength(ref.grade) for ref in verified]
+        strength = aggregate_strength(strengths)
+        if strength in (Strength.DAIF, Strength.MAWDU):
+            notes.append("cited evidence is weak or fabricated; do not rely on it")
+        if any(ref.flagged for ref in verified):
+            notes.append("cited evidence carries an unstated authenticity caveat")
+        supported = (
+            bool(refs)
+            and strength not in (Strength.DAIF, Strength.MAWDU, Strength.UNKNOWN)
+            and not any(ref.flagged for ref in verified)
+            and not any("not explicitly connected" in note for note in notes)
+        )
+        return EvidenceVerdict(claim, refs, supported, strength, notes)
+
+    def trace_provenance(self, text: str) -> list[dict[str, str]]:
+        """Return a verification audit trail for every citation in *text*."""
+        return [
+            {
+                "collection": ref.collection or "",
+                "hadith_number": str(ref.hadith_number or ""),
+                "grade": ref.grade,
+                "grader": ref.grader or "",
+                "chain_type": ref.chain_type or "",
+                "verified": str(ref.verified).lower(),
+                "flagged": str(ref.flagged).lower(),
+            }
+            for ref in annotate(text, self._source)
+        ]
+
+
 HADITH_ADAB_CONTEXT = """
 
 HADITH CITATION RULES:

@@ -12,8 +12,26 @@ from google.api_core.exceptions import (
 from httpx import ASGITransport, AsyncClient
 
 import main
+from confidence import ConfidenceAssessment, ConfidenceBand
 from main import app
 from semantic_cache import get_cache, get_chat_exact_cache, get_token_quota_tracker
+
+
+def _confident(signals):
+    """Force the two-tier cache tests to treat the mock answer as cached.
+
+    Confident answers are the only ones written to the cache (confidence policy),
+    and the mock response has no citation/self-consistency signals, so these tests
+    pin the assessment to the confident band to focus on cache behaviour.
+    """
+    return ConfidenceAssessment(
+        score=0.9,
+        band=ConfidenceBand.CONFIDENT,
+        abstained=False,
+        queued=False,
+        signals=signals.present() if signals is not None else {},
+        signals_used=sorted(signals.present()) if signals is not None else [],
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -307,9 +325,10 @@ async def test_quota_exceeded_returns_429_with_retry_after(monkeypatch):
     mock_model.start_chat.return_value = mock_session
     monkeypatch.setattr(main, "get_model", lambda: mock_model)
 
-    # Set a very low quota for testing
+    # Set a low quota for testing: each request is estimated at 3 tokens,
+    # so two requests must exceed it.
     quota_tracker = get_token_quota_tracker()
-    quota_tracker._quota = 100
+    quota_tracker._quota = 5
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -349,6 +368,7 @@ async def test_cache_hit_for_signed_in_user(monkeypatch):
 
     # Enable cache for this test
     monkeypatch.setattr(main, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(main, "assess", _confident)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -427,6 +447,7 @@ async def test_exact_cache_hit_before_semantic(monkeypatch):
 
     # Enable cache for this test
     monkeypatch.setattr(main, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(main, "assess", _confident)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
