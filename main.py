@@ -129,6 +129,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from scholarly_attribution_api import router as scholarly_attribution_router
 from model_router import router as model_routing_router
 from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
@@ -386,6 +387,8 @@ app.include_router(arabic_dialect_router)
 app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
 app.include_router(recitation_router)
+# Scholarly attribution validation: prevent fabricated/misattributed scholarly opinions
+app.include_router(scholarly_attribution_router)
 
 # Configure CORS
 app.add_middleware(
