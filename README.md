@@ -64,6 +64,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/learning-path` | Personalized, catalog-grounded study path from a learner profile + progress (see [Learning-path contract](#learning-path-contract-for-dnb-backend)) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
+| `POST` | `/tafsir/compare` | Compare 10–12 retrieved tafsir works with consensus, divergence, methodology, and chronology |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
 | `GET` | `/uncertainty/taxonomy` | Islamic epistemology taxonomy and uncertainty quantification categories |
@@ -203,6 +204,13 @@ services:
 | `TOP_K` | Top-K sampling value | 40 |
 | `MAX_OUTPUT_TOKENS` | Maximum response tokens | 2048 |
 | `PORT` | Server port used by Uvicorn | 8000 |
+| `LLM_MAX_CONCURRENCY` | Maximum simultaneous model generations per process; excess requests wait without blocking the event loop | `100` |
+| `ASYNC_BACKGROUND_WORKERS` | Workers for prioritized persistence, memory extraction, and summarization tasks | `4` |
+| `ASYNC_BACKGROUND_QUEUE_SIZE` | Maximum queued response-side tasks before new work is rejected and logged | `1000` |
+| `ASYNC_SHUTDOWN_GRACE_SECONDS` | Time allowed for background work to drain before cancellation during shutdown | `10` |
+| `HTTP_MAX_CONNECTIONS` | Maximum outbound HTTP connections retained by the shared pool | `200` |
+| `HTTP_MAX_KEEPALIVE_CONNECTIONS` | Maximum idle keep-alive connections retained by the shared pool | `50` |
+| `HTTP_KEEPALIVE_EXPIRY_SECONDS` | Idle lifetime for pooled outbound HTTP connections | `30` |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
@@ -566,6 +574,36 @@ In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
 passages, with the model instructed to attribute each claim to a named mufassir
 and to surface — not flatten — points where the mufassirun differ. The response
 carries a `tafsir` block naming the works whose text actually backed the answer.
+
+#### Comparative tafsir
+
+`POST /tafsir/compare` compares one ayah across the configured Quran.com tafsir
+catalog. The default request retrieves all 12 registered works, while a custom
+request must name 10–12 distinct works. The response includes:
+
+- source text with author, language, historical era, death year where known,
+  methodology labels, and the broad perspective label recorded for that work;
+- deterministic token-similarity clusters with support ratios for high-support
+  groupings;
+- separate attributed positions for divergences and source-specific insights;
+- chronological coverage and methodology notes;
+- an optional low-temperature model synthesis whose consensus, divergence,
+  insight, and citation fields are validated against the retrieved source keys.
+
+Unavailable works remain visible under `unavailable` and never count as
+evidence. Language fallback is labelled with the language actually retrieved.
+The endpoint accepts one ayah rather than a range so that each comparison has a
+single subject and its consensus and divergence claims cannot mix unrelated
+verses. The configured catalog currently represents classical, modern, and
+contemporary works, primarily within the perspectives exposed by Quran.com; the
+response reports that coverage instead of implying unsupported sectarian
+balance.
+
+```bash
+curl -X POST http://localhost:8000/tafsir/compare \
+  -H 'Content-Type: application/json' \
+  -d '{"reference": "103:2", "language": "en"}'
+```
 
 ### Zakat (on-chain, with a live nisab)
 

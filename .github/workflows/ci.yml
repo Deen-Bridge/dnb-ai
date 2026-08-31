@@ -120,13 +120,32 @@ jobs:
       - name: Run chat request validation tests
         run: pytest -q tests/test_chat_validation.py
 
+      - name: Run async runtime tests
+        run: pytest -q tests/test_async_runtime.py
+
       - name: Run factual consistency tests
         run: pytest -q tests/test_factual_consistency.py
+
       - name: Run Swahili language processing tests
         run: pytest -q tests/test_swahili.py
 
       - name: Run audio analysis tests
         run: pytest -q tests/test_audio_analysis.py
+
+      - name: Run thematic Quran retrieval tests
+        run: pytest -q tests/test_thematic_quran.py
+
+      - name: Run Quranic concordance tests
+        run: pytest -q tests/test_concordance.py
+
+      - name: Validate theme-verse concordance dataset
+        run: python scripts/build_theme_mappings.py --check
+
+      - name: Run manuscript upload tests
+        run: pytest -q tests/test_manuscript_upload.py
+
+      - name: Run image content analysis tests
+        run: pytest -q tests/test_image_analysis.py
 
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py

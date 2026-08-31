@@ -84,6 +84,7 @@ _MAGIC_SIGNATURES: tuple[tuple[bytes, str], ...] = (
     (b"\xff\xd8\xff", "image/jpeg"),
     (b"\x89PNG\r\n\x1a\n", "image/png"),
     (b"%PDF-", "application/pdf"),
+    (b"RIFF", "image/webp"),
 )
 
 _EXTENSION_MIME: dict[str, str] = {
@@ -91,6 +92,7 @@ _EXTENSION_MIME: dict[str, str] = {
     ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".pdf": "application/pdf",
+    ".webp": "image/webp",
 }
 
 
@@ -119,12 +121,12 @@ def validate_upload(filename: str, data: bytes, max_bytes: int = DEFAULT_MAX_UPL
         raise UploadTooLargeError(f"Upload is {len(data)} bytes; the maximum allowed is {max_bytes} bytes.")
     sniffed = sniff_format(data)
     if sniffed is None:
-        raise UnsupportedFormatError("Unsupported file. Upload a JPEG image, PNG image, or PDF manuscript.")
+        raise UnsupportedFormatError("Unsupported file. Upload a JPEG, PNG, or WebP image, or a PDF manuscript.")
     suffix = PurePosixPath(filename.replace("\\", "/")).suffix.lower()
     declared = _EXTENSION_MIME.get(suffix)
     if declared is None:
         raise UnsupportedFormatError(
-            f"File extension {suffix or '(missing)'} is not supported; use .jpg, .jpeg, .png, or .pdf."
+            f"File extension {suffix or '(missing)'} is not supported; use .jpg, .jpeg, .png, .webp, or .pdf."
         )
     if declared != sniffed:
         raise UnsupportedFormatError(f"File content ({sniffed}) does not match its extension ({declared}).")

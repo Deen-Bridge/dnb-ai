@@ -7,7 +7,8 @@ import secrets
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -44,7 +45,15 @@ from slowapi.util import get_remote_address
 import metrics
 import telemetry
 from adhkar import corpus as adhkar_corpus
+from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
+from async_runtime import (
+    TaskPriority,
+    background_tasks,
+    chat_locks,
+    http_client_pool,
+    llm_limiter,
+)
 from audio_analysis import router as audio_analysis_router
 from audio_hadith import router as audio_hadith_router
 from calligraphy import router as calligraphy_router
@@ -61,6 +70,7 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
+from concordance import router as concordance_router
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -92,8 +102,10 @@ from fiqh import (
 )
 from hadith import HADITH_ADAB_CONTEXT, HadithReference, annotate as annotate_hadith, build_caution_note
 from hadith_context import router as hadith_context_router
+from hadith_search import router as hadith_search_router
 from history import router as history_router
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
+from image_analysis import router as image_analysis_router
 from learning import router as learning_router
 from manuscript_ocr import (
     ManuscriptAnalysis,
@@ -118,7 +130,9 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from scholarly_attribution_api import router as scholarly_attribution_router
 from model_router import router as model_routing_router
+from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
 from prompts import (
     ExperimentConfig,
@@ -181,7 +195,19 @@ GEMINI_API_KEY = settings.gemini_api_key
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-app = FastAPI(title="DeenBridge AI API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    """Own shared async resources and cancel unfinished work on shutdown."""
+    await background_tasks.start()
+    try:
+        yield
+    finally:
+        await background_tasks.stop()
+        await http_client_pool.aclose()
+
+
+app = FastAPI(title="DeenBridge AI API", lifespan=lifespan)
 
 metrics.setup_metrics(app)
 
@@ -313,6 +339,12 @@ app.include_router(stellar_router)
 app.include_router(faraid_router)
 app.include_router(learning_router)
 app.include_router(worship_router)
+# Quranic concordance: topic-based ayat discovery with hierarchical navigation,
+# multi-topic AND/OR queries, and per-surah frequency statistics (#125)
+app.include_router(concordance_router)
+# Research agent orchestration: multi-agent query decomposition, DAG execution,
+# synthesis and observability (#126)
+app.include_router(orchestration_router)
 
 app.include_router(reasoning_router)
 app.include_router(study_router)
@@ -328,6 +360,8 @@ app.include_router(calligraphy_router)
 app.include_router(review_router)
 # Question reformulation: deterministic quality assessment + rewrite suggestions
 app.include_router(reformulation_router)
+# Hadith search: topic and keyword search with authenticity grading
+app.include_router(hadith_search_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
@@ -342,14 +376,22 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Image content analysis: canonical verse extraction, hadith detection, translation,
+# structured metadata and batch processing for scanned Islamic content (#135)
+app.include_router(image_analysis_router)
 # Context manager: session-based user preferences, topic continuity, and follow-up detection
 app.include_router(context_router)
 # Swahili: language processing and response enhancement
 app.include_router(swahili_router)
+# Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
+# normalization and dialectal terminology lexicon (#136)
+app.include_router(arabic_dialect_router)
 # Factual consistency: cross-session contradiction prevention and reconciliation
 app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
 app.include_router(recitation_router)
+# Scholarly attribution validation: prevent fabricated/misattributed scholarly opinions
+app.include_router(scholarly_attribution_router)
 
 # Configure CORS
 app.add_middleware(
@@ -558,7 +600,11 @@ async def purchase_retriever(
 ) -> PurchaseContext | None:
     """Load purchase metadata for a chat turn; never fail the turn over it."""
     try:
-        return await build_chat_purchase_context(prompt, transactions=transactions, auth_token=auth_token)
+        return await build_chat_purchase_context(
+            prompt,
+            transactions=transactions,
+            auth_token=auth_token,
+        )
     except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
         logger.warning("Purchase lookup failed; answering without it: %s", exc)
         return None
@@ -585,6 +631,34 @@ async def personal_context_retriever(
     except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
         logger.warning("Personal context retrieval failed; answering without it: %s", exc)
         return None
+
+
+async def retrieve_chat_contexts(
+    request: ChatRequest,
+    prompt: str,
+) -> tuple[TafsirContext | None, ZakatContext | None, PurchaseContext | None, PersonalContext | None]:
+    """Run independent best-effort enrichments concurrently."""
+
+    async def best_effort(name: str, operation: Awaitable[Any]) -> Any:
+        try:
+            return await operation
+        except Exception as exc:  # noqa: BLE001 - one enrichment must not cancel its siblings
+            logger.warning("%s retrieval failed; answering without it: %s", name, exc)
+            return None
+
+    tafsir_context, zakat_context, purchase_context, personal_context = await asyncio.gather(
+        best_effort("tafsir", tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)),
+        best_effort("zakat", zakat_retriever(request.prompt, request.context)),
+        best_effort(
+            "purchase",
+            purchase_retriever(request.prompt, request.transactions, request.auth_token),
+        ),
+        best_effort(
+            "personal context",
+            personal_context_retriever(request.prompt, request.user_id, request.auth_token),
+        ),
+    )
+    return tafsir_context, zakat_context, purchase_context, personal_context
 
 
 def get_safety_settings() -> list[dict[str, str]]:
@@ -827,10 +901,11 @@ async def send_message_with_retry(
             kwargs: dict[str, Any] = {"request_options": {"timeout": timeout}}
             if generation_config:
                 kwargs["generation_config"] = generation_config
-            response = await chat_session.send_message_async(
-                message,
-                **kwargs,
-            )
+            async with llm_limiter.slot():
+                response = await chat_session.send_message_async(
+                    message,
+                    **kwargs,
+                )
             return response
         except (TimeoutError, ServiceUnavailable, DeadlineExceeded) as exc:
             if hasattr(chat_session, "history") and chat_session.history is not None:
@@ -892,6 +967,18 @@ async def run_strict_corrective_loop(
 @app.post("/chat", response_model=ChatResponse)
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
+    """Serialize one conversation while unrelated chats remain fully concurrent."""
+    chat_id = str(body.chat_id) if body.chat_id else str(uuid.uuid4())
+    async with chat_locks.hold(chat_id):
+        return await _chat(body, request, fastapi_response, chat_id)
+
+
+async def _chat(
+    body: ChatRequest,
+    request: Request,
+    fastapi_response: Response,
+    chat_id: str,
+) -> ChatResponse:
     trace = telemetry.Trace()
     _ctx_token = telemetry.current_trace.set(trace)
     _handler_start = time.perf_counter()
@@ -908,7 +995,6 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        chat_id = str(body.chat_id) if body.chat_id is not None else str(uuid.uuid4())
         is_new_chat = chat_id not in active_chats
         is_bypass = request.headers.get("X-Cache-Bypass") == "1"
 
@@ -938,33 +1024,24 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
-        # --- Tafsir and zakat retrieval (grouped as one telemetry stage) ---
+        # --- Independent retrieval fan-out (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
-            # Tafsir detection is offline (regex + the bundled surah index),
-            # so a non-tafsir prompt costs nothing.
-            tafsir_context = await tafsir_retriever(prompt, body.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+                body,
+                prompt,
+            )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
-
-            # Zakat detection is offline (keywords plus a key-shaped match), so
-            # an ordinary prompt never touches Horizon or the gold-price API.
-            zakat_context = await zakat_retriever(body.prompt, body.context)
             zakat_info = zakat_context.info if zakat_context else None
-
-            # Purchase detection is offline (keywords). History comes from an
-            # inline summary or a best-effort JWT fetch — never other users'.
-            purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
-
-            # Per-user retrieval: only this user's most-relevant records (deny by
-            # default without user_id/auth_token; ownership re-checked post-fetch).
-            personal_context = await personal_context_retriever(body.prompt, body.user_id, body.auth_token)
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
         summary: ChatSummary | None = None
         if body.user_id:
-            profile = await memory_store.get_profile(body.user_id)
-            summary = await memory_store.get_chat_summary(f"{body.user_id}:{chat_id}")
+            profile, summary = await asyncio.gather(
+                memory_store.get_profile(body.user_id),
+                memory_store.get_chat_summary(f"{body.user_id}:{chat_id}"),
+            )
 
         # Determine cache scope: public for anonymous, user:{user_id} for authenticated
         cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
@@ -1312,48 +1389,59 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         _succeeded = True
 
         # --- Persist chat history ---
-        asyncio.create_task(_persist_chat_history(chat_id, body.user_id, chat_session))
+        background_tasks.submit(
+            lambda: _persist_chat_history(chat_id, body.user_id, chat_session),
+            priority=TaskPriority.HIGH,
+            name=f"persist-chat-{chat_id}",
+        )
 
         # --- Background factual claim indexing ---
         if body.remember:
-            asyncio.create_task(
-                consistency_enforcer.index_claims(
+            background_tasks.submit(
+                lambda: consistency_enforcer.index_claims(
                     response_text,
                     chat_id=chat_id,
                     user_id=body.user_id,
-                )
+                ),
+                priority=TaskPriority.NORMAL,
+                name=f"index-claims-{chat_id}",
             )
 
         # --- Background memory extraction and summarization ---
         # Runs as fire-and-forget tasks after the response is sent.
-        if body.user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
-            asyncio.create_task(
-                _extract_and_update_memory(
-                    body.user_id,
+        user_id = body.user_id
+        if user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
+            background_tasks.submit(
+                lambda: _extract_and_update_memory(
+                    user_id,
                     prompt,
                     response_text,
                     chat_id,
                     summary,
                     memory_store,
-                )
+                ),
+                priority=TaskPriority.NORMAL,
+                name=f"extract-memory-{chat_id}",
             )
-            logger.info("Memory extraction scheduled for user %s", body.user_id[:8])
+            logger.info("Memory extraction scheduled for user %s", user_id[:8])
 
         # --- Summary eviction ---
         # After enough turns accumulate, summarize old history and persist.
-        if body.user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
+        if user_id and body.remember and MEMORY_EXTRACTION_ENABLED:
             chat_session = active_chats.get(chat_id)
             if chat_session and hasattr(chat_session, "history") and chat_session.history:
                 if len(chat_session.history) >= MAX_CHAT_HISTORY_TURNS:
-                    asyncio.create_task(
-                        _summarize_history(
-                            f"{body.user_id}:{chat_id}",
+                    background_tasks.submit(
+                        lambda: _summarize_history(
+                            f"{user_id}:{chat_id}",
                             chat_session.history,
                             summary,
                             memory_store,
-                        )
+                        ),
+                        priority=TaskPriority.LOW,
+                        name=f"summarize-chat-{chat_id}",
                     )
-                    logger.info("History summarization triggered for %s", body.user_id[:8])
+                    logger.info("History summarization triggered for %s", user_id[:8])
 
         return response_obj
 
@@ -1418,7 +1506,7 @@ async def _extract_and_update_memory(
     existing_summary: ChatSummary | None,
     store: Any,
 ) -> None:
-    """Fire-and-forget memory extraction. Runs via asyncio.create_task."""
+    """Run memory extraction submitted to the bounded background scheduler."""
     try:
         updates = await extract_updates(prompt, response)
         if updates.get("none"):
@@ -1500,23 +1588,22 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
-        # --- Tafsir and zakat retrieval ---
+        # --- Independent retrieval fan-out ---
         with trace.span("retrieval"):
-            tafsir_context = await tafsir_retriever(prompt, body.language or DEFAULT_TAFSIR_LANGUAGE)
+            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+                body,
+                prompt,
+            )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
-            zakat_context = await zakat_retriever(body.prompt, body.context)
             zakat_info = zakat_context.info if zakat_context else None
+            purchase_info = purchase_context.info if purchase_context else None
 
         combined_text: str = ""  # accumulated full response for post-processing
         chat_session = None
 
         safety_enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
 
-        # --- Purchase history & personal context ---
-        purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
-        personal_context = await personal_context_retriever(body.prompt, body.user_id, body.auth_token)
-
-        async def event_generator() -> AsyncGenerator[str, None]:
+        async def _locked_event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
             nonlocal combined_text, chat_session
 
@@ -1595,44 +1682,45 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     logger.info("Starting async streaming response...")
                     _t0 = time.perf_counter()
 
-                    stream_response = await active_chats[chat_id].send_message_async(
-                        full_prompt,
-                        generation_config={
-                            "temperature": settings.temperature,
-                            "top_p": settings.top_p,
-                            "top_k": settings.top_k,
-                            "max_output_tokens": settings.max_output_tokens,
-                        },
-                        stream=True,
-                    )
-
-                    # The citation block must never flash in a delta. The filter
-                    # withholds any tail that could still turn out to be the
-                    # start marker, including one split across two chunks.
-                    citation_filter = CitationStreamFilter()
-                    async for chunk in stream_response:
-                        if chunk.text:
-                            visible = citation_filter.feed(chunk.text)
-                            if visible:
-                                combined_text += visible
-                                delta = json.dumps(
-                                    {
-                                        "type": "content",
-                                        "delta": visible,
-                                    }
-                                )
-                                yield f"data: {delta}\n\n"
-
-                    trailing, citation_extraction = citation_filter.finish()
-                    if trailing:
-                        combined_text += trailing
-                        delta = json.dumps(
-                            {
-                                "type": "content",
-                                "delta": trailing,
-                            }
+                    async with llm_limiter.slot():
+                        stream_response = await active_chats[chat_id].send_message_async(
+                            full_prompt,
+                            generation_config={
+                                "temperature": settings.temperature,
+                                "top_p": settings.top_p,
+                                "top_k": settings.top_k,
+                                "max_output_tokens": settings.max_output_tokens,
+                            },
+                            stream=True,
                         )
-                        yield f"data: {delta}\n\n"
+
+                        # The citation block must never flash in a delta. The filter
+                        # withholds any tail that could still turn out to be the
+                        # start marker, including one split across two chunks.
+                        citation_filter = CitationStreamFilter()
+                        async for chunk in stream_response:
+                            if chunk.text:
+                                visible = citation_filter.feed(chunk.text)
+                                if visible:
+                                    combined_text += visible
+                                    delta = json.dumps(
+                                        {
+                                            "type": "content",
+                                            "delta": visible,
+                                        }
+                                    )
+                                    yield f"data: {delta}\n\n"
+
+                        trailing, citation_extraction = citation_filter.finish()
+                        if trailing:
+                            combined_text += trailing
+                            delta = json.dumps(
+                                {
+                                    "type": "content",
+                                    "delta": trailing,
+                                }
+                            )
+                            yield f"data: {delta}\n\n"
 
                     telemetry.record_model_call(
                         stream_response,
@@ -1744,6 +1832,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "fiqh": fiqh_info.model_dump() if fiqh_info else None,
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
+                        "purchases": purchase_info.model_dump() if purchase_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
                     },
                     ensure_ascii=False,
@@ -1793,6 +1882,11 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 except Exception:
                     # Client may have already disconnected; nothing to do.
                     pass
+
+        async def event_generator() -> AsyncGenerator[str, None]:
+            async with chat_locks.hold(chat_id):
+                async for event in _locked_event_generator():
+                    yield event
 
         return StreamingResponse(
             event_generator(),
@@ -1915,20 +2009,21 @@ async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
 @app.delete("/chat/{chat_id}")
 async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[str, str]:
     chat_id_str = str(chat_id)
-    try:
-        existed = chat_id_str in active_chats
-        active_chats.pop(chat_id_str, None)
-        # Drop this session's feedback bookkeeping too, so the message-id list
-        # and answer snapshots do not outlive the conversation they describe.
-        for message_id in chat_message_ids.pop(chat_id_str, []):
-            answer_snapshots.pop((chat_id_str, message_id), None)
-        # Remove from persistent store
-        persisted = await session_store.delete_session(chat_id_str)
-        if user_id:
-            await session_store.remove_user_chat(user_id, chat_id_str)
-    except Exception as e:
-        logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+    async with chat_locks.hold(chat_id_str):
+        try:
+            existed = chat_id_str in active_chats
+            active_chats.pop(chat_id_str, None)
+            # Drop this session's feedback bookkeeping too, so the message-id list
+            # and answer snapshots do not outlive the conversation they describe.
+            for message_id in chat_message_ids.pop(chat_id_str, []):
+                answer_snapshots.pop((chat_id_str, message_id), None)
+            # Remove from persistent store
+            persisted = await session_store.delete_session(chat_id_str)
+            if user_id:
+                await session_store.remove_user_chat(user_id, chat_id_str)
+        except Exception as e:
+            logger.exception("failed to delete chat", extra={"chat_id": chat_id_str})
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     if not (existed or persisted):
         raise HTTPException(status_code=404, detail="Chat session not found")
@@ -2174,6 +2269,11 @@ async def prometheus_metrics(
     if format == "json" or "application/json" in accept_header:
         snapshot = telemetry.registry.snapshot()
         snapshot["semantic_cache"] = semantic_cache.get_stats()
+        snapshot["async_runtime"] = {
+            "background_tasks": background_tasks.stats(),
+            "llm": llm_limiter.stats(),
+            "http_pool": http_client_pool.stats(),
+        }
         return JSONResponse(content=snapshot)
 
     return Response(
@@ -2188,6 +2288,11 @@ async def metrics_json(request: Request) -> dict[str, Any]:
     metrics.verify_metrics_access(request)
     snapshot = telemetry.registry.snapshot()
     snapshot["semantic_cache"] = semantic_cache.get_stats()
+    snapshot["async_runtime"] = {
+        "background_tasks": background_tasks.stats(),
+        "llm": llm_limiter.stats(),
+        "http_pool": http_client_pool.stats(),
+    }
     return snapshot
 
 

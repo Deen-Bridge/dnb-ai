@@ -24,7 +24,6 @@ never scans every item ever recorded.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -34,6 +33,8 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from async_runtime import TaskPriority, background_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -168,8 +169,12 @@ class ReviewStore:
             import metrics
 
             if self._use_redis:
-                # In Redis, queue depth will be accurate on stats / gauge refresh
-                asyncio.create_task(metrics.refresh_scholar_queue_depth())
+                # In Redis, queue depth will be accurate on stats / gauge refresh.
+                background_tasks.submit(
+                    metrics.refresh_scholar_queue_depth,
+                    priority=TaskPriority.LOW,
+                    name="refresh-scholar-queue-depth",
+                )
             else:
                 pending_count = sum(1 for it in self._local.values() if it.status is ReviewStatus.PENDING)
                 metrics.set_scholar_queue_depth(pending_count)
@@ -285,7 +290,11 @@ class ReviewStore:
             import metrics
 
             if self._use_redis:
-                asyncio.create_task(metrics.refresh_scholar_queue_depth())
+                background_tasks.submit(
+                    metrics.refresh_scholar_queue_depth,
+                    priority=TaskPriority.LOW,
+                    name="refresh-scholar-queue-depth",
+                )
             else:
                 pending_count = sum(1 for it in self._local.values() if it.status is ReviewStatus.PENDING)
                 metrics.set_scholar_queue_depth(pending_count)
