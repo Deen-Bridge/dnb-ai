@@ -32,12 +32,80 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from threading import Lock
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/db-optimizer", tags=["db-optimizer"])
+
+# Cross-Surah Reference System
+
+class ReferenceType(str, Enum):
+    REPEATED_STORY = "repeated_story"
+    RELATED_RULING = "related_ruling"
+    SIMILAR_TEACHING = "similar_teaching"
+    PROPHET_NARRATIVE = "prophet_narrative"
+    THEOLOGICAL_PARALLEL = "theological_parallel"
+    SCHOLARLY_CROSS_REF = "scholarly_cross_ref"
+
+
+class CrossReferenceRecord(BaseModel):
+    source_surah: int = Field(..., ge=1, le=114)
+    source_ayah: int = Field(..., ge=1)
+    target_surah: int = Field(..., ge=1, le=114)
+    target_ayah: int = Field(..., ge=1)
+    reference_type: ReferenceType
+    context: str = ""
+    commentary: str = ""
+    attributes: list[str] = Field(default_factory=list)
+
+
+class CrossReferenceDatabase:
+    def __init__(self) -> None:
+        self._records: list[CrossReferenceRecord] = []
+        self._by_surah: dict[int, list[int]] = {}
+        self._by_type: dict[str, list[int]] = {}
+        self._by_attribute: dict[str, list[int]] = {}
+
+    def add(self, record: CrossReferenceRecord) -> None:
+        idx = len(self._records)
+        self._records.append(record)
+        for surah in (record.source_surah, record.target_surah):
+            self._by_surah.setdefault(surah, []).append(idx)
+        self._by_type.setdefault(record.reference_type.value, []).append(idx)
+        for attribute in record.attributes:
+            self._by_attribute.setdefault(attribute, []).append(idx)
+
+    def query(self, surah: int | None = None, reference_type: ReferenceType | None = None, attributes: list[str] | None = None) -> list[CrossReferenceRecord]:
+        candidates = set(range(len(self._records)))
+        if surah is not None:
+            candidates &= set(self._by_surah.get(surah, []))
+        if reference_type is not None:
+            candidates &= set(self._by_type.get(reference_type.value, []))
+        if attributes:
+            selected: set[int] = set()
+            for attribute in attributes:
+                selected.update(self._by_attribute.get(attribute, []))
+            candidates &= selected
+        return [self._records[i] for i in sorted(candidates)]
+
+    def references_for(self, surah: int, ayah: int) -> list[CrossReferenceRecord]:
+        found = []
+        for idx in self._by_surah.get(surah, []):
+            record = self._records[idx]
+            if (record.source_surah == surah and record.source_ayah == ayah) or (record.target_surah == surah and record.target_ayah == ayah):
+                found.append(record)
+        return found
+
+
+_STOPWORDS = frozenset({"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "was", "were", "be", "been", "by", "that", "this", "these", "those", "it", "as", "at", "from", "which", "who"})
+
+
+def _tokenize(text: str) -> set[str]:
+    return {token for token in re.findall(r"[a-z0-9']+", text.lower()) if token not in _STOPWORDS}
+
 
 # Latency at or above this (milliseconds) counts a query as "slow". Mirrors the
 # issue's "zero queries exceeding 500ms" success criterion.
@@ -826,3 +894,212 @@ async def decompose_endpoint(request: DecompositionRequest) -> DecompositionPlan
 async def replan_endpoint(request: ReplanRequest) -> DecompositionPlan:
     """Re-plan after progress or when a changed query arrives."""
     return replan(request.plan, request.completed_task_ids, request.new_query, request.available_agents)
+
+
+# Ayah relationship mapping
+# ---------------------------------------------------------------------------
+
+_QURANIC_STOPWORDS = frozenset(
+    {
+        "the",
+        "and",
+        "of",
+        "to",
+        "in",
+        "that",
+        "it",
+        "is",
+        "for",
+        "on",
+        "with",
+        "as",
+        "by",
+        "are",
+        "be",
+        "this",
+        "those",
+        "who",
+        "whom",
+        "which",
+        "from",
+        "at",
+        "an",
+        "or",
+        "we",
+        "you",
+        "they",
+        "he",
+        "she",
+        "them",
+        "his",
+        "her",
+        "their",
+        "our",
+        "your",
+        "will",
+        "shall",
+        "may",
+        "all",
+        "not",
+        "but",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "then",
+        "when",
+        "what",
+        "why",
+        "how",
+        "so",
+        "if",
+        "there",
+        "where",
+        "than",
+        "too",
+        "very",
+        "can",
+        "would",
+        "should",
+        "could",
+        "must",
+        "unto",
+        "thy",
+        "thou",
+        "ye",
+        "hath",
+        "doth",
+        "art",
+        "shalt",
+        "wilt",
+        "verily",
+        "indeed",
+        "surely",
+        "lord",
+        "allah",
+        "god",
+        "people",
+        "say",
+        "said",
+        "says",
+        "o",
+        "yea",
+        "nay",
+        "also",
+        "still",
+        "even",
+        "yet",
+        "thus",
+        "among",
+        "before",
+        "after",
+        "until",
+        "against",
+        "upon",
+        "into",
+        "over",
+        "under",
+        "through",
+        "during",
+        "within",
+        "without",
+        "about",
+        "between",
+        "because",
+        "such",
+        "same",
+        "own",
+        "every",
+        "each",
+        "both",
+        "some",
+        "any",
+        "no",
+        "one",
+        "two",
+        "many",
+        "much",
+        "more",
+        "most",
+        "other",
+        "another",
+        "these",
+        "therein",
+        "thereafter",
+        "deem",
+    }
+)
+
+
+def _tokens(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-zA-Z0-9']+", text.lower()) if w not in _QURANIC_STOPWORDS and len(w) > 1}
+
+
+class AyahText(BaseModel):
+    """One Quranic ayah with thematic labels used for similarity detection."""
+
+    surah: int = Field(..., ge=1, le=114)
+    ayah: int = Field(..., ge=1)
+    text: str = Field(..., min_length=1)
+    topics: list[str] = Field(default_factory=list)
+    scholarly_note: str | None = None
+
+
+class AyahRelationshipEdge(BaseModel):
+    source: str
+    target: str
+    relationship_type: str
+    strength: float = Field(..., ge=0.0, le=1.0)
+    scholarly_note: str | None = None
+
+
+class AyahCorpus(BaseModel):
+    ayahs: list[AyahText] = Field(..., min_length=1)
+
+
+class BuildGraphResult(BaseModel):
+    ayahs: int
+    relationships: int
+
+
+class IndirectPath(BaseModel):
+    path: list[str]
+    average_strength: float
+
+
+class RelatedAyahResult(BaseModel):
+    source: str
+    direct: list[AyahRelationshipEdge]
+    indirect: list[IndirectPath] = Field(default_factory=list)
+
+
+class RelationshipGraphNode(BaseModel):
+    id: str
+    surah: int
+    ayah: int
+    topics: list[str]
+
+
+class RelationshipGraph(BaseModel):
+    nodes: list[RelationshipGraphNode]
+    edges: list[AyahRelationshipEdge]
+
+
+def _classify_relationship(a: AyahText, b: AyahText, jaccard: float, topic_overlap: float) -> str:
+    a_tokens = _tokens(a.text)
+    b_tokens = _tokens(b.text)
+    if not a_tokens or not b_tokens:
+        return "parallel_teaching"
+    contrast = {"but", "however", "yet", "while", "whereas", "except", "without"}
+    example = {"example", "like", "likeness", "parable", "similitude"}
+    if topic_overlap >= 0.65 and jaccard >= 0.25:
+        return "parallel_teaching"
+    if a_tokens & contrast or b_tokens & contrast:
+        return "contrast"
+    if a_tokens & example or b_tokens & example:
+        return "example"
+    if jaccard >= 0.15:
+        return "elaboration"
+    return "complement"
