@@ -114,22 +114,29 @@ def test_chat_documents_success_and_error_responses(spec):
     ],
 )
 def test_documented_chat_error_bodies_match_the_handler(spec, code, detail):
-    """Each documented example is the exact `detail` main.chat raises, so /docs
-    cannot drift into describing errors the service never returns."""
+    """Each documented example is the exact `detail` the handler raises, so /docs
+    cannot drift into describing errors the service never returns.
+
+    The route is a thin locking wrapper over ``_chat``, which is where the
+    HTTPExceptions are actually raised — so that is what gets inspected.
+    """
     documented = spec["paths"]["/chat"]["post"]["responses"][code]["content"]["application/json"]["example"]
 
     assert documented == {"detail": detail}
-    assert f'detail="{detail}"' in inspect.getsource(main.chat)
+    assert f'detail="{detail}"' in inspect.getsource(main._chat)
 
 
 def test_auth_token_documents_every_use_of_the_credential(spec):
     """A bearer credential's documented data use must match the code path."""
     description = spec["components"]["schemas"]["ChatRequest"]["properties"]["auth_token"]["description"]
-    source = inspect.getsource(main.chat)
+    # The chat path fans its retrievals out through this helper, so both uses
+    # of the token are visible in one place.
+    source = inspect.getsource(main.retrieve_chat_contexts)
 
     assert "purchase history" in description
-    # The handler also hands the token to personal-context retrieval, and it does
-    # so unconditionally — not only when `transactions` is absent.
+    # The token reaches purchase history and, unconditionally, personal-context
+    # retrieval — not only when `transactions` is absent.
+    assert "purchase_retriever(request.prompt, request.transactions, request.auth_token)" in source
     assert "personal_context_retriever(request.prompt, request.user_id, request.auth_token)" in source
     assert "personal-context" in description
 

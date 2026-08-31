@@ -229,6 +229,7 @@ OPENAPI_TAGS = [
     },
 ]
 
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Own shared async resources and cancel unfinished work on shutdown."""
