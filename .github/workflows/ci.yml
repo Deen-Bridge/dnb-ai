@@ -1,5 +1,4 @@
 name: CI
-
 on:
   pull_request:
     branches: [main, dev]
@@ -7,7 +6,8 @@ on:
     branches: [main, dev]
 
 jobs:
-  lin-and-test:
+  lint-and-test:
+
     name: Lint and Test
     runs-on: ubuntu-latest
 
@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-ython@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -24,8 +24,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r.requirements.txt
-          pip install -r.requirements-dev.txt
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Lint (ruff)
         run: ruff check .
@@ -159,7 +159,7 @@ jobs:
 
       - name: Verify container starts and /ping returns 200
         run: |
-          docker run -d --name test-ai -p 8000:8000 -e GEMNI_API_KEY=dummy deenbridge-ai:ci
+          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
           timeout 60s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
           docker logs test-ai
           docker stop test-ai
