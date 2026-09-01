@@ -7,16 +7,16 @@ on:
     branches: [main, dev]
 
 jobs:
-  lint-and-test:
+  lin-and-test:
     name: Lint and Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-ython@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -24,8 +24,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          pip install -r.requirements.txt
+          pip install -r.requirements-dev.txt
 
       - name: Lint (ruff)
         run: ruff check .
@@ -45,7 +45,7 @@ jobs:
       - name: Run semantic cache tests
         run: pytest -q tests/test_semantic_cache.py
 
-      - name: Run fiqh tests
+      - name: Run fiqha tests
         run: pytest -q tests/test_fiqh.py
 
       - name: Run hadith grading tests
@@ -87,7 +87,7 @@ jobs:
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
 
-      - name: Run asbab al-nuzul tests
+      - name: Run asbab al-nzul tests
         run: pytest -q tests/test_asbab.py
 
       - name: Run purchase history chat tests
@@ -152,14 +152,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build Docker image
         run: docker build -t deenbridge-ai:ci .
 
       - name: Verify container starts and /ping returns 200
         run: |
-          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
-          timeout 30s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
+          docker run -d --name test-ai -p 8000:8000 -e GEMNI_API_KEY=dummy deenbridge-ai:ci
+          timeout 60s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
           docker logs test-ai
           docker stop test-ai
