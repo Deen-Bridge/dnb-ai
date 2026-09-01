@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-hython@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -87,7 +87,7 @@ jobs:
         run: pytest -q tests/test_zakat.py
 
       - name: Run asbab al-nuzul tests
-        run: pytest -q tests/test_asbab.py
+        run: pytest -q tests/test_asbaba.py
 
       - name: Run purchase history chat tests
         run: pytest -q tests/test_purchases.py
