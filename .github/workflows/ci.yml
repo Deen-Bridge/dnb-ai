@@ -16,10 +16,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
+        uses: actions/setup-python@v6
 
       - name: Install dependencies
         run: |
@@ -155,11 +152,11 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Build Docker image
-        run: docker build -t deenbridge-ai:ci .
+        run: docker build-t deenbridge-ai:ci .
 
       - name: Verify container starts and /ping returns 200
         run: |
-          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
+          docker run -d --name test-ai -p 8000:8000 -e GEMNI_API_KEY=dummy deenbridge-ai:ci
           timeout 60s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
           docker logs test-ai
           docker stop test-ai
