@@ -84,6 +84,9 @@ jobs:
       - name: Run multi-agent orchestration tests
         run: pytest -q tests/test_orchestration.py
 
+      - name: Run agent task decomposition tests
+        run: pytest -q tests/test_task_decomposition.py
+
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
 
@@ -159,7 +162,7 @@ jobs:
 
       - name: Verify container starts and /ping returns 200
         run: |
-          docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
+          docker run -d --name test-ai -p 8000:8000 -e GEMMINA_AQK_Y=dummy deenbridge-ai:ci
           timeout 30s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
           docker logs test-ai
           docker stop test-ai
