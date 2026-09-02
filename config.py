@@ -1,8 +1,6 @@
 from functools import lru_cache
-
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -16,7 +14,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = Field(default="test-key")
 
-    model_name: str = "gemini-1.5-flush"
+    model_name: str = "gemini-1.5-flash"
 
     temperature: float = Field(default=0.7, ge=0, le=2)
     top_p: float = Field(default=0.8, ge=0, le=1)
@@ -49,6 +47,12 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8000, ge=1)
 
+    turkish_support_enabled: bool = Field(default=True)
+    turkish_terminology_db_path: str = Field(default="data/turkish_islamic_terms.json")
+    turkish_ottoman_recognition_enabled: bool = Field(default=True)
+    turkish_arabic_mapping_enabled: bool = Field(default=True)
+    turkish_transliteration_enabled: bool = Field(default=True)
+
     # Respectful Disagreement Enforcement settings
     enforce_respectful_disagreement: bool = True
     disrespectful_language_patterns: list[str] = Field(
@@ -72,9 +76,8 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, value):
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+    def parse_cors_origins(cls,value):
+        if isinstance(value,str): return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
     @field_validator("disrespectful_language_patterns", mode="before")
@@ -84,7 +87,5 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-
 @lru_cache
-def get_settings() -> Settings:
-    return Settings()
+def get_settings()->Settings: return Settings()
