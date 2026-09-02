@@ -483,7 +483,7 @@ by double newlines (`\n\n`):
 3. **Done** — terminal event with the complete response, chat history, and
    metadata (confidence, hadith references, fiqh info, tafsir info, zakat info):
    ```json
-   data: {"type": "done", "chat_id": "<uuid>", "history": [...], "text": "...", "confidence": {...}}
+   data: {"type": "done", "chat_id": "<uuid>", "history": [...], "text": "...", "cached": false, "confidence": {...}}
    ```
 
 4. **Error** — if an upstream error occurs mid-stream, a terminal error event
@@ -507,6 +507,39 @@ curl -N -X POST http://localhost:8000/chat/stream \
 ```
 
 The `-N` flag disables curl's output buffering so text appears incrementally.
+
+#### Response caching
+
+The streaming path consults the same two-tier cache as `POST /chat` — exact
+match first, embedding similarity second — under the same `cache_scope`, so an
+answer cached by either endpoint is served by both, and one user's answers are
+never read by another. On a hit no model call is made: the stored answer is
+replayed as ordinary `content` deltas, the `done` event carries
+`"cached": true`, and the session is seeded with the turn so a follow-up still
+has context.
+
+Every response carries `X-Cache-Tier: exact | semantic | miss` and
+`X-Semantic-Cache: hit | miss | bypass`; `X-Cache-Bypass: 1` on the request
+forces a fresh generation. Eligibility is the one `cache_eligible()` predicate
+both endpoints share: first message of a chat — decided from the session store,
+not from process-local state, so a resumed conversation is never mistaken for a
+new one — no `context`, no tafsir/zakat/purchase/personal retrieval, no
+`language` or `madhhab` (both reshape the answer without changing the prompt
+the key is built from), and an input-gate verdict of plain `allow`. Only
+non-abstained answers are written.
+
+The cache is off by default. Set `SEMANTIC_CACHE_ENABLED=1` to turn it on; the
+full configuration table is in [`docs/latency.md`](docs/latency.md). Until it
+is set, every response reports `X-Semantic-Cache: miss`.
+
+A replay carries the same `confidence` block the original asker saw, so the
+`done` event has the same shape whichever branch served the turn.
+
+Measured against a stub provider streaming four 0.4 s chunks, a repeat question
+goes from 1625 ms to 12 ms end-to-end (99.2 %), with first text on screen at
+9 ms instead of 409 ms. Reproduce with
+`python -m scripts.bench_stream_cache`; the method and the full table are in
+[`docs/latency.md`](docs/latency.md).
 
 #### Safety, telemetry, and confidence
 
