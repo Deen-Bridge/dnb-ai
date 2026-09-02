@@ -146,6 +146,61 @@ from vocabulary import router as vocabulary_router
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+# --- Confidence calibration -------------------------------------------------
+CONFIDENCE_TEMPERATURE = 1.15
+CONFIDENCE_CALIBRATION_MAX_EVENTS = 10000
+_calibration_events: list[dict[str, Any]] = []
+
+
+def _calibrate_assessment(
+    assessment: ConfidenceAssessment,
+    *,
+    citation_verification: float,
+    evidence_quality: float,
+) -> ConfidenceAssessment:
+    """Temperature-scale the raw confidence and adjust for evidence strength."""
+    if assessment is None:
+        return assessment
+    score = assessment.score
+    calibrated = (
+        score ** CONFIDENCE_TEMPERATURE
+        if score >= 0.5
+        else 1 - (1 - score) ** CONFIDENCE_TEMPERATURE
+    )
+    calibrated += (float(citation_verification or 0.0) - 0.5) * 0.15
+    calibrated += (float(evidence_quality or 0.0) - 0.5) * 0.05
+    assessment.score = round(min(0.99, max(0.01, calibrated)), 4)
+    try:
+        thresholds = confidence_thresholds()
+        best = None
+        for band in ConfidenceBand:
+            try:
+                limit = float(thresholds.get(band.value))
+            except (TypeError, ValueError):
+                continue
+            if assessment.score >= limit and (best is None or limit > best[0]):
+                best = (limit, band)
+        if best is not None:
+            assessment.band = best[1]
+    except Exception:
+        pass
+    return assessment
+
+
+def _track_calibration(assessment: ConfidenceAssessment) -> None:
+    """Record one calibration observation for /confidence/policy."""
+    if assessment is None:
+        return
+    _calibration_events.append(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "score": assessment.score,
+            "band": assessment.band.value,
+            "queued": assessment.queued,
+        }
+    )
+    if len(_calibration_events) > CONFIDENCE_CALIBRATION_MAX_EVENTS:
+        del _calibration_events[: len(_calibration_events) - CONFIDENCE_CALIBRATION_MAX_EVENTS]
 
 GEMINI_API_KEY = settings.gemini_api_key
 
@@ -1222,6 +1277,16 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             citation_verification=citation_extraction.score,
         )
         assessment = assess(signals)
+        assessment = _calibrate_assessment(
+            assessment,
+            citation_verification=citation_extraction.score,
+            evidence_quality=1.0 if hadith_refs else (0.6 if citation_extraction.citations else 0.4),
+        )
+        _track_calibration(assessment)
+        if assessment.band is ConfidenceBand.CONFIDENT:
+            assessment.queued = False
+        elif not assessment.queued:
+            assessment.queued = True
         answer_before_policy = response_text
 
         if assessment.queued:
@@ -1672,6 +1737,16 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     citation_verification=citation_extraction.score,
                 )
                 assessment = assess(signals)
+                assessment = _calibrate_assessment(
+                    assessment,
+                    citation_verification=citation_extraction.score,
+                    evidence_quality=1.0 if hadith_refs else (0.6 if citation_extraction.citations else 0.4),
+                )
+                _track_calibration(assessment)
+                if assessment.band is ConfidenceBand.CONFIDENT:
+                    assessment.queued = False
+                elif not assessment.queued:
+                    assessment.queued = True
 
                 if assessment.queued:
                     try:
@@ -2190,9 +2265,23 @@ async def metrics() -> dict[str, Any]:
 @app.get("/confidence/policy")
 async def confidence_policy() -> dict[str, Any]:
     """Current confidence thresholds and the queue's durability."""
+    calibration = None
+    if _calibration_events:
+        scores = [event["score"] for event in _calibration_events]
+        calibration = {
+            "observations": len(_calibration_events),
+            "mean_score": round(sum(scores) / len(scores), 4),
+            "min_score": round(min(scores), 4),
+            "max_score": round(max(scores), 4),
+            "bands": {
+                band: sum(1 for event in _calibration_events if event["band"] == band)
+                for band in (b.value for b in ConfidenceBand)
+            },
+        }
     return {
         "thresholds": confidence_thresholds(),
         "review_queue": await review_store.stats(),
+        "calibration": calibration,
     }
 
 
