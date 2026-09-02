@@ -181,7 +181,7 @@ def embed_text(text: str) -> np.ndarray:
 
 
 class CacheEntry:
-    __slots__ = ("embedding", "response", "chat_id", "history", "expires_at", "scope", "token_count")
+    __slots__ = ("embedding", "response", "chat_id", "history", "expires_at", "scope", "token_count", "confidence")
 
     def __init__(
         self,
@@ -192,6 +192,7 @@ class CacheEntry:
         expires_at: float,
         scope: str = "public",
         token_count: int = 0,
+        confidence: dict[str, Any] | None = None,
     ) -> None:
         self.embedding = embedding
         self.response = response
@@ -200,6 +201,12 @@ class CacheEntry:
         self.expires_at = expires_at
         self.scope = scope
         self.token_count = token_count
+        # The confidence assessment the answer was stored with, as a plain
+        # dict so this module stays independent of the confidence model. A
+        # replay carries the same block the original asker saw instead of a
+        # null, so a client's response shape does not depend on whether the
+        # cache served the turn.
+        self.confidence = confidence
 
     @property
     def expired(self) -> bool:
@@ -245,6 +252,7 @@ class SemanticCache:
         history: list[Any],
         scope: str = "public",
         token_count: int = 0,
+        confidence: dict[str, Any] | None = None,
     ) -> None:
         if not SEMANTIC_CACHE_ENABLED:
             return
@@ -257,6 +265,7 @@ class SemanticCache:
             expires_at=time.time() + SEMANTIC_CACHE_TTL_SECONDS,
             scope=scope,
             token_count=token_count,
+            confidence=confidence,
         )
         self._entries.append(entry)
         self._access_times.append(time.time())

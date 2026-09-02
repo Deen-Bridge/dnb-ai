@@ -552,6 +552,12 @@ safety_pipeline = SafetyPipeline(InputGate(safety_policy, classify_for_safety), 
 
 # Semantic response cache
 semantic_cache = get_cache()
+
+# A cache hit is replayed to a streaming client in fixed-size slices instead of
+# one giant delta, so the client renders it through exactly the same
+# progressive path as a live generation. No artificial delay is inserted: the
+# answer is already in memory, so every slice goes out immediately.
+CACHE_REPLAY_CHUNK_CHARS = 120
 token_quota_tracker = get_token_quota_tracker()
 
 # Durable queue for low-confidence religious answers awaiting a scholar
@@ -964,6 +970,99 @@ async def run_strict_corrective_loop(
     return safe_text or original_text
 
 
+def session_history_messages(chat_session: Any) -> list[Message]:
+    """Render a Gemini chat session's turns as API ``Message`` objects.
+
+    Shared by ``/chat`` and both branches of ``/chat/stream``. A malformed
+    entry is skipped rather than failing the turn: the answer already exists,
+    and losing one history row beats losing the reply.
+    """
+    history: list[Message] = []
+    for message in chat_session.history if chat_session else []:
+        try:
+            if hasattr(message, "parts") and message.parts:
+                content = message.parts[0].text if hasattr(message.parts[0], "text") else str(message.parts[0])
+            else:
+                content = str(message)
+
+            if message.role == "user":
+                content = _strip_system_context(content)
+            history.append(Message(role="user" if message.role == "user" else "model", content=content))
+        except Exception:  # noqa: BLE001 - one malformed turn must not fail the answer
+            logger.warning("error processing message in history", exc_info=True)
+            continue
+    return history
+
+
+def cache_eligible(
+    *,
+    is_new_chat: bool,
+    context: str | None,
+    language: str | None,
+    madhhab: str | None,
+    safety_action: str | None,
+    tafsir_context: Any,
+    zakat_context: Any,
+    purchase_context: Any,
+    personal_context: Any,
+) -> bool:
+    """Decide whether this turn may be served from / written to the response cache.
+
+    Shared by ``/chat`` and ``/chat/stream`` so the two endpoints can never
+    drift into caching different things. A follow-up turn depends on
+    conversation history and must not be replayed to anyone else, and neither
+    may an answer built from this asker's tafsir passages, wallet balance,
+    purchase history, or personal memory. (One user's answers are kept from
+    another by ``cache_scope``, which the caller supplies at lookup time.)
+
+    ``language`` and ``madhhab`` reshape the answer while leaving the prompt
+    untouched, so they cannot ride on a key derived from the prompt alone: an
+    Arabic or Hanafi-led answer would replay for the same question asked
+    without either. Folding them into the embedded text would not help — two
+    strings differing by a short prefix sit far inside the similarity
+    threshold. Serving them correctly needs a variant-keyed store, so until
+    there is one, a request carrying either is left out of the cache.
+
+    ``safety_action`` is the input gate's verdict. Only a plainly allowed
+    prompt may touch the cache: a refusal must never be answered from it, and
+    a guidance-shaped answer belongs to the prompt that earned the guidance.
+    """
+    return (
+        is_new_chat
+        and context is None
+        and tafsir_context is None
+        and zakat_context is None
+        and purchase_context is None
+        and personal_context is None
+        and language is None
+        and madhhab is None
+        and safety_action in (None, "allow")
+        and SEMANTIC_CACHE_ENABLED
+    )
+
+
+async def embed_for_cache(prompt: str) -> Any:
+    """Embed *prompt* for cache lookup without blocking the event loop.
+
+    ``embed_text`` issues a blocking HTTP call to the embedding API. Running it
+    inline stalls every other in-flight request for its duration, which is the
+    opposite of what a latency fix should do, so it goes to the threadpool.
+    """
+    return await run_in_threadpool(embed_text, normalize_text(prompt))
+
+
+def replay_chunks(text: str, size: int = CACHE_REPLAY_CHUNK_CHARS) -> list[str]:
+    """Split a cached answer into the deltas a streaming replay emits.
+
+    Slices are taken at fixed character offsets rather than word boundaries:
+    a live model stream splits mid-word too, so a client that renders one
+    correctly renders the other.
+    """
+    if size <= 0:
+        raise ValueError("replay chunk size must be positive")
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
 @app.post("/chat", response_model=ChatResponse)
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
@@ -995,7 +1094,17 @@ async def _chat(
         telemetry.registry.record_request(handler_ms, error=False)
 
     try:
-        is_new_chat = chat_id not in active_chats
+        # active_chats is process-local: empty after a restart and on every
+        # other worker. Trusting it alone would mark a resumed conversation as
+        # new and let the cache replay a standalone answer over a follow-up, so
+        # the session store decides. What it returns is reused when the session
+        # is seeded rather than being loaded a second time.
+        persisted_history: list[dict[str, str]] = []
+        if chat_id in active_chats:
+            is_new_chat = False
+        else:
+            persisted_history = await session_store.load_history(chat_id)
+            is_new_chat = not persisted_history
         is_bypass = request.headers.get("X-Cache-Bypass") == "1"
 
         # A user who pastes a Stellar secret key must not have it forwarded to
@@ -1050,14 +1159,19 @@ async def _chat(
         # through the semantic response cache: the first is built from retrieved
         # passages (already cached by ayah key), and the others contain one
         # user's real financial data, which must never be replayed to anyone else.
-        is_cacheable = (
-            is_new_chat
-            and body.context is None
-            and tafsir_context is None
-            and zakat_context is None
-            and purchase_context is None
-            and personal_context is None
-            and SEMANTIC_CACHE_ENABLED
+        is_cacheable = cache_eligible(
+            is_new_chat=is_new_chat,
+            context=body.context,
+            language=effective_language,
+            madhhab=madhhab,
+            # /chat runs the input gate inside safety_pipeline.run_async, below
+            # this point, so no verdict exists here yet. That ordering pre-dates
+            # this change; the streaming path gates its own lookup.
+            safety_action=None,
+            tafsir_context=tafsir_context,
+            zakat_context=zakat_context,
+            purchase_context=purchase_context,
+            personal_context=personal_context,
         )
 
         # --- Two-tier cache lookup: exact-match first, then semantic ---
@@ -1091,15 +1205,22 @@ async def _chat(
                     response=exact_cached["response"],
                     chat_id=chat_id,
                     message_id=cached_message_id,
-                    history=exact_cached["history"],
+                    # Built from this caller's own session rather than the
+                    # stored history: a match only has to clear the similarity
+                    # threshold, so the stored wording can be someone else's,
+                    # and the transcript must show what this user asked.
+                    history=session_history_messages(chat_session),
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(exact_cached["response"]),
+                    confidence=(
+                        ConfidenceAssessment(**exact_cached["confidence"]) if exact_cached.get("confidence") else None
+                    ),
                     language=effective_language,
                 )
 
             # Semantic cache lookup (tier 2)
             normalized = normalize_text(prompt)
-            embedding = embed_text(normalized)
+            embedding = await embed_for_cache(prompt)
             cached = semantic_cache.get(embedding, scope=cache_scope)
             if cached is not None:
                 fastapi_response.headers["X-Cache-Tier"] = "semantic"
@@ -1123,9 +1244,10 @@ async def _chat(
                     response=cached.response,
                     chat_id=chat_id,
                     message_id=cached_message_id,
-                    history=cached.history,
+                    history=session_history_messages(chat_session),
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(cached.response),
+                    confidence=(ConfidenceAssessment(**cached.confidence) if cached.confidence else None),
                     language=effective_language,
                 )
         elif is_bypass:
@@ -1156,8 +1278,8 @@ async def _chat(
                 logger.info(f"Creating new chat session: {chat_id}")
                 model = get_model()
                 # Load persisted history if available
-                persisted = await session_store.load_history(chat_id)
-                history = dicts_to_contents(persisted) if persisted else []
+                # Already loaded when new-chat status was determined.
+                history = dicts_to_contents(persisted_history) if persisted_history else []
                 active_chats[chat_id] = model.start_chat(history=history)
 
             system_context = ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT
@@ -1225,21 +1347,8 @@ async def _chat(
         )
 
         # Get chat history (strip system context from user messages)
-        history = []
         chat_session = active_chats.get(chat_id)
-        for message in chat_session.history if chat_session else []:
-            try:
-                if hasattr(message, "parts") and message.parts:
-                    content = message.parts[0].text if hasattr(message.parts[0], "text") else str(message.parts[0])
-                else:
-                    content = str(message)
-
-                if message.role == "user":
-                    content = _strip_system_context(content)
-                history.append(Message(role="user" if message.role == "user" else "model", content=content))
-            except Exception as e:
-                logger.warning(f"Error processing message in history: {str(e)}")
-                continue
+        history = session_history_messages(chat_session)
 
         response_text = safety_result.text if safety_result else generated_text
 
@@ -1329,14 +1438,15 @@ async def _chat(
             token_count = totals.get("total_tokens", 0)
 
             if embedding is None:
+                embedding = await embed_for_cache(prompt)
+            if normalized is None:
                 normalized = normalize_text(prompt)
-                embedding = embed_text(normalized)
 
             # Write to exact-match cache (tier 1)
             exact_key = f"{cache_scope}:{normalized}"
             exact_cache.put(
                 exact_key,
-                {"response": response_text, "history": history},
+                {"response": response_text, "history": history, "confidence": assessment.model_dump()},
                 token_count=token_count,
             )
 
@@ -1348,6 +1458,7 @@ async def _chat(
                 history,
                 scope=cache_scope,
                 token_count=token_count,
+                confidence=assessment.model_dump(),
             )
             logger.info("Two-tier cache WRITE for prompt: %s (scope: %s)", prompt[:80], cache_scope)
 
@@ -1603,13 +1714,183 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
         safety_enabled = os.getenv("SAFETY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "off"}
 
+        # active_chats is process-local: empty after a restart and on every
+        # other worker. Trusting it alone would mark a resumed conversation as
+        # new and let the cache replay a standalone answer over a follow-up, so
+        # the session store decides. What it returns is reused when the session
+        # is seeded rather than being loaded a second time.
+        persisted_history: list[dict[str, str]] = []
+        if chat_id in active_chats:
+            is_new_chat = False
+        else:
+            persisted_history = await session_store.load_history(chat_id)
+            is_new_chat = not persisted_history
+        is_bypass = request.headers.get("X-Cache-Bypass") == "1"
+        cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
+
+        # --- Safety input gate ---
+        # Evaluated here rather than inside the generator so its verdict can
+        # gate the cache lookup below: a prompt the gate would refuse must not
+        # be answered from cache merely because an allowed phrasing once landed
+        # inside the similarity threshold. The generator reuses this decision,
+        # so classification still runs exactly once per request.
+        decision: Any = None
+        if safety_enabled:
+            with trace.span("safety_input"):
+                decision = await safety_pipeline.input_gate.evaluate_async(prompt)
+
+        # --- Two-tier cache lookup ---
+        # The same tiers, scope and key as ``/chat``, so an answer cached by
+        # either endpoint is served by both. A hit skips the model call
+        # outright: the first delta reaches the client in milliseconds instead
+        # of after a full generation round-trip.
+        is_cacheable = cache_eligible(
+            is_new_chat=is_new_chat,
+            context=body.context,
+            language=effective_language,
+            madhhab=madhhab,
+            safety_action=decision.action if decision is not None else None,
+            tafsir_context=tafsir_context,
+            zakat_context=zakat_context,
+            purchase_context=purchase_context,
+            personal_context=personal_context,
+        )
+
+        exact_cache = get_chat_exact_cache()
+        cache_embedding: Any = None
+        cached_text: str | None = None
+        cached_confidence: dict[str, Any] | None = None
+        cache_tier: str | None = None
+
+        if is_cacheable and not is_bypass:
+            exact_key = f"{cache_scope}:{normalize_text(prompt)}"
+            exact_cached = exact_cache.get(exact_key)
+            if exact_cached is not None:
+                cache_tier = "exact"
+                cached_text = exact_cached["response"]
+                cached_confidence = exact_cached.get("confidence")
+            else:
+                cache_embedding = await embed_for_cache(prompt)
+                semantic_cached = semantic_cache.get(cache_embedding, scope=cache_scope)
+                if semantic_cached is not None:
+                    cache_tier = "semantic"
+                    cached_text = semantic_cached.response
+                    cached_confidence = semantic_cached.confidence
+        elif is_bypass:
+            semantic_cache.bypasses += 1
+
+        if cached_text is not None:
+            logger.info(
+                "cache hit (stream)",
+                extra={
+                    "chat_id": chat_id,
+                    "tier": cache_tier,
+                    "scope": cache_scope,
+                    "prompt_chars": len(prompt),
+                    **prompt_debug_fields(prompt),
+                },
+            )
+
+            async def cached_event_generator(
+                answer: str, confidence: dict[str, Any] | None
+            ) -> AsyncGenerator[str, None]:
+                """Replay a cached answer over the live stream's event contract.
+
+                The client sees the same metadata → content deltas → done
+                sequence as a generated answer, so nothing downstream needs to
+                know a cache served this turn beyond the ``cached`` flag.
+                """
+                async with chat_locks.hold(chat_id):
+                    try:
+                        meta = json.dumps({"type": "metadata", "chat_id": chat_id, "language": effective_language})
+                        yield f"data: {meta}\n\n"
+
+                        # Seed the session with this turn so a follow-up message
+                        # in the same chat_id — streamed or not — has context.
+                        session = get_model().start_chat(
+                            history=[
+                                {"role": "user", "parts": [{"text": prompt}]},
+                                {"role": "model", "parts": [{"text": answer}]},
+                            ]
+                        )
+                        active_chats[chat_id] = session
+
+                        for piece in replay_chunks(answer):
+                            delta = json.dumps({"type": "content", "delta": piece}, ensure_ascii=False)
+                            yield f"data: {delta}\n\n"
+
+                        hadith_refs = annotate_hadith(answer)
+                        # Built from this caller's own session, not from the
+                        # cached entry's history: a match only has to clear the
+                        # similarity threshold, so the stored wording can be an
+                        # earlier asker's, and the transcript must show the
+                        # question this user actually asked.
+                        history = session_history_messages(session)
+
+                        done = json.dumps(
+                            {
+                                "type": "done",
+                                "chat_id": chat_id,
+                                "history": [m.model_dump() for m in history],
+                                "text": answer,
+                                "cached": True,
+                                # Replayed from the write, not recomputed, so
+                                # the done event has the same shape whichever
+                                # branch served the turn. An entry written
+                                # before this field existed replays as null
+                                # rather than as a fabricated score.
+                                "confidence": confidence,
+                                "hadith_references": ([r.model_dump() for r in hadith_refs] if hadith_refs else None),
+                                "fiqh": fiqh_info.model_dump() if fiqh_info else None,
+                                "tafsir": None,
+                                "zakat": None,
+                                "purchases": None,
+                                "citations": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                        yield f"data: {done}\n\n"
+
+                        await _persist_chat_history(chat_id, body.user_id, session)
+
+                    except asyncio.CancelledError:
+                        logger.info("Client disconnected from cached stream %s", chat_id)
+                        raise
+
+                    except Exception as exc:  # noqa: BLE001 — never 500 mid-stream
+                        logger.error("Cached replay failed for %s: %s", chat_id, exc)
+                        err = json.dumps(
+                            {
+                                "type": "error",
+                                "message": "An error occurred during response generation.",
+                            }
+                        )
+                        try:
+                            yield f"data: {err}\n\n"
+                        except Exception:
+                            # Client may have already disconnected.
+                            pass
+
+            return StreamingResponse(
+                cached_event_generator(cached_text, cached_confidence),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "X-Cache-Tier": cache_tier or "miss",
+                    "X-Semantic-Cache": "hit",
+                },
+            )
+
         async def _locked_event_generator() -> AsyncGenerator[str, None]:
             """SSE generator: metadata → content deltas → done/error."""
-            nonlocal combined_text, chat_session
+            # cache_embedding is rebound when a cache write needs an embedding
+            # the lookup never computed (an exact-tier miss short-circuits it).
+            nonlocal combined_text, chat_session, cache_embedding
 
             # Track the Gemini streaming response for disconnect handling
             stream_response: Any = None
-            decision: Any = None
             hadith_refs: list[HadithReference] = []
             assessment: ConfidenceAssessment | None = None
             citation_extraction = CitationExtraction()
@@ -1620,10 +1901,9 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 yield f"data: {meta}\n\n"
 
                 # --- Safety input gate ---
-                if safety_enabled:
-                    with trace.span("safety_input"):
-                        decision = await safety_pipeline.input_gate.evaluate_async(prompt)
-
+                # Already evaluated in the handler body, where it gated the
+                # cache lookup; this branch only acts on the verdict.
+                if decision is not None:
                     if decision.action == "refuse":
                         err = json.dumps(
                             {
@@ -1646,9 +1926,9 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     logger.info("Creating new streaming chat session: %s", chat_id)
                     # Resume from persisted history so a returning user (or a
                     # request that arrived after a restart) keeps the context.
-                    persisted = await session_store.load_history(chat_id)
+                    # Already loaded when new-chat status was determined.
                     active_chats[chat_id] = get_model().start_chat(
-                        history=dicts_to_contents(persisted) if persisted else []
+                        history=dicts_to_contents(persisted_history) if persisted_history else []
                     )
 
                 chat_session = active_chats[chat_id]
@@ -1796,24 +2076,43 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 )
 
                 # --- Build history ---
-                history: list[Message] = []
-                for msg in chat_session.history if chat_session else []:
-                    try:
-                        if hasattr(msg, "parts") and msg.parts:
-                            content = msg.parts[0].text if hasattr(msg.parts[0], "text") else str(msg.parts[0])
-                        else:
-                            content = str(msg)
-                        if msg.role == "user":
-                            content = _strip_system_context(content)
-                        history.append(
-                            Message(
-                                role="user" if msg.role == "user" else "model",
-                                content=content,
-                            )
-                        )
-                    except Exception as exc:
-                        logger.warning("Error processing message in history: %s", exc)
-                        continue
+                history = session_history_messages(chat_session)
+
+                # --- Two-tier cache write ---
+                # Mirrors /chat: only a non-abstained answer is stored, and
+                # only after the citation filter, hadith caution and
+                # abstention policy have shaped it — so a later hit replays
+                # exactly the text this asker saw. Written before the done
+                # event so the answer is cached even if the client drops
+                # immediately after.
+                if is_cacheable and assessment is not None and assessment.band is not ConfidenceBand.ABSTAIN:
+                    token_count = trace.request_totals().get("total_tokens", 0)
+                    if cache_embedding is None:
+                        cache_embedding = await embed_for_cache(prompt)
+                    stored_confidence = assessment.model_dump()
+                    exact_cache.put(
+                        f"{cache_scope}:{normalize_text(prompt)}",
+                        {"response": combined_text, "history": history, "confidence": stored_confidence},
+                        token_count=token_count,
+                    )
+                    semantic_cache.put(
+                        cache_embedding,
+                        combined_text,
+                        chat_id,
+                        history,
+                        scope=cache_scope,
+                        token_count=token_count,
+                        confidence=stored_confidence,
+                    )
+                    logger.info(
+                        "two-tier cache write (stream)",
+                        extra={
+                            "chat_id": chat_id,
+                            "scope": cache_scope,
+                            "prompt_chars": len(prompt),
+                            **prompt_debug_fields(prompt),
+                        },
+                    )
 
                 trace.add_span(
                     "post_processing",
@@ -1827,6 +2126,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "chat_id": chat_id,
                         "history": [m.model_dump() for m in history],
                         "text": combined_text,
+                        "cached": False,
                         "confidence": assessment.model_dump() if assessment else None,
                         "hadith_references": ([r.model_dump() for r in hadith_refs] if hadith_refs else None),
                         "fiqh": fiqh_info.model_dump() if fiqh_info else None,
@@ -1895,6 +2195,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
+                "X-Cache-Tier": "miss",
+                "X-Semantic-Cache": "bypass" if is_bypass else "miss",
             },
         )
 
