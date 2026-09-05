@@ -81,7 +81,9 @@ from hadith import (
     build_caution_note,
 )
 from hadith_context import router as hadith_context_router
+from hadith_research import router as hadith_research_router
 from history import router as history_router
+from intent import accuracy_tracker as intent_accuracy_tracker, classify_intent
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -138,15 +140,73 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from video_analysis import router as video_analysis_router
 from vocabulary import router as vocabulary_router
 
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+# --- Confidence calibration -------------------------------------------------
+CONFIDENCE_TEMPERATURE = 1.15
+CONFIDENCE_CALIBRATION_MAX_EVENTS = 10000
+_calibration_events: list[dict[str, Any]] = []
+
+
+def _calibrate_assessment(
+    assessment: ConfidenceAssessment,
+    *,
+    citation_verification: float,
+    evidence_quality: float,
+) -> ConfidenceAssessment:
+    """Temperature-scale the raw confidence and adjust for evidence strength."""
+    if assessment is None:
+        return assessment
+    score = assessment.score
+    calibrated = (
+        score ** CONFIDENCE_TEMPERATURE
+        if score >= 0.5
+        else 1 - (1 - score) ** CONFIDENCE_TEMPERATURE
+    )
+    calibrated += (float(citation_verification or 0.0) - 0.5) * 0.15
+    calibrated += (float(evidence_quality or 0.0) - 0.5) * 0.05
+    assessment.score = round(min(0.99, max(0.01, calibrated)), 4)
+    try:
+        thresholds = confidence_thresholds()
+        best = None
+        for band in ConfidenceBand:
+            try:
+                limit = float(thresholds.get(band.value))
+            except (TypeError, ValueError):
+                continue
+            if assessment.score >= limit and (best is None or limit > best[0]):
+                best = (limit, band)
+        if best is not None:
+            assessment.band = best[1]
+    except Exception:
+        pass
+    return assessment
+
+
+def _track_calibration(assessment: ConfidenceAssessment) -> None:
+    """Record one calibration observation for /confidence/policy."""
+    if assessment is None:
+        return
+    _calibration_events.append(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "score": assessment.score,
+            "band": assessment.band.value,
+            "queued": assessment.queued,
+        }
+    )
+    if len(_calibration_events) > CONFIDENCE_CALIBRATION_MAX_EVENTS:
+        del _calibration_events[: len(_calibration_events) - CONFIDENCE_CALIBRATION_MAX_EVENTS]
 
 GEMINI_API_KEY = settings.gemini_api_key
 
 genai.configure(api_key=GEMINI_API_KEY)
+
+EVIDENCE_VERIFICATION_ENABLED = os.getenv("EVIDENCE_VERIFICATION_ENABLED", "true").lower() not in {"0", "false", "off"}
 
 app = FastAPI(title="DeenBridge AI API")
 
@@ -283,6 +343,9 @@ app.include_router(reformulation_router)
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
 app.include_router(audio_hadith_router)
+# Hadith Research: retrieval, isnad analysis, rijal cross-referencing, grading
+# justification, and variant alignment across ten major collections
+app.include_router(hadith_research_router)
 # Database query optimization: static anti-pattern analysis + runtime profiling
 app.include_router(query_optimizer_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
@@ -295,6 +358,7 @@ app.include_router(arabic_ocr_router)
 app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
+app.include_router(video_analysis_router)
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
 # normalization and dialectal terminology lexicon (#136)
 app.include_router(arabic_dialect_router)
@@ -344,6 +408,26 @@ class CitationVerificationResult(BaseModel):
     reason: str | None = None
 
 
+class EvidenceClaim(BaseModel):
+    claim: str
+    evidence: list[str] = Field(default_factory=list)
+    source_type: str | None = None
+    verification_status: str = "unverified"
+    confidence: float | None = None
+    reason: str | None = None
+    alternative_evidence: list[str] = Field(default_factory=list)
+
+
+class EvidenceVerificationResult(BaseModel):
+    claims: list[EvidenceClaim] = Field(default_factory=list)
+    overall_score: float = 0.0
+    audit_trail: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EvidenceVerifyRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=30000)
+
+
 class ChatRequest(BaseModel):
     prompt: str = Field(..., max_length=CHAT_PROMPT_MAX_LENGTH)
     chat_id: str | None = None
@@ -387,6 +471,8 @@ class ChatResponse(BaseModel):
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
+    # Evidence verification agent audit (#evidence-verification).
+    evidence_verification: EvidenceVerificationResult | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -781,6 +867,83 @@ async def run_strict_corrective_loop(
     return safe_text or original_text
 
 
+def _citation_to_dict(item: Any) -> dict[str, Any]:
+    if hasattr(item, "model_dump"):
+        return item.model_dump()
+    if hasattr(item, "dict"):
+        return item.dict()
+    return {}
+
+
+def _evidence_label(d: dict[str, Any]) -> str:
+    if d.get("source") == "quran" and d.get("surah") is not None:
+        return f"Quran {d['surah']}:{d.get('ayah', '')}"
+    if d.get("collection"):
+        return f"{d['collection']} {d.get('number', '')}".strip()
+    return str(d.get("source") or "cited source")
+
+
+def verify_evidence_claims(
+    response_text: str,
+    citation_extraction: CitationExtraction,
+    hadith_refs: list[HadithReference],
+) -> EvidenceVerificationResult:
+    """Deterministic claim-evidence audit using already-verified citations."""
+    result = EvidenceVerificationResult()
+    claims = [s.strip() for s in response_text.replace("\n", " ").split(".") if len(s.strip()) >= 25]
+    evidence: list[tuple[str, str, bool]] = []
+
+    for c in citation_extraction.citations:
+        d = _citation_to_dict(c)
+        label = _evidence_label(d)
+        status = str(d.get("status") or d.get("verification") or "unverified")
+        evidence.append((label, status, status in {"verified", "authentic", "sahih", "hasan", "mutawatir"}))
+
+    for h in hadith_refs:
+        d = _citation_to_dict(h)
+        label = _evidence_label(d)
+        grade = str(d.get("grade") or d.get("authenticity") or d.get("status") or "unverified").lower()
+        evidence.append((label, grade, grade not in {"daif", "weak", "munkar", "fabricated", "mawdu", "unverified"}))
+
+    for claim in claims:
+        matched = [e for e in evidence if e[0].lower() in claim.lower()]
+        if not matched and len(claims) == 1 and len(evidence) == 1:
+            matched = evidence[:]
+
+        if not matched:
+            result.claims.append(
+                EvidenceClaim(
+                    claim=claim,
+                    verification_status="unsupported",
+                    confidence=0.1,
+                    reason="No verifiable citation is present for this claim.",
+                    alternative_evidence=["Provide a precise Quranic/Hadith citation for this claim."],
+                )
+            )
+            result.audit_trail.append({"claim": claim, "status": "unsupported"})
+            continue
+
+        supported = any(e[2] for e in matched)
+        status = "supported" if supported else "weak"
+        result.claims.append(
+            EvidenceClaim(
+                claim=claim,
+                evidence=[e[0] for e in matched],
+                verification_status=status,
+                confidence=0.9 if supported else 0.4,
+                reason="Evidence linked and verified." if supported else "Evidence cited but could not be verified.",
+            )
+        )
+        result.audit_trail.append({"claim": claim, "evidence": [e[0] for e in matched], "status": status})
+
+    result.overall_score = (
+        sum(1 for c in result.claims if c.verification_status == "supported") / len(result.claims)
+        if result.claims
+        else 0.0
+    )
+    return result
+
+
 @app.post("/chat", response_model=ChatResponse)
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
@@ -818,6 +981,12 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
+
+            # Hierarchical multi-label intent classification (#203). Offline and
+            # deterministic; recorded for accuracy tracking and structured logs.
+            intent = classify_intent(prompt)
+            intent_accuracy_tracker.record_prediction(intent)
+            logger.info("intent=%s", {"chat_id": chat_id, **intent.model_dump()})
 
             # --- Swahili analysis ---
             is_swahili = effective_language == "sw"
@@ -1080,6 +1249,13 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
         # Baked into response_text *before* the cache write so a cached hit
         # replays the same caution the user originally saw.
         hadith_refs = annotate_hadith(response_text)
+        # --- Evidence verification agent ---
+        evidence_verification = None
+        if EVIDENCE_VERIFICATION_ENABLED:
+            try:
+                evidence_verification = verify_evidence_claims(response_text, citation_extraction, hadith_refs)
+            except Exception as exc:  # noqa: BLE001 - verification is best-effort
+                logger.warning("Evidence verification failed; continuing without it: %s", exc)
         caution = build_caution_note(response_text, hadith_refs)
         if caution:
             response_text = f"{response_text.rstrip()}\n\n{caution}"
@@ -1101,6 +1277,16 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             citation_verification=citation_extraction.score,
         )
         assessment = assess(signals)
+        assessment = _calibrate_assessment(
+            assessment,
+            citation_verification=citation_extraction.score,
+            evidence_quality=1.0 if hadith_refs else (0.6 if citation_extraction.citations else 0.4),
+        )
+        _track_calibration(assessment)
+        if assessment.band is ConfidenceBand.CONFIDENT:
+            assessment.queued = False
+        elif not assessment.queued:
+            assessment.queued = True
         answer_before_policy = response_text
 
         if assessment.queued:
@@ -1202,6 +1388,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             purchases=purchase_info,
             language=effective_language,
             citations=citation_extraction.citations,
+            evidence_verification=evidence_verification,
         )
         _finalize()
         _succeeded = True
@@ -1373,6 +1560,12 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
+            # Hierarchical multi-label intent classification (#203). Offline and
+            # deterministic; recorded for accuracy tracking and structured logs.
+            intent = classify_intent(prompt)
+            intent_accuracy_tracker.record_prediction(intent)
+            logger.info("intent=%s", {"chat_id": chat_id, **intent.model_dump()})
+
         # --- Tafsir and zakat retrieval ---
         with trace.span("retrieval"):
             tafsir_context = await tafsir_retriever(prompt, body.language or DEFAULT_TAFSIR_LANGUAGE)
@@ -1526,6 +1719,12 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
                 # --- Hadith authenticity grading ---
                 hadith_refs = annotate_hadith(combined_text)
+                evidence_verification = None
+                if EVIDENCE_VERIFICATION_ENABLED:
+                    try:
+                        evidence_verification = verify_evidence_claims(combined_text, citation_extraction, hadith_refs)
+                    except Exception as exc:  # noqa: BLE001 - verification is best-effort
+                        logger.warning("Streaming evidence verification failed: %s", exc)
                 caution = build_caution_note(combined_text, hadith_refs)
                 if caution:
                     combined_text = f"{combined_text.rstrip()}\n\n{caution}"
@@ -1538,6 +1737,16 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     citation_verification=citation_extraction.score,
                 )
                 assessment = assess(signals)
+                assessment = _calibrate_assessment(
+                    assessment,
+                    citation_verification=citation_extraction.score,
+                    evidence_quality=1.0 if hadith_refs else (0.6 if citation_extraction.citations else 0.4),
+                )
+                _track_calibration(assessment)
+                if assessment.band is ConfidenceBand.CONFIDENT:
+                    assessment.queued = False
+                elif not assessment.queued:
+                    assessment.queued = True
 
                 if assessment.queued:
                     try:
@@ -1604,6 +1813,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
+                        "evidence_verification": evidence_verification.model_dump() if evidence_verification else None,
                     },
                     ensure_ascii=False,
                 )
@@ -1785,6 +1995,26 @@ async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str
             detail="Internal server error",
             hint="Failed to delete chat session. Please retry.",
         ) from e
+
+
+@app.post("/evidence/verify", response_model=EvidenceVerificationResult)
+async def verify_evidence_endpoint(body: EvidenceVerifyRequest) -> EvidenceVerificationResult:
+    """Run the evidence verification agent on a generated answer.
+
+    Extracts any citation block, parses Quran/Hadith references, links them to
+    claims, and returns a structured audit of support strength.
+    """
+    try:
+        cleaned_text, citation_extraction = extract_citations(body.text)
+        hadith_refs = annotate_hadith(cleaned_text)
+        return verify_evidence_claims(cleaned_text, citation_extraction, hadith_refs)
+    except Exception as exc:
+        logger.error("Evidence verification endpoint failed: %s", exc)
+        raise APIException(
+            status_code=500,
+            detail="Evidence verification failed.",
+            hint="The evidence verification agent could not process the supplied text. Verify the text is well-formed and retry.",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -2035,9 +2265,23 @@ async def metrics() -> dict[str, Any]:
 @app.get("/confidence/policy")
 async def confidence_policy() -> dict[str, Any]:
     """Current confidence thresholds and the queue's durability."""
+    calibration = None
+    if _calibration_events:
+        scores = [event["score"] for event in _calibration_events]
+        calibration = {
+            "observations": len(_calibration_events),
+            "mean_score": round(sum(scores) / len(scores), 4),
+            "min_score": round(min(scores), 4),
+            "max_score": round(max(scores), 4),
+            "bands": {
+                band: sum(1 for event in _calibration_events if event["band"] == band)
+                for band in (b.value for b in ConfidenceBand)
+            },
+        }
     return {
         "thresholds": confidence_thresholds(),
         "review_queue": await review_store.stats(),
+        "calibration": calibration,
     }
 
 
