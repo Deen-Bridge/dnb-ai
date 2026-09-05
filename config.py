@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pydantic import Field, field_validator
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -35,6 +36,31 @@ class Settings(BaseSettings):
     quality_regeneration_max_attempts: int = Field(default=2, ge=1)
 
     gemini_timeout: int = Field(default=30, ge=1)
+
+    # Fallback model configuration
+    fallback_enabled: bool = Field(default=True, description="Enable automatic failover to fallback models")
+    fallback_models: list[str] = Field(
+        default_factory=list,
+        description="Ordered list of fallback models to use when primary fails",
+    )
+    fallback_health_check_interval: int = Field(
+        default=30, ge=1, description="Interval in seconds for health checks on models"
+    )
+    fallback_failure_threshold: int = Field(
+        default=3, ge=1, description="Number of consecutive failures to trip circuit breaker"
+    )
+    fallback_circuit_breaker_timeout: int = Field(
+        default=60, ge=1, description="Recovery timeout in seconds after circuit breaker trips"
+    )
+    fallback_quality_threshold: float = Field(
+        default=0.8, ge=0.0, le=1.0, description="Minimum acceptable quality score for fallback models"
+    )
+    fallback_restore_interval: int = Field(
+        default=120, ge=1, description="Interval in seconds to retry primary model after recovery"
+    )
+    fallback_alerts_enabled: bool = Field(
+        default=True, description="Enable alerts when fallback is activated"
+    )
 
     cors_origins: list[str] = Field(
         default_factory=lambda: [
@@ -80,6 +106,24 @@ class Settings(BaseSettings):
         if isinstance(value,str): return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
+    @field_validator("fallback_models", mode="before")
+    @classmethod
+    def parse_fallback_models(cls, value):
+        if isinstance(value, str):
+            # Support comma-separated or JSON array string (if from env)
+            value = value.strip()
+            if value.startswith("[") and value.endswith("]"):
+                import json
+                try:
+                    parsed = json.loads(value)
+                    if isinstance(parsed, list):
+                        value = parsed
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(value, str):
+                return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
     @field_validator("disrespectful_language_patterns", mode="before")
     @classmethod
     def parse_disrespectful_language_patterns(cls, value):
@@ -88,4 +132,5 @@ class Settings(BaseSettings):
         return value
 
 @lru_cache
-def get_settings()->Settings: return Settings()
+def get_settings() -> Settings:
+    return Settings()
