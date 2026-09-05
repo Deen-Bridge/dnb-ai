@@ -8,7 +8,6 @@ concept-based expansion for improved search results.
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -243,8 +242,8 @@ TRANSLITERATION_PATTERNS = [
     (r"aa+", "a"),  # Multiple 'a's -> single 'a'
     (r"ee+", "i"),  # 'ee' -> 'i'
     (r"oo+", "u"),  # 'oo' -> 'u'
-    (r"'", ""),     # Remove apostrophes
-    (r"-", ""),     # Remove hyphens
+    (r"'", ""),  # Remove apostrophes
+    (r"-", ""),  # Remove hyphens
 ]
 
 
@@ -256,7 +255,7 @@ def normalize_transliteration(text: str) -> str:
     return result
 
 
-def find_matching_term(query: str) -> Optional[str]:
+def find_matching_term(query: str) -> str | None:
     """Find a matching term in the knowledge graph."""
     normalized_query = normalize_transliteration(query)
 

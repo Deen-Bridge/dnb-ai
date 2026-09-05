@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -512,14 +511,21 @@ HISTORICAL_EVENTS: dict[str, dict[str, Any]] = {
 ABSOLUTIST_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(absolutely|categorically|without\s+exception|in\s+all\s+cases|never\s+varying)\b", re.IGNORECASE),
     re.compile(r"\b(all\s+scholars|every\s+scholar|unanimously|ijma')\b", re.IGNORECASE),
-    re.compile(r"\b(the\s+only\s+(valid|correct|acceptable|legitimate)\s+(position|ruling|view|opinion))\b", re.IGNORECASE),
+    re.compile(
+        r"\b(the\s+only\s+(valid|correct|acceptable|legitimate)\s+(position|ruling|view|opinion))\b", re.IGNORECASE
+    ),
     re.compile(r"\b(there\s+is\s+(no|zero)\s+(room|doubt|difference|debate)\s+about)\b", re.IGNORECASE),
 ]
 
 NUANCE_INDICATORS: list[re.Pattern[str]] = [
-    re.compile(r"\b(according\s+to|as\s+(stated|mentioned)\s+by|in\s+(his|her)\s+(view|opinion|work))\b", re.IGNORECASE),
+    re.compile(
+        r"\b(according\s+to|as\s+(stated|mentioned)\s+by|in\s+(his|her)\s+(view|opinion|work))\b", re.IGNORECASE
+    ),
     re.compile(r"\b(some\s+scholars|many\s+scholars|scholars\s+differ|ikhtilaf)\b", re.IGNORECASE),
-    re.compile(r"\b(this\s+position|this\s+view|this\s+ruling)\b.{0,30}\b(is|was)\b.{0,30}\b(contested|debated|questioned)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(this\s+position|this\s+view|this\s+ruling)\b.{0,30}\b(is|was)\b.{0,30}\b(contested|debated|questioned)\b",
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -656,9 +662,7 @@ def _extract_attributions(text: str) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _match_opinion_to_scholar(
-    attributed_opinion: str, scholar: ScholarInfo
-) -> tuple[bool, OpinionEntry | None, float]:
+def _match_opinion_to_scholar(attributed_opinion: str, scholar: ScholarInfo) -> tuple[bool, OpinionEntry | None, float]:
     """Check if the attributed opinion matches any known position of the scholar.
 
     Returns (is_match, matched_opinion_entry, similarity_score).
@@ -705,9 +709,7 @@ def _match_opinion_to_scholar(
     return False, best_entry, best_score
 
 
-def _check_temporal_consistency(
-    text: str, scholar: ScholarInfo, attributed_text: str
-) -> AttributionIssue | None:
+def _check_temporal_consistency(text: str, scholar: ScholarInfo, attributed_text: str) -> AttributionIssue | None:
     """Check if the attribution makes temporal sense.
 
     Verify that the scholar's era is compatible with the topic or institution
@@ -720,9 +722,7 @@ def _check_temporal_consistency(
             continue
         event_desc = event.get("description", "").lower()
 
-        if event_desc and any(
-            word in attributed_text.lower() for word in event_desc.lower().split()[:3]
-        ):
+        if event_desc and any(word in attributed_text.lower() for word in event_desc.lower().split()[:3]):
             # The scholar is discussing something related to this event
             if scholar.era.death_ce and event_ce > scholar.era.death_ce + 50:
                 return AttributionIssue(
@@ -741,9 +741,7 @@ def _check_temporal_consistency(
     return None
 
 
-def _detect_anachronism(
-    text: str, scholar: ScholarInfo
-) -> AttributionIssue | None:
+def _detect_anachronism(text: str, scholar: ScholarInfo) -> AttributionIssue | None:
     """Detect anachronistic attributions where a scholar is attributed opinions
     about topics that postdate their lifetime by a significant margin.
     """
@@ -762,13 +760,12 @@ def _detect_anachronism(
                 # Check if the modern concept appears in context of the scholar's statement
                 # Look for the scholar name within 200 chars of the modern concept
                 scholar_mentions = [
-                    (m.start(), m.end())
-                    for m in re.finditer(re.escape(scholar.name), text, re.IGNORECASE)
+                    (m.start(), m.end()) for m in re.finditer(re.escape(scholar.name), text, re.IGNORECASE)
                 ]
                 concept_matches = list(re.finditer(pattern, text, re.IGNORECASE))
 
                 for concept_match in concept_matches:
-                    for s_start, s_end in scholar_mentions:
+                    for s_start, _s_end in scholar_mentions:
                         if abs(concept_match.start() - s_start) < 200:
                             return AttributionIssue(
                                 issue_type=AttributionIssueType.ANACHRONISM,
@@ -799,11 +796,7 @@ def _detect_flattened_nuance(text: str, scholar: ScholarInfo) -> AttributionIssu
                 if pattern.search(context):
                     # Check if the position is actually debated
                     for position in scholar.known_positions:
-                        if any(
-                            word in position.lower()
-                            for word in context.lower().split()
-                            if len(word) > 3
-                        ):
+                        if any(word in position.lower() for word in context.lower().split() if len(word) > 3):
                             return AttributionIssue(
                                 issue_type=AttributionIssueType.FLATTENED_NUANCE,
                                 severity="medium",
@@ -881,8 +874,6 @@ def validate_scholarly_attribution(text: str) -> AttributionValidationResult:
     5. False consensus claims (disputed topics claimed as consensus)
     """
     result = AttributionValidationResult()
-    audit_trail: list[dict[str, Any]] = []
-
     # Step 1: Find scholars mentioned in text
     found_scholars = _find_scholar_in_text(text)
 
@@ -1079,9 +1070,7 @@ def get_scholar_by_id(scholar_id: str) -> ScholarInfo | None:
     return SCHOLARS_DB.get(scholar_id)
 
 
-def validate_single_attribution(
-    scholar_name: str, opinion: str
-) -> dict[str, Any]:
+def validate_single_attribution(scholar_name: str, opinion: str) -> dict[str, Any]:
     """Validate a single scholar-opinion pair without parsing free text."""
     # Find the scholar
     matched_scholar: ScholarInfo | None = None
@@ -1105,7 +1094,8 @@ def validate_single_attribution(
 
     is_match, matched_entry, similarity = _match_opinion_to_scholar(opinion, matched_scholar)
     similar_positions = [
-        pos for pos in matched_scholar.known_positions
+        pos
+        for pos in matched_scholar.known_positions
         if any(w in pos.lower() for w in opinion.lower().split() if len(w) > 3)
     ]
 

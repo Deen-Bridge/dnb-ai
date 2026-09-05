@@ -8,14 +8,17 @@ accuracy and identify potential errors or weak citations.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
+
+from fastapi import APIRouter
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
 class SourceType(str, Enum):
     """Types of authoritative Islamic sources."""
+
     QURAN = "quran"
     TAFSIR = "tafsir"
     HADITH = "hadith"
@@ -27,6 +30,7 @@ class SourceType(str, Enum):
 
 class ValidationStatus(str, Enum):
     """Status of a validation check."""
+
     VERIFIED = "verified"
     PARTIALLY_VERIFIED = "partially_verified"
     UNVERIFIED = "unverified"
@@ -36,23 +40,25 @@ class ValidationStatus(str, Enum):
 
 class HadithGrade(str, Enum):
     """Grades of hadith authenticity."""
+
     SAHIH = "sahih"  # Authentic
     HASAN = "hasan"  # Good
-    DAIF = "da'if"   # Weak
-    MAWDU = "mawdu'" # Fabricated
+    DAIF = "da'if"  # Weak
+    MAWDU = "mawdu'"  # Fabricated
     UNKNOWN = "unknown"
 
 
 @dataclass
 class SourceReference:
     """Represents a reference to an authoritative source."""
+
     source_type: SourceType
     source_name: str
-    volume: Optional[int] = None
-    page: Optional[int] = None
-    chapter: Optional[str] = None
-    hadith_number: Optional[str] = None
-    edition: Optional[str] = None
+    volume: int | None = None
+    page: int | None = None
+    chapter: str | None = None
+    hadith_number: str | None = None
+    edition: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -69,11 +75,12 @@ class SourceReference:
 @dataclass
 class ValidationResult:
     """Result of a single validation check."""
+
     status: ValidationStatus
     confidence: float  # 0.0 to 1.0
     source: SourceReference
     details: str
-    matching_text: Optional[str] = None
+    matching_text: str | None = None
     discrepancies: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -90,6 +97,7 @@ class ValidationResult:
 @dataclass
 class CrossReferenceResult:
     """Complete cross-reference validation result."""
+
     claim: str
     overall_status: ValidationStatus
     overall_confidence: float
@@ -148,7 +156,7 @@ async def verify_quranic_reference(
     surah: int,
     ayah: int,
     claimed_text: str,
-    tafsir_sources: Optional[list[str]] = None,
+    tafsir_sources: list[str] | None = None,
 ) -> list[ValidationResult]:
     """
     Verify a Quranic reference using multiple tafsir sources.
@@ -185,8 +193,8 @@ async def verify_quranic_reference(
 
 async def cross_check_hadith(
     matn: str,
-    claimed_source: Optional[str] = None,
-    claimed_chain: Optional[list[str]] = None,
+    claimed_source: str | None = None,
+    claimed_chain: list[str] | None = None,
 ) -> list[ValidationResult]:
     """
     Cross-check a hadith across multiple collections.
@@ -318,9 +326,7 @@ async def detect_contradictions(validations: list[ValidationResult]) -> list[str
 
     if verified and contradicted:
         for c in contradicted:
-            contradictions.append(
-                f"Contradiction found: {c.source.source_name} contradicts verified sources"
-            )
+            contradictions.append(f"Contradiction found: {c.source.source_name} contradicts verified sources")
 
     return contradictions
 
@@ -356,11 +362,11 @@ def calculate_overall_confidence(validations: list[ValidationResult]) -> tuple[V
 async def cross_reference_validate(
     claim: str,
     claim_type: str = "general",
-    surah: Optional[int] = None,
-    ayah: Optional[int] = None,
-    hadith_text: Optional[str] = None,
-    isnad: Optional[list[str]] = None,
-    scholar: Optional[str] = None,
+    surah: int | None = None,
+    ayah: int | None = None,
+    hadith_text: str | None = None,
+    isnad: list[str] | None = None,
+    scholar: str | None = None,
 ) -> CrossReferenceResult:
     """
     Perform comprehensive cross-reference validation on a claim.
@@ -397,9 +403,7 @@ async def cross_reference_validate(
 
     # Validate scholarly positions
     if scholar:
-        scholarly_validations = await validate_scholarly_position(
-            scholar, claim, "general"
-        )
+        scholarly_validations = await validate_scholarly_position(scholar, claim, "general")
         validations.extend(scholarly_validations)
 
     # Detect contradictions
@@ -425,26 +429,24 @@ async def cross_reference_validate(
     )
 
 
-# FastAPI router
-from fastapi import APIRouter
-from pydantic import BaseModel
-
 router = APIRouter(prefix="/validation", tags=["Cross-Reference Validation"])
 
 
 class ValidationRequest(BaseModel):
     """Request model for cross-reference validation."""
+
     claim: str
     claim_type: str = "general"
-    surah: Optional[int] = None
-    ayah: Optional[int] = None
-    hadith_text: Optional[str] = None
-    isnad: Optional[list[str]] = None
-    scholar: Optional[str] = None
+    surah: int | None = None
+    ayah: int | None = None
+    hadith_text: str | None = None
+    isnad: list[str] | None = None
+    scholar: str | None = None
 
 
 class ValidationResponse(BaseModel):
     """Response model for validation."""
+
     success: bool
     data: dict
 

@@ -16,8 +16,8 @@ from scholarly_attribution import (
     AttributionValidationResult,
     get_scholars_by_school,
     get_scholars_list,
-    validate_single_attribution,
     validate_scholarly_attribution,
+    validate_single_attribution,
 )
 
 router = APIRouter(prefix="/scholarly-attribution", tags=["scholarly-attribution"])

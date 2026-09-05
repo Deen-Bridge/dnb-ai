@@ -172,9 +172,7 @@ class TestGetRelatedConcepts:
     def test_known_term(self):
         result = get_related_concepts("salah")
         assert len(result) > 0
-        assert any(
-            term in result for term in ["wudu", "qibla", "rakah", "sujud", "ruku"]
-        )
+        assert any(term in result for term in ["wudu", "qibla", "rakah", "sujud", "ruku"])
 
     def test_unknown_term(self):
         result = get_related_concepts("unknown_xyz")
