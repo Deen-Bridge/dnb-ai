@@ -9,6 +9,7 @@ accuracy and identify potential errors or weak citations.
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TypedDict
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -128,8 +129,20 @@ TAFSIR_SOURCES = [
     "Tafsir al-Baghawi",
 ]
 
+
 # Hadith collections for cross-checking
-HADITH_COLLECTIONS = [
+class HadithCollection(TypedDict):
+    name: str
+    authority: float
+
+
+class HadithScholar(TypedDict):
+    name: str
+    status: str
+    reliability: float
+
+
+HADITH_COLLECTIONS: list[HadithCollection] = [
     {"name": "Sahih al-Bukhari", "authority": 1.0},
     {"name": "Sahih Muslim", "authority": 1.0},
     {"name": "Sunan Abu Dawud", "authority": 0.9},
@@ -141,7 +154,7 @@ HADITH_COLLECTIONS = [
 ]
 
 # Known authentic hadith scholars for isnad verification
-HADITH_SCHOLARS = {
+HADITH_SCHOLARS: dict[str, HadithScholar] = {
     "أبو هريرة": {"name": "Abu Hurayrah", "status": "sahabi", "reliability": 1.0},
     "عائشة": {"name": "Aisha", "status": "sahabi", "reliability": 1.0},
     "ابن عمر": {"name": "Ibn Umar", "status": "sahabi", "reliability": 1.0},
@@ -171,7 +184,7 @@ async def verify_quranic_reference(
         List of validation results from each tafsir
     """
     sources = tafsir_sources or TAFSIR_SOURCES
-    results = []
+    results: list[ValidationResult] = []
 
     for tafsir in sources:
         # In production, this would query a Quran/Tafsir database
@@ -207,7 +220,7 @@ async def cross_check_hadith(
     Returns:
         List of validation results from each collection checked
     """
-    results = []
+    results: list[ValidationResult] = []
 
     for collection in HADITH_COLLECTIONS:
         # In production, this would use hadith search APIs or databases
@@ -243,9 +256,9 @@ async def verify_isnad(chain: list[str]) -> ValidationResult:
     - Chain continuity
     - Historical plausibility
     """
-    verified_narrators = []
-    unknown_narrators = []
-    reliability_scores = []
+    verified_narrators: list[str] = []
+    unknown_narrators: list[str] = []
+    reliability_scores: list[float] = []
 
     for narrator in chain:
         if narrator in HADITH_SCHOLARS:
@@ -393,7 +406,7 @@ async def cross_reference_validate(
 
     # Cross-check hadith
     if hadith_text:
-        hadith_validations = await cross_check_hadith(hadith_text, isnad=isnad)
+        hadith_validations = await cross_check_hadith(hadith_text, claimed_chain=isnad)
         validations.extend(hadith_validations)
 
     # Verify isnad
