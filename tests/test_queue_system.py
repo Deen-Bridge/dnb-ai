@@ -162,7 +162,9 @@ class MockHandler(JobHandler):
 
     @property
     def retry_config(self) -> RetryConfig:
-        return RetryConfig(max_retries=2)
+        # Deterministic and fast so the failure-and-retry test reliably reaches
+        # the dead-letter queue inside its polling window.
+        return RetryConfig(max_retries=2, initial_delay_seconds=0.05, jitter=False)
 
     async def execute(self, job, progress_callback=None):
         await asyncio.sleep(self._execution_time)

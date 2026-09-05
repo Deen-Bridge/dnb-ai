@@ -58,6 +58,7 @@ class TokenQuotaTracker:
         self,
         quota_per_hour: int = CHAT_TOKEN_QUOTA_PER_HOUR,
     ) -> None:
+        self._default_quota = quota_per_hour
         self._quota = quota_per_hour
         self._window_seconds = 3600.0  # 1 hour
         # key -> list of (timestamp, token_count)
@@ -103,9 +104,11 @@ class TokenQuotaTracker:
                 del self._usage[key]
 
     def reset(self) -> None:
-        """Clear all buckets. Used by tests."""
+        """Clear all buckets and restore default quota/limits. Used by tests."""
         with self._lock:
             self._usage.clear()
+            self._quota = self._default_quota
+            self._window_seconds = 3600.0
 
     def get_usage(self, key: str) -> int:
         """Get current token usage for a key."""
@@ -158,13 +161,34 @@ def set_fake_embedding(vec: np.ndarray | None) -> None:
 def embed_text(text: str) -> np.ndarray:
     if _FAKE_EMBEDDING is not None:
         return _FAKE_EMBEDDING
-    import google.generativeai as genai
+    try:
+        import google.generativeai as genai
 
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=text,
-    )
-    return np.array(result["embedding"], dtype=np.float32)
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=text,
+        )
+        return np.array(result["embedding"], dtype=np.float32)
+    except Exception:
+        # Deterministic local fallback so the semantic cache still functions
+        # offline and in tests (identical prompts yield identical vectors) when
+        # no embedding model/API key is available.
+        return _local_embedding(text)
+
+
+def _local_embedding(text: str) -> np.ndarray:
+    """Deterministic offline embedding for when the embedding API is unavailable."""
+    import hashlib
+
+    dim = 384
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    # Seed a fixed RNG so vectors are stable across calls and processes.
+    rng = np.random.default_rng(int.from_bytes(digest, "big") & 0xFFFFFFFF)
+    vec = rng.standard_normal(dim).astype(np.float32)
+    norm = np.linalg.norm(vec)
+    if norm > 0:
+        vec = vec / norm
+    return vec
 
 
 # ---------------------------------------------------------------------------

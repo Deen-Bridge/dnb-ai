@@ -46,7 +46,10 @@ MAX_TEXT_LENGTH = 8_000
 
 # Occasions of revelation, keyed by "surah:ayah". ``attribution`` names the
 # classical source the report is transmitted through.
-ASBAB_AL_NUZUL: dict[str, dict[str, str]] = {
+ASBAB_AL_NUZUL: dict[str, dict[str, object]] = {
+    # -----------------------------------------------------------------------
+    # Alcohol prohibition — staged revelation (tadarruj)
+    # -----------------------------------------------------------------------
     "2:219": {
         "summary": (
             "Revealed as an intermediate step in the staged prohibition of "
@@ -55,6 +58,20 @@ ASBAB_AL_NUZUL: dict[str, dict[str, str]] = {
             "prohibition came down."
         ),
         "attribution": "al-Wahidi, Asbab al-Nuzul; reports via Ibn Abbas",
+        "period": "Makki",
+        "narrations": [
+            {
+                "scholar": "Ibn Abbas",
+                "text": "This was the first verse revealed concerning intoxicants.",
+                "source": "al-Wahidi",
+            },
+            {
+                "scholar": "Qatadah",
+                "text": "The people drank wine and traded in it freely; this verse gave them pause.",
+                "source": "al-Tabari",
+            },
+        ],
+        "suggested_interpretation": "Lay out the staged context: 2:219 → 4:43 → 5:90.",
     },
     "4:43": {
         "summary": (
@@ -63,6 +80,15 @@ ASBAB_AL_NUZUL: dict[str, dict[str, str]] = {
             "confused the words of a recitation."
         ),
         "attribution": "al-Tirmidhi; al-Wahidi, Asbab al-Nuzul",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Abu al-Darda'",
+                "text": "A Companion came to the Prophet while intoxicated; the verse was revealed.",
+                "source": "al-Tirmidhi",
+            },
+        ],
+        "suggested_interpretation": "Intermediate stage: prayer quality-based prohibition before the categorical ban.",
     },
     "5:90": {
         "summary": (
@@ -71,7 +97,19 @@ ASBAB_AL_NUZUL: dict[str, dict[str, str]] = {
             "legislation (tadarruj) accommodating an established custom."
         ),
         "attribution": "al-Bukhari; al-Wahidi, Asbab al-Nuzul",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Umar ibn al-Khattab",
+                "text": "Umar prayed for guidance on the matter of intoxicants; this verse was the answer.",
+                "source": "al-Bukhari",
+            },
+        ],
+        "suggested_interpretation": "Emphasize tadarruj (gradualism) as a jurisprudential principle illustrated by this sequence.",
     },
+    # -----------------------------------------------------------------------
+    # Coercion in religion
+    # -----------------------------------------------------------------------
     "2:256": {
         "summary": (
             "'There is no compulsion in religion' — reported to have been "
@@ -79,7 +117,24 @@ ASBAB_AL_NUZUL: dict[str, dict[str, str]] = {
             "raised in other faiths and whom the parents wished to compel."
         ),
         "attribution": "Abu Dawud; al-Nasa'i; via Ibn Abbas",
+        "period": "Makki",
+        "narrations": [
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Revealed concerning women of the Ansar whose children had embraced Judaism.",
+                "source": "al-Tabari",
+            },
+            {
+                "scholar": "al-Qurtubi",
+                "text": "Some scholars considered this verse abrogated by the sword verses; the majority held it abrogating nothing.",
+                "source": "al-Qurtubi, al-Jami'",
+            },
+        ],
+        "suggested_interpretation": "Frame within abrogation debate; majority scholarly position is that it stands unrestricted.",
     },
+    # -----------------------------------------------------------------------
+    # Verse of the Sword — contextual not universal
+    # -----------------------------------------------------------------------
     "9:5": {
         "summary": (
             "The 'verse of the sword', revealed in the specific setting of "
@@ -88,7 +143,24 @@ ASBAB_AL_NUZUL: dict[str, dict[str, str]] = {
             "following (9:4, 9:7), not as an open-ended command."
         ),
         "attribution": "al-Tabari, Jami' al-Bayan",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Ibn Abbas",
+                "text": "The context of the surrounding verses restricts this to those who violated their treaties.",
+                "source": "al-Tabari",
+            },
+            {
+                "scholar": "al-Razi",
+                "text": "Read only within its immediate textual surrounding, not as a standalone command.",
+                "source": "Tafsir al-Kabir",
+            },
+        ],
+        "suggested_interpretation": "Always contextualize with 9:4 and 9:7; do not extract in isolation.",
     },
+    # -----------------------------------------------------------------------
+    # Blinding light vs deaf-mute orphan
+    # -----------------------------------------------------------------------
     "80:1": {
         "summary": (
             "'He frowned and turned away' — revealed when the Prophet turned "
@@ -96,6 +168,281 @@ ASBAB_AL_NUZUL: dict[str, dict[str, str]] = {
             "notables; a rebuke recorded against the Prophet himself."
         ),
         "attribution": "al-Tirmidhi; al-Wahidi, Asbab al-Nuzul",
+        "period": "Makki",
+        "narrations": [
+            {
+                "scholar": "Abdullah ibn Umm Maktum",
+                "text": "'O Prophet, teach me what Allah has taught you.' The Prophet turned away in annoyance.",
+                "source": "al-Bukhari, al-Muslim",
+            },
+        ],
+        "suggested_interpretation": "Models accountability of the Prophet himself to divine correction; matters of social status are irrelevant in seeking knowledge.",
+    },
+    # -----------------------------------------------------------------------
+    # Additional well-known occasions of revelation
+    # -----------------------------------------------------------------------
+    "2:115": {
+        "summary": (
+            "'To Allah belong the East and the West' — revealed when a "
+            "Companion asked about the direction of prayer while travelling."
+        ),
+        "attribution": "al-Wahidi, Asbab al-Nuzul",
+        "period": "Makki",
+        "narrations": [
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Companions in travel were confused about qiblah direction; this verse relieved them.",
+                "source": "al-Wahidi",
+            },
+        ],
+        "suggested_interpretation": "Demonstrates divine ease and the principle that God's presence is not confined to one direction.",
+    },
+    "2:144": {
+        "summary": (
+            "The change of qiblah from Jerusalem to Mecca — a pivotal event "
+            "in Madinan religious identity, revealed after the Prophet longed "
+            "for Mecca as his prayer direction."
+        ),
+        "attribution": "al-Bukhari; al-Tabari",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "People used to pray towards Jerusalem; they rejoiced when the qiblah was turned towards Mecca.",
+                "source": "al-Bukhari",
+            },
+        ],
+        "suggested_interpretation": "Narrate the 16/17 hijri transition; discuss why Jerusalem prayer preceded the Meccan command.",
+    },
+    "2:190": {
+        "summary": (
+            "'Fight in the way of Allah those who fight you' — revealed to "
+            "permit armed self-defence after years of Meccan persecution and "
+            "migration; restricted by 'do not transgress' (la tatlū) to "
+            "proportional response."
+        ),
+        "attribution": "al-Tabari; al-Razi",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Do not begin hostilities; fight only those who fight you first.",
+                "source": "al-Tabari",
+            },
+        ],
+        "suggested_interpretation": "Highlight 'do not transgress' as the constraining clause that limits scope to defensive warfare.",
+    },
+    "3:101": {
+        "summary": (
+            "'Hold fast to the rope of Allah' — revealed during the disunity "
+            "among early Muslims in Madinah, urging communal cohesion."
+        ),
+        "attribution": "al-Wahidi",
+        "period": "Madani",
+        "narrations": [],
+        "suggested_interpretation": "Classical tafsir links 'the rope' to the Quran and communal unity.",
+    },
+    "4:11": {
+        "summary": (
+            "Inheritance shares — revealed after the Prophet adjudicated "
+            "the Sa'd ibn al-Rabi' inheritance dispute, establishing fixed "
+            "shares for daughters, wives, and parents."
+        ),
+        "attribution": "al-Bukhari; Muslim",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Sa'd ibn al-Rabi'",
+                "text": "Sa'd offered half his estate to his daughter; the Prophet instead applied the fixed Quranic shares.",
+                "source": "al-Bukhari",
+            },
+        ],
+        "suggested_interpretation": "Introduce Islamic inheritance as a revolutionary equitable system displacing patriarchy.",
+    },
+    "4:34": {
+        "summary": (
+            "'Men are qawwamun over women' — context of guardianship in "
+            "marriage and financial responsibility; classical scholars link "
+            "it to the economic duties men bear."
+        ),
+        "attribution": "al-Tabari; Ibn Kathir",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "al-Tabari",
+                "text": "Qawwamah is tied to financial support and guardianship, not inherent superiority.",
+                "source": "Tafsir al-Tabari",
+            },
+        ],
+        "suggested_interpretation": "Ground in guardianship and financial duty; avoid anachronistic readings.",
+    },
+    "5:67": {
+        "summary": (
+            "The 'completion of religion' verse — revealed at Ghadir Khumm "
+            "as the Prophet publicly designated Ali; Sunni and Shia exegetes "
+            "disagree on its scope."
+        ),
+        "attribution": "al-Wahidi; al-Tha'labi",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Omar ibn al-Khattab",
+                "text": "After the sermon, Umar said 'Well done, O son of Abu Talib!' indicating public acknowledgment.",
+                "source": "Ibn Kathir",
+            },
+        ],
+        "suggested_interpretation": "Present both Sunni and Shia readings neutrally; attribution certainty is high for the event, not its scope.",
+    },
+    "5:48": {
+        "summary": (
+            "'For each of you We have appointed a law and a way' — revealed "
+            "to affirm the divine origin of earlier scriptures while granting "
+            "Muhammad the final legislation."
+        ),
+        "attribution": "al-Tabari",
+        "period": "Madani",
+        "narrations": [],
+        "suggested_interpretation": "Addresses Jewish and Christian communities; affirms continuity while establishing finality of the Quran.",
+    },
+    "9:28": {
+        "summary": (
+            "The Polytheists are najis (ritually unclean) — revealed after "
+            "the conquest of Mecca regarding the management of the Sacred "
+            "Mosque's perimeter."
+        ),
+        "attribution": "al-Tabari",
+        "period": "Madani",
+        "narrations": [],
+        "suggested_interpretation": "Contextual to the immediate post-conquest period; do not generalize beyond the specific historical setting.",
+    },
+    "17:1": {
+        "summary": (
+            "'Glory be to Him who took His servant on the night journey' — "
+            "revealed after the Prophet's Isra and Mi'raj; first verse of "
+            "Surah al-Isra'."
+        ),
+        "attribution": "al-Bukhari; Muslim",
+        "period": "Makki",
+        "narrations": [
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "Quraysh mocked the claim of night travel; the Prophet confirmed the details privately.",
+                "source": "al-Bukhari",
+            },
+        ],
+        "suggested_interpretation": "Recount the Isra and Mi'raj event; note theological significance of Jerusalem as the first qiblah.",
+    },
+    "18:60": {
+        "summary": (
+            "Moses and al-Khidr — the journey narrative, revealed when "
+            "Musa asked what knowledge he did not possess, illustrating "
+            "divine wisdom beyond human understanding."
+        ),
+        "attribution": "al-Tabari; Ibn Kathir",
+        "period": "Makki",
+        "narrations": [
+            {
+                "scholar": "Ibn Abbas",
+                "text": "Al-Khidr met Musa to teach him the inner meanings that the Torah does not contain.",
+                "source": "al-Tabari",
+            },
+        ],
+        "suggested_interpretation": "Narrate the parable as an epistemological lesson on divine knowledge beyond apparent events.",
+    },
+    "18:74": {
+        "summary": (
+            "Al-Khidr's killing of the boy — the most controversial episode "
+            "in the Moses narrative, explained only in the final verse (18:82) "
+            "as divine foreknowledge."
+        ),
+        "attribution": "al-Tabari",
+        "period": "Makki",
+        "narrations": [],
+        "suggested_interpretation": "Present explanation at 18:82; do not present as a standalone moral lesson.",
+    },
+    "24:31": {
+        "summary": (
+            "Modesty injunctions for believing women — revealed after incidents "
+            "of inappropriate staring; context includes 'draw their veils over "
+            "their bosoms'.",
+        ),
+        "attribution": "al-Tabari; al-Qurtubi",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "Men would follow women through the streets; this verse was revealed to establish boundaries.",
+                "source": "al-Tabari",
+            },
+        ],
+        "suggested_interpretation": "Present with full scholarly context; note significant disagreement on what exactly is mandated.",
+    },
+    "33:37": {
+        "summary": (
+            "'When you said to the one Allah had blessed' — the Prophet's "
+            "marriage to Zaynab bint Jahsh after Zayd's divorce, revealed to "
+            "legitimate the union and abolish pre-Islamic adoption."
+        ),
+        "attribution": "al-Bukhari; al-Tabari",
+        "period": "Madani",
+        "narrations": [
+            {
+                "scholar": "Anas ibn Malik",
+                "text": "Zayd divorced Zaynab; the Prophet married her by divine command, abolishing the pre-Islamic adoption-kinship rule.",
+                "source": "al-Bukhari",
+            },
+        ],
+        "suggested_interpretation": "Link to abolition of pre-Islamic adoption (tabanni'); focus on the legal principle, not the biographical detail.",
+    },
+    "66:5": {
+        "summary": (
+            "'Perhaps his Lord, if he divorces you, will give him wives "
+            "better than you' — revealed during the Incident of al-Ifk, "
+            "affirming the Prophet's honor."
+        ),
+        "attribution": "al-Bukhari; Muslim",
+        "period": "Madani",
+        "narrations": [],
+        "suggested_interpretation": "Link to the al-Ifk incident (24:11-20); demonstrate divine defence of prophetic reputation.",
+    },
+    "112:1": {
+        "summary": (
+            "'Say He is Allah the One' — Surah al-Ikhlas, revealed as a "
+            "response to the Quraysh's challenge about Allah's lineage, "
+            "affirming radical monotheism."
+        ),
+        "attribution": "al-Bukhari; Muslim",
+        "period": "Makki",
+        "narrations": [
+            {
+                "scholar": "Abu Bakr",
+                "text": "'By Allah, this is equal to one-third of the Quran in reward.'",
+                "source": "al-Bukhari",
+            },
+        ],
+        "suggested_interpretation": "Use as the purest monotheistic creed text; link to the Quraysh's tribal-theology challenge.",
+    },
+    "55:1": {
+        "summary": (
+            "'The Most Merciful taught the Quran' — Surah al-Rahman, "
+            "revealed to affirm the Quran as the core proof of Muhammad's "
+            "prophethood."
+        ),
+        "attribution": "al-Wahidi",
+        "period": "Makki",
+        "narrations": [],
+        "suggested_interpretation": "Present as an early Meccan surah affirming the Quran's miraculous nature.",
+    },
+    "109:1": {
+        "summary": (
+            "'To you your religion, to me mine' — revealed when the "
+            "Quraysh offered the Prophet a compromise on polytheism; "
+            "refused on principle."
+        ),
+        "attribution": "al-Tabari",
+        "period": "Makki",
+        "narrations": [],
+        "suggested_interpretation": "Demonstrate the Prophet's refusal to compromise monotheism even under social pressure.",
     },
 }
 
@@ -342,10 +689,22 @@ def _match_keywords(text: str, table: dict[str, str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+class NarrationEntry(BaseModel):
+    """One scholarly narration of the circumstances of revelation."""
+
+    scholar: str
+    text: str
+    source: str = ""
+    authenticity: str = "sahih"  # sahih | hasan | da'if | mursal
+
+
 class AsbabEntry(BaseModel):
     reference: str
     summary: str
     attribution: str
+    period: str = "unknown"  # Makki | Madani | unknown
+    narrations: list[NarrationEntry] = Field(default_factory=list)
+    suggested_interpretation: str = ""
 
 
 class HadithContextEntry(BaseModel):
@@ -399,14 +758,72 @@ class HistoryContextRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _build_asbab_entry(ref: str, record: dict[str, object]) -> AsbabEntry:
+    """Build an AsbabEntry from the raw data, mapping narrations correctly."""
+    narrations_raw = record.get("narrations", [])
+    narrations: list[NarrationEntry] = []
+    if isinstance(narrations_raw, list):
+        for n in narrations_raw:
+            if isinstance(n, dict):
+                narrations.append(NarrationEntry(**n))
+    return AsbabEntry(
+        reference=ref,
+        summary=str(record["summary"]),
+        attribution=str(record["attribution"]),
+        period=str(record.get("period", "unknown")),
+        narrations=narrations,
+        suggested_interpretation=str(record.get("suggested_interpretation", "")),
+    )
+
+
 def _asbab_entries(text: str) -> list[AsbabEntry]:
     out: list[AsbabEntry] = []
     for surah, ayah in _AYAH_REF.findall(text):
         ref = f"{int(surah)}:{int(ayah)}"
         record = ASBAB_AL_NUZUL.get(ref)
         if record and all(e.reference != ref for e in out):
-            out.append(AsbabEntry(reference=ref, **record))
+            out.append(_build_asbab_entry(ref, record))
     return out
+
+
+def get_asbab_for_verse(reference: str) -> AsbabEntry | None:
+    """Return enriched asbab data for a single 'surah:ayah' reference, or None."""
+    record = ASBAB_AL_NUZUL.get(reference.strip())
+    if record is None:
+        return None
+    return _build_asbab_entry(reference.strip(), record)
+
+
+def filter_asbab(
+    period: str | None = None,
+    has_narrations: bool | None = None,
+) -> list[AsbabEntry]:
+    """Return all asbab entries matching optional filters.
+
+    ``period``: filter to 'Makki' or 'Madani' (case-insensitive).
+    ``has_narrations``: if True, only entries with at least one narration.
+    """
+    result: list[AsbabEntry] = []
+    for ref, record in ASBAB_AL_NUZUL.items():
+        entry_period = str(record.get("period", "unknown")).lower()
+        if period and entry_period != period.lower():
+            continue
+        narrations_raw = record.get("narrations", [])
+        if has_narrations is True and not (isinstance(narrations_raw, list) and len(narrations_raw) > 0):
+            continue
+        result.append(_build_asbab_entry(ref, record))
+    return result
+
+
+def list_all_asbab_periods() -> dict[str, list[str]]:
+    """Return a mapping of period ('Makki', 'Madani', 'unknown') to verse references."""
+    periods: dict[str, list[str]] = {}
+    for ref, record in ASBAB_AL_NUZUL.items():
+        period = str(record.get("period", "unknown"))
+        periods.setdefault(period, []).append(ref)
+    for refs in periods.values():
+        refs.sort()
+    return periods
 
 
 def _hadith_entries(text: str) -> list[HadithContextEntry]:
@@ -485,14 +902,36 @@ def historical_context(request: HistoryContextRequest) -> HistoricalContext:
     return build_historical_context(request.text)
 
 
+class AsbabFilterRequest(BaseModel):
+    period: str | None = Field(None, description="Filter: 'Makki' or 'Madani'")
+    has_narrations: bool | None = Field(None, description="If true, only entries with narrations")
+
+
+class AsbabPeriodSummary(BaseModel):
+    period: str
+    references: list[str]
+
+
 @router.get("/asbab/{surah}/{ayah}", response_model=AsbabEntry)
 def asbab_al_nuzul(surah: int, ayah: int) -> AsbabEntry:
     """Return the occasion of revelation for a verse, if one is recorded."""
-    ref = f"{surah}:{ayah}"
-    record = ASBAB_AL_NUZUL.get(ref)
-    if record is None:
-        raise HTTPException(status_code=404, detail=f"No recorded asbab al-nuzul for {ref}")
-    return AsbabEntry(reference=ref, **record)
+    entry = get_asbab_for_verse(f"{surah}:{ayah}")
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No recorded asbab al-nuzul for {surah}:{ayah}")
+    return entry
+
+
+@router.post("/asbab/filter", response_model=list[AsbabEntry])
+def asbab_filter(body: AsbabFilterRequest) -> list[AsbabEntry]:
+    """Return asbab entries matching period and/or narration filters."""
+    return filter_asbab(period=body.period, has_narrations=body.has_narrations)
+
+
+@router.get("/asbab/periods", response_model=list[AsbabPeriodSummary])
+def asbab_periods() -> list[AsbabPeriodSummary]:
+    """Return a summary of asbab entries grouped by Makki/Madani period."""
+    periods = list_all_asbab_periods()
+    return [AsbabPeriodSummary(period=period, references=refs) for period, refs in sorted(periods.items())]
 
 
 @router.get("/scholar/{name}", response_model=ScholarBio)
