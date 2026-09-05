@@ -751,3 +751,152 @@ Rules for the block:
 4. Write your answer normally first. The block is in addition to your answer,
    never a replacement for it, and never a substitute for citing sources in prose.
 """
+
+
+class SynthesizedCitation(BaseModel):
+    """A citation with the agent IDs that contributed to it."""
+
+    citation: Citation
+    sources: list[str] = Field(default_factory=list)
+
+
+class CitationConsolidation(BaseModel):
+    """Consolidated citation output with attribution and conflict diagnostics."""
+
+    citations: list[SynthesizedCitation] = Field(default_factory=list)
+    attempted: int = 0
+    rejected: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    source_count: int = 0
+
+    @property
+    def score(self) -> float | None:
+        if self.attempted <= 0:
+            return None
+        return round(len(self.citations) / self.attempted, 4)
+
+
+def _citation_ref(citation: Citation) -> str:
+    if isinstance(citation, QuranCitation):
+        return citation.reference
+    if isinstance(citation, HadithCitation):
+        return f"{citation.collection} {citation.number}" if citation.number else citation.collection
+    return citation.work
+
+
+class CitationSynthesisEngine:
+    """Merge citation extractions from multiple agent responses.
+
+    The engine is attribution-preserving: every synthesized citation records
+    which agents supplied it. Exact duplicates are folded together, overlapping
+    Quran ranges are merged, and contradictory hadith gradings or scholarly
+    authorship are recorded as conflicts instead of being silently dropped.
+    """
+
+    def __init__(self, max_citations: int = MAX_CITATIONS) -> None:
+        self._max_citations = max_citations
+        self._citations: list[SynthesizedCitation] = []
+        self._attempted = 0
+        self._rejected: list[str] = []
+        self._conflicts: list[str] = []
+        self._sources: set[str] = set()
+
+    def add_agent_output(self, source_id: str, text: str | None) -> None:
+        """Parse one agent answer and fold its citations into the synthesis."""
+        _, extraction = extract_citations(text)
+        self.add_extraction(source_id, extraction)
+
+    def add_extraction(self, source_id: str, extraction: CitationExtraction) -> None:
+        """Merge an existing extraction, attributing it to *source_id*."""
+        if source_id:
+            self._sources.add(source_id)
+        self._attempted += extraction.attempted
+        self._rejected.extend(extraction.rejected)
+        for citation in extraction.citations:
+            self._add_citation(citation, source_id)
+
+    def synthesize(self) -> CitationConsolidation:
+        """Return the final consolidated citation set and its diagnostics."""
+        return CitationConsolidation(
+            citations=list(self._citations),
+            attempted=self._attempted,
+            rejected=self._rejected,
+            conflicts=self._conflicts,
+            source_count=len(self._sources),
+        )
+
+    def _add_citation(self, citation: Citation, source_id: str) -> None:
+        if len(self._citations) >= self._max_citations:
+            self._rejected.append(
+                f"citation limit {self._max_citations} reached; dropping {_citation_ref(citation)}"
+            )
+            return
+        existing = self._find_related(citation)
+        if existing is None:
+            existing = SynthesizedCitation(citation=citation, sources=[])
+            self._citations.append(existing)
+        else:
+            self._merge_citation(existing, citation)
+        if source_id and source_id not in existing.sources:
+            existing.sources.append(source_id)
+
+    def _find_related(self, citation: Citation) -> SynthesizedCitation | None:
+        if isinstance(citation, QuranCitation):
+            for item in self._citations:
+                current = item.citation
+                if isinstance(current, QuranCitation) and current.surah == citation.surah:
+                    if self._ranges_overlap(current, citation):
+                        return item
+            return None
+        key = self._exact_key(citation)
+        for item in self._citations:
+            if self._exact_key(item.citation) == key:
+                return item
+        return None
+
+    def _merge_citation(self, target: SynthesizedCitation, incoming: Citation) -> None:
+        current = target.citation
+        if isinstance(incoming, QuranCitation) and isinstance(current, QuranCitation):
+            start = min(current.ayah_start, incoming.ayah_start)
+            end = max(current.ayah_end or current.ayah_start, incoming.ayah_end or incoming.ayah_start)
+            target.citation = QuranCitation(
+                surah=current.surah,
+                ayah_start=start,
+                ayah_end=end if end != start else None,
+                surah_name=current.surah_name,
+            )
+            return
+        if isinstance(incoming, HadithCitation) and isinstance(current, HadithCitation):
+            if current.number == incoming.number:
+                if incoming.grading and not current.grading:
+                    current.grading = incoming.grading
+                elif current.grading and incoming.grading and current.grading != incoming.grading:
+                    self._conflicts.append(
+                        f"conflicting gradings for {current.collection} {current.number}: "
+                        f"{current.grading!r} vs {incoming.grading!r}"
+                    )
+            return
+        if isinstance(incoming, ScholarlyReference) and isinstance(current, ScholarlyReference):
+            if current.work.casefold() == incoming.work.casefold():
+                if incoming.author and not current.author:
+                    current.author = incoming.author
+                elif current.author and incoming.author and current.author != incoming.author:
+                    self._conflicts.append(
+                        f"conflicting authors for {current.work!r}: "
+                        f"{current.author!r} vs {incoming.author!r}"
+                    )
+            return
+
+    @staticmethod
+    def _exact_key(citation: Citation) -> tuple[Any, ...]:
+        if isinstance(citation, HadithCitation):
+            return ("hadith", citation.collection, citation.number)
+        if isinstance(citation, ScholarlyReference):
+            return ("scholarly", citation.work.casefold())
+        return ("",)
+
+    @staticmethod
+    def _ranges_overlap(a: QuranCitation, b: QuranCitation) -> bool:
+        a_end = a.ayah_end or a.ayah_start
+        b_end = b.ayah_end or b.ayah_start
+        return a.ayah_start <= b_end + 1 and b.ayah_start <= a_end + 1
