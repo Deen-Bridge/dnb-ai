@@ -316,7 +316,8 @@ class MetricsRegistry:
                     "model_p50": _percentile(self._model_latencies, 50),
                     "model_p95": _percentile(self._model_latencies, 95),
                 },
-                "by_model": {
+                "by_model": self._by_model,
+            }y_model": {
                     model: {
                         "calls": b["calls"],
                         "total_tokens": b["total_tokens"],

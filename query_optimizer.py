@@ -192,8 +192,7 @@ _STOPWORDS = frozenset({"the", "a", "an", "and", "or", "of", "to", "in", "on", "
 
 
 def _tokenize(text: str) -> set[str]:
-    return {token for token in re.findall(r"[a-z0-9']+", text.lower()) if
-            token not in _STOPWORDS}
+    return {token for token in re.findall(r"[a-z0-9']+", text.lower()) if token not in _STOPWORDS}
 
 
 # Latency at or above this (milliseconds) counts a query as "slow". Mirrors the
@@ -760,6 +759,231 @@ async def pool_efficiency_endpoint(request: PoolRequest) -> PoolResponse:
 
 
 # ---------------------------------------------------------------------------
+# Intelligent agent task decomposition
+# ---------------------------------------------------------------------------
+
+
+class AgentCapability(BaseModel):
+    agent_id: str = Field(..., description="Unique agent identifier")
+    capabilities: list[str] = Field(..., description="Task types this agent can execute")
+    load: float = Field(default=0.0, ge=0.0, le=1.0, description="Current agent load from 0 to 1")
+
+
+class SubTask(BaseModel):
+    task_id: str = Field(..., description="Stable sub-task identifier")
+    description: str = Field(..., description="What this sub-task does")
+    required_capability: str = Field(..., description="Capability an agent must offer")
+    dependencies: list[str] = Field(default_factory=list, description="Sub-task IDs that must finish first")
+    estimated_cost: int = Field(default=10, ge=1, le=100, description="Relative execution cost")
+    assigned_agent: str | None = Field(default=None, description="Selected agent identifier")
+
+
+class ExecutionLevel(BaseModel):
+    level: int = Field(..., ge=0, description="Parallel execution wave index")
+    task_ids: list[str] = Field(default_factory=list, description="Sub-tasks scheduled in this wave")
+
+
+class DecompositionPlan(BaseModel):
+    query: str = Field(..., description="Original complex query")
+    tasks: list[SubTask] = Field(default_factory=list, description="Identified sub-tasks")
+    execution_levels: list[ExecutionLevel] = Field(default_factory=list, description="Parallel execution waves")
+    completeness: float = Field(default=1.0, ge=0.0, le=1.0, description="Fraction of recognized query clauses covered")
+    parallelization_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Parallel freedom of the plan")
+    estimated_speedup: float = Field(default=1.0, ge=1.0, description="Estimated speedup over serial execution")
+    complexity: int = Field(..., ge=0, le=100, description="Heuristic query complexity from static analysis")
+    validation_warnings: list[str] = Field(default_factory=list, description="Decomposition validation messages")
+
+
+class DecompositionRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Complex query to decompose")
+    agents: list[AgentCapability] = Field(..., min_length=1, description="Agents available for assignment")
+
+
+class ReplanRequest(BaseModel):
+    plan: DecompositionPlan = Field(..., description="Plan to adjust")
+    completed_task_ids: list[str] = Field(default_factory=list, description="Sub-tasks already finished")
+    new_query: str | None = Field(default=None, description="Optional new query for full re-decomposition")
+    available_agents: list[AgentCapability] = Field(..., min_length=1, description="Agents available after replan")
+
+
+_CLAUSE_SPECS = (
+    ("with", "cte_materialization", 15, ()),
+    ("select", "projection", 10, ("with", "from", "join", "where", "group by")),
+    ("from", "base_scan", 20, ("with",)),
+    ("join", "join_execution", 25, ("from",)),
+    ("where", "filter", 20, ("from", "join")),
+    ("group by", "aggregation", 25, ("where", "from", "join")),
+    ("order by", "sort", 10, ("where", "group by", "from", "join")),
+    ("limit", "limit", 5, ("order by", "where", "group by", "from", "join")),
+)
+
+
+def _build_sub_tasks(normalized: str) -> list[SubTask]:
+    """Identify one sub-task per recognized SQL planning clause."""
+    id_by_clause: dict[str, str] = {}
+    for idx, (clause, _capability, _cost, _deps) in enumerate(_CLAUSE_SPECS):
+        if clause in normalized:
+            id_by_clause[clause] = f"task_{idx}"
+    tasks: list[SubTask] = []
+    for idx, (clause, capability, cost, dep_clauses) in enumerate(_CLAUSE_SPECS):
+        task_id = id_by_clause.get(clause)
+        if task_id is None:
+            continue
+        dependencies = [id_by_clause[dep] for dep in dep_clauses if dep in id_by_clause]
+        tasks.append(
+            SubTask(
+                task_id=task_id,
+                description=f"{clause.upper()} clause: {capability.replace('_', ' ')}",
+                required_capability=capability,
+                dependencies=dependencies,
+                estimated_cost=cost,
+            )
+        )
+    return tasks
+
+
+def _select_agent(capability: str, agents: list[AgentCapability]) -> AgentCapability | None:
+    """Pick the least-loaded agent that can execute the required capability."""
+    candidates = [agent for agent in agents if capability in agent.capabilities]
+    return min(candidates, key=lambda agent: agent.load) if candidates else None
+
+
+def _execution_levels(tasks: list[SubTask]) -> list[ExecutionLevel]:
+    """Layer sub-tasks by dependency readiness for parallel execution."""
+    if not tasks:
+        return []
+    remaining: dict[str, set[str]] = {task.task_id: set(task.dependencies) for task in tasks}
+    levels: list[ExecutionLevel] = []
+    while remaining:
+        ready = sorted(task_id for task_id, deps in remaining.items() if not deps)
+        if not ready:
+            ready = [sorted(remaining)[0]]
+            remaining[ready[0]] = set()
+        levels.append(ExecutionLevel(level=len(levels), task_ids=ready))
+        for task_id in ready:
+            del remaining[task_id]
+        for deps in remaining.values():
+            deps.difference_update(ready)
+    return levels
+
+
+def _parallelism_metrics(tasks: list[SubTask], levels: list[ExecutionLevel]) -> tuple[float, float]:
+    """Return (parallelization_score, estimated_speedup) for the plan."""
+    if len(tasks) <= 1 or len(levels) <= 1:
+        return 0.0, 1.0
+    serial_cost = sum(task.estimated_cost for task in tasks)
+    parallel_cost = max(sum(task.estimated_cost for task in level.task_ids) for level in levels)
+    speedup = serial_cost / parallel_cost if parallel_cost else 1.0
+    score = min(1.0, (len(levels) - 1) / max(len(tasks), 1))
+    return score, max(1.0, speedup)
+
+
+def decompose_query(query: str, agents: list[AgentCapability]) -> DecompositionPlan:
+    """Analyze a complex query and produce an executable decomposition plan."""
+    normalized = normalize_sql(query)
+    analysis = analyze_query(query)
+    tasks = _build_sub_tasks(normalized)
+    if not tasks:
+        tasks = [
+            SubTask(
+                task_id="task_0",
+                description="Execute the full query as a single sub-task",
+                required_capability="query_executor",
+                dependencies=[],
+                estimated_cost=analysis.estimated_cost or 10,
+            )
+        ]
+    valid_ids = {task.task_id for task in tasks}
+    for task in tasks:
+        task.dependencies = [dep for dep in task.dependencies if dep in valid_ids and dep != task.task_id]
+        agent = _select_agent(task.required_capability, agents)
+        task.assigned_agent = agent.agent_id if agent else None
+
+    warnings: list[str] = []
+    for task in tasks:
+        if task.assigned_agent is None:
+            warnings.append(
+                f"No agent available for task {task.task_id} requiring '{task.required_capability}'"
+            )
+        unknown = [dep for dep in task.dependencies if dep not in valid_ids]
+        if unknown:
+            warnings.append(f"Task {task.task_id} references unknown dependencies: {', '.join(unknown)}")
+
+    levels = _execution_levels(tasks)
+    score, speedup = _parallelism_metrics(tasks, levels)
+
+    recognized = sum(1 for spec in _CLAUSE_SPECS if spec[0] in normalized)
+    completeness = min(1.0, len(tasks) / recognized) if recognized else (1.0 if tasks else 0.0)
+
+    return DecompositionPlan(
+        query=query,
+        tasks=tasks,
+        execution_levels=levels,
+        completeness=completeness,
+        parallelization_score=score,
+        estimated_speedup=speedup,
+        complexity=analysis.estimated_cost,
+        validation_warnings=warnings,
+    )
+
+
+def replan(
+    plan: DecompositionPlan,
+    completed_task_ids: list[str],
+    new_query: str | None,
+    agents: list[AgentCapability],
+) -> DecompositionPlan:
+    """Adjust a plan after completed sub-tasks, or re-decompose a new query."""
+    if new_query is not None:
+        return decompose_query(new_query, agents)
+
+    completed = set(completed_task_ids)
+    remaining = [task for task in plan.tasks if task.task_id not in completed]
+    if not remaining:
+        return DecompositionPlan(
+            query=plan.query,
+            tasks=[],
+            execution_levels=[],
+            completeness=1.0,
+            parallelization_score=0.0,
+            estimated_speedup=1.0,
+            complexity=plan.complexity,
+            validation_warnings=["All sub-tasks are complete."],
+        )
+
+    for task in remaining:
+        task.dependencies = [dep for dep in task.dependencies if dep not in completed]
+
+    levels = _execution_levels(remaining)
+    score, speedup = _parallelism_metrics(remaining, levels)
+    warnings = list(plan.validation_warnings)
+    warnings.append(f"Replanned after completing {len(completed)} sub-tasks.")
+    warnings = warnings[-10:]
+
+    return DecompositionPlan(
+        query=plan.query,
+        tasks=remaining,
+        execution_levels=levels,
+        completeness=plan.completeness,
+        parallelization_score=score,
+        estimated_speedup=speedup,
+        complexity=plan.complexity,
+        validation_warnings=warnings,
+    )
+
+
+@router.post("/decompose", response_model=DecompositionPlan)
+async def decompose_endpoint(request: DecompositionRequest) -> DecompositionPlan:
+    """Decompose a complex query into an agent-assigned parallel plan."""
+    return decompose_query(request.query, request.agents)
+
+
+@router.post("/decompose/replan", response_model=DecompositionPlan)
+async def replan_endpoint(request: ReplanRequest) -> DecompositionPlan:
+    """Re-plan after progress or when a changed query arrives."""
+    return replan(request.plan, request.completed_task_ids, request.new_query, request.available_agents)
+
+
 # Ayah relationship mapping
 # ---------------------------------------------------------------------------
 
