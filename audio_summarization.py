@@ -314,8 +314,8 @@ def extract_topics(
 
     # Group segments by time windows
     window_size = 300  # 5 minutes
-    current_window_start = 0
-    current_segments = []
+    current_window_start: float = 0.0
+    current_segments: list[TranscriptSegment] = []
 
     for segment in segments:
         if segment.timestamp.start_seconds - current_window_start > window_size:

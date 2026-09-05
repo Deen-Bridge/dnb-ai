@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
+from typing import TypedDict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -159,8 +160,14 @@ WEAK_LETTERS = set("وياأإآ")  # حروف العلة
 EMPHATIC_LETTERS = set("صضطظ")  # حروف الإطباق
 DIACRITICS = set("ًٌٍَُِّْٰٕٓٔ")
 
+
 # Common roots database (simplified - would be comprehensive in production)
-ROOT_DATABASE = {
+class RootEntry(TypedDict):
+    meaning: str
+    derived_forms: list[str]
+
+
+ROOT_DATABASE: dict[str, RootEntry] = {
     "كتب": {
         "meaning": "to write",
         "derived_forms": ["كِتَاب", "كَاتِب", "مَكْتُوب", "كُتُب", "مَكْتَبَة"],
@@ -312,8 +319,8 @@ def analyze_morphology(word: str) -> MorphologicalAnalysis:
             verb_form = VerbForm.FORM_I
 
     # Get root info if available
-    root_info = ROOT_DATABASE.get(root, {})
-    meaning = root_info.get("meaning", "")
+    root_info: RootEntry | None = ROOT_DATABASE.get(root)
+    meaning = root_info["meaning"] if root_info else ""
 
     return MorphologicalAnalysis(
         surface_form=word,
@@ -332,7 +339,7 @@ def lookup_root(root: str) -> RootInfo:
     """
     Look up a root and find its Quranic occurrences and derived forms.
     """
-    root_data = ROOT_DATABASE.get(root, {})
+    root_data: RootEntry | None = ROOT_DATABASE.get(root)
 
     # Simulated Quranic occurrences
     # In production, this would query the Quranic corpus
@@ -350,9 +357,9 @@ def lookup_root(root: str) -> RootInfo:
 
     return RootInfo(
         root=root,
-        meaning=root_data.get("meaning", "Unknown"),
+        meaning=root_data["meaning"] if root_data else "Unknown",
         occurrences_count=len(occurrences),
-        derived_forms=root_data.get("derived_forms", []),
+        derived_forms=root_data["derived_forms"] if root_data else [],
         quranic_occurrences=occurrences,
     )
 
