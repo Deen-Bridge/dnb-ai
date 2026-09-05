@@ -197,7 +197,7 @@ def _local_embedding(text: str) -> np.ndarray:
 
 
 class CacheEntry:
-    __slots__ = ("embedding", "response", "chat_id", "history", "expires_at", "scope", "token_count")
+    __slots__ = ("embedding", "response", "chat_id", "history", "expires_at", "scope", "token_count", "version", "metadata")
 
     def __init__(
         self,
@@ -208,6 +208,8 @@ class CacheEntry:
         expires_at: float,
         scope: str = "public",
         token_count: int = 0,
+        version: int = 1,
+        metadata: dict | None = None,
     ) -> None:
         self.embedding = embedding
         self.response = response
@@ -216,6 +218,8 @@ class CacheEntry:
         self.expires_at = expires_at
         self.scope = scope
         self.token_count = token_count
+        self.version = version
+        self.metadata = metadata or {}
 
     @property
     def expired(self) -> bool:
@@ -231,6 +235,7 @@ class SemanticCache:
     def __init__(self) -> None:
         self._entries: list[CacheEntry] = []
         self._access_times: list[float] = []
+        self._preferences: dict[str, dict[str, Any]] = {}
 
         self.hits = 0
         self.misses = 0
@@ -261,6 +266,8 @@ class SemanticCache:
         history: list[Any],
         scope: str = "public",
         token_count: int = 0,
+        version: int = 1,
+        metadata: dict | None = None,
     ) -> None:
         if not SEMANTIC_CACHE_ENABLED:
             return
@@ -273,6 +280,8 @@ class SemanticCache:
             expires_at=time.time() + SEMANTIC_CACHE_TTL_SECONDS,
             scope=scope,
             token_count=token_count,
+            version=version,
+            metadata=metadata,
         )
         self._entries.append(entry)
         self._access_times.append(time.time())
@@ -296,6 +305,7 @@ class SemanticCache:
     def clear(self) -> None:
         self._entries.clear()
         self._access_times.clear()
+        self._preferences.clear()
         self.hits = 0
         self.misses = 0
         self.bypasses = 0
@@ -327,6 +337,89 @@ class SemanticCache:
         """
         # TODO: Add content_source tagging to CacheEntry and implement matching
         return 0
+
+    # -- memory and context sharing API -------------------------------------
+
+    def share_memory(self, entry_id: int, target_scope: str) -> bool:
+        """Copy a cache entry (memory) into another scope, enabling inter-agent sharing."""
+        if entry_id < 0 or entry_id >= len(self._entries):
+            return False
+        entry = self._entries[entry_id]
+        if entry.scope == target_scope:
+            return True  # Already in target scope
+        # Create a shallow copy with updated scope and fresh timestamps
+        shared_entry = CacheEntry(
+            embedding=entry.embedding,
+            response=entry.response,
+            chat_id=entry.chat_id,
+            history=list(entry.history),
+            expires_at=time.time() + SEMANTIC_CACHE_TTL_SECONDS,
+            scope=target_scope,
+            token_count=entry.token_count,
+            version=entry.version,
+            metadata=dict(entry.metadata),
+        )
+        self._entries.append(shared_entry)
+        self._access_times.append(time.time())
+        return True
+
+    def set_user_preference(self, user_id: str, key: str, value: Any) -> None:
+        """Persist a user preference in memory (key-value store)."""
+        prefs = self._preferences.setdefault(user_id, {})
+        prefs[key] = value
+
+    def get_user_preferences(self, user_id: str) -> dict[str, Any]:
+        """Retrieve all persisted preferences for a user."""
+        return dict(self._preferences.get(user_id, {}))
+
+    def prune_archived(self, cutoff: float | None = None) -> int:
+        """Remove expired entries and optionally entries older than cutoff."""
+        now = time.time()
+        cutoff = cutoff if cutoff is not None else now
+        surviving_entries: list[CacheEntry] = []
+        surviving_times: list[float] = []
+        pruned = 0
+        for entry, access_time in zip(self._entries, self._access_times, strict=True):
+            if entry.expired or access_time < cutoff:
+                pruned += 1
+                self.evictions += 1
+            else:
+                surviving_entries.append(entry)
+                surviving_times.append(access_time)
+        self._entries = surviving_entries
+        self._access_times = surviving_times
+        return pruned
+
+    def retrieve_contexts(
+        self,
+        embedding: np.ndarray,
+        scope: str = "public",
+        top_k: int = 3,
+        min_score: float | None = None,
+    ) -> list[tuple[CacheEntry, float]]:
+        """Retrieve the top-k most relevant cached entries for context assembly."""
+        if not SEMANTIC_CACHE_ENABLED:
+            return []
+        threshold = min_score if min_score is not None else SEMANTIC_CACHE_THRESHOLD
+        scored: list[tuple[float, CacheEntry]] = []
+        # First pass to clean expired and enforce scope
+        for entry in self._entries:
+            if entry.expired or entry.scope != scope:
+                continue
+            score = cosine_similarity(embedding, entry.embedding)
+            if score >= threshold:
+                scored.append((score, entry))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        # Update access times for retrieved entries
+        retrieved = scored[:top_k]
+        for score, entry in retrieved:
+            # Find its index and update access time (simplified: just mark access)
+            try:
+                idx = self._entries.index(entry)
+                self._access_times[idx] = time.time()
+            except ValueError:
+                pass
+        return [(entry, score) for score, entry in retrieved]
 
     # -- internals ----------------------------------------------------------
 
