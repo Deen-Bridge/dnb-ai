@@ -40,6 +40,94 @@ from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/db-optimizer", tags=["db-optimizer"])
 
+# ---------------------------------------------------------------------------
+# Turkish language support
+# ---------------------------------------------------------------------------
+
+def turkish_lower(text: str) -> str:
+    """Turkish-aware lowercasing that respects the dotted/dotless I distinction."""
+    return text.replace("I", "ı").replace("İ", "i").lower()
+
+
+_TURKISH_SUFFIXES = (
+    "lar", "ler", "dan", "den", "tan", "ten",
+    "yla", "yle", "sin", "sın", "sun", "sün",
+    "dir", "dır", "dur", "dür", "tir", "tır", "tur", "tür",
+    "ken", "ince", "erek", "arak",
+)
+
+TURKISH_ISLAMIC_TERMS: dict[str, tuple[str, ...]] = {
+    "namaz": ("salat", "salât"),
+    "oruç": ("savm", "sawm"),
+    "zekat": ("zakat", "zekât"),
+    "hac": ("hajj", "hacc"),
+    "peygamber": ("nebi", "resul", "rasûl"),
+    "melek": ("malaik", "melekût"),
+    "kuran": ("qur'an", "kur'an", "quran"),
+    "hadis": ("hadith", "hadîs"),
+    "sünnet": ("sunna", "sünnet"),
+    "kelam": ("kalam", "kelâm"),
+    "tasavvuf": ("sufism", "tasawwuf"),
+    "tevhid": ("tawhid", "tevhit"),
+    "ibadet": ("ibada", "ibâdet"),
+    "sevap": ("thawab", "sevâb"),
+    "günah": ("dhanb", "gunah", "günâh"),
+    "helal": ("halal", "helâl"),
+    "haram": ("haram", "harâm"),
+    "dua": ("du'a", "duâ"),
+    "iman": ("iman", "îman"),
+    "islam": ("islam", "islâm"),
+}
+
+_OTTOMAN_AFFIXES = ("ullah", "ül", "il", "el", "al", "ibn", "bin", "zade", "efendi")
+
+
+def turkish_tokenize(text: str) -> list[str]:
+    """Split Turkish text into lowercase tokens, respecting Turkish characters."""
+    return re.findall(r"[a-z0-9çğıöşüâîû']+", turkish_lower(text))
+
+
+def strip_turkish_suffixes(word: str) -> str:
+    """Remove common agglutinative suffixes for a conservative Turkish stem."""
+    stem = word
+    changed = True
+    while changed and len(stem) > 3:
+        changed = False
+        for suffix in _TURKISH_SUFFIXES:
+            if stem.endswith(suffix) and len(stem) - len(suffix) >= 2:
+                stem = stem[: -len(suffix)]
+                changed = True
+                break
+    return stem
+
+
+def normalize_turkish_islamic_term(term: str) -> tuple[str, ...] | str:
+    """Return known Arabic/Ottoman equivalents for a Turkish Islamic term."""
+    normalized = turkish_lower(term).replace("'", "").replace(" ", "")
+    return TURKISH_ISLAMIC_TERMS.get(normalized, turkish_lower(term))
+
+
+def expand_turkish_islamic_query(text: str) -> str:
+    """Expand Turkish Islamic terms with Arabic/Ottoman equivalents for recall."""
+    tokens = turkish_tokenize(text)
+    expanded: list[str] = []
+    for token in tokens:
+        root = strip_turkish_suffixes(token)
+        equivalents = normalize_turkish_islamic_term(root)
+        if isinstance(equivalents, tuple):
+            expanded.append(token)
+            expanded.extend(equivalents)
+        else:
+            expanded.append(token)
+    return " ".join(expanded)
+
+
+def detect_ottoman_turkish_influence(text: str) -> list[str]:
+    """Return Ottoman affixes found in a religious text fragment."""
+    lowered = turkish_lower(text)
+    return [affix for affix in _OTTOMAN_AFFIXES if affix in lowered]
+
+
 # Cross-Surah Reference System
 
 class ReferenceType(str, Enum):
