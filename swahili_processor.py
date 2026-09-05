@@ -51,6 +51,15 @@ def analyze_swahili(text: str) -> SwahiliAnalysisResult:
     )
 
 
+def analyze_turkish(text: str) -> dict:
+    """Analyze Turkish text.
+
+    Placeholder for Turkish language support.  The actual implementation
+    will be added in a dedicated Turkish processor module.
+    """
+    raise NotImplementedError("Turkish language support is under development.")
+
+
 __all__ = [
     "CodeSwitchResult",
     "CodeSwitchType",
@@ -64,6 +73,7 @@ __all__ = [
     "SwahiliPromptEnhancement",
     "SwahiliToken",
     "analyze_swahili",
+    "analyze_turkish",
     "code_switch_processor",
     "cultural_context_engine",
     "dialect_classifier",
