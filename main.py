@@ -130,7 +130,6 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
-from scholarly_attribution_api import router as scholarly_attribution_router
 from model_router import router as model_routing_router
 from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
@@ -148,6 +147,7 @@ from reformulation import router as reformulation_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
+from scholarly_attribution_api import router as scholarly_attribution_router
 from semantic_cache import (
     CHAT_CONTEXT_MAX_LENGTH,
     CHAT_PROMPT_MAX_LENGTH,

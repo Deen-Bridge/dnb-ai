@@ -5,17 +5,16 @@ All offline — no model calls, no GEMINI_API_KEY. Tests hit the real
 endpoints, not helpers in isolation.
 """
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from scholarly_attribution import (
-    AttributionVerdict,
     SCHOLARS_DB,
+    AttributionVerdict,
     get_scholars_by_school,
     get_scholars_list,
-    validate_single_attribution,
     validate_scholarly_attribution,
+    validate_single_attribution,
 )
 from scholarly_attribution_api import router as scholarly_attribution_router
 
@@ -207,9 +206,7 @@ class TestEndpoints:
     def test_validate_endpoint_blocks_fabrication(self):
         response = client.post(
             "/scholarly-attribution/validate",
-            json={
-                "text": "Imam Abu Hanifa said that the internet is essential for dawah."
-            },
+            json={"text": "Imam Abu Hanifa said that the internet is essential for dawah."},
         )
         assert response.status_code == 200
         data = response.json()
@@ -289,7 +286,4 @@ class TestEdgeCases:
         )
         result = validate_scholarly_attribution(text)
         assert len(result.issues) > 0
-        assert any(
-            i.issue_type.value == "flattened_nuance"
-            for i in result.issues
-        )
+        assert any(i.issue_type.value == "flattened_nuance" for i in result.issues)

@@ -9,14 +9,17 @@ summarization while maintaining theological accuracy.
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
 class Language(str, Enum):
     """Supported languages for transcription."""
+
     ARABIC = "ar"
     ENGLISH = "en"
     URDU = "ur"
@@ -28,6 +31,7 @@ class Language(str, Enum):
 
 class ReferenceType(str, Enum):
     """Types of Islamic references."""
+
     QURAN = "quran"
     HADITH = "hadith"
     SCHOLARLY = "scholarly"
@@ -37,16 +41,19 @@ class ReferenceType(str, Enum):
 @dataclass
 class Timestamp:
     """Represents a timestamp in the audio."""
+
     start_seconds: float
     end_seconds: float
 
     def format(self) -> str:
         """Format as HH:MM:SS."""
+
         def _fmt(secs: float) -> str:
             hours = int(secs // 3600)
             mins = int((secs % 3600) // 60)
             secs_rem = int(secs % 60)
             return f"{hours:02d}:{mins:02d}:{secs_rem:02d}"
+
         return f"{_fmt(self.start_seconds)} - {_fmt(self.end_seconds)}"
 
     def to_dict(self) -> dict:
@@ -60,6 +67,7 @@ class Timestamp:
 @dataclass
 class Speaker:
     """Represents an identified speaker."""
+
     id: str
     label: str  # e.g., "Speaker 1", "Sheikh Ahmad"
     speaking_time: float = 0.0  # Total seconds
@@ -75,9 +83,10 @@ class Speaker:
 @dataclass
 class TranscriptSegment:
     """A segment of transcribed text with metadata."""
+
     text: str
     timestamp: Timestamp
-    speaker: Optional[Speaker] = None
+    speaker: Speaker | None = None
     language: Language = Language.ARABIC
     confidence: float = 0.0
 
@@ -94,14 +103,15 @@ class TranscriptSegment:
 @dataclass
 class DetectedReference:
     """A detected Islamic reference in the lecture."""
+
     reference_type: ReferenceType
     text: str
     timestamp: Timestamp
-    surah: Optional[int] = None
-    ayah: Optional[int] = None
-    hadith_source: Optional[str] = None
-    hadith_number: Optional[str] = None
-    scholar: Optional[str] = None
+    surah: int | None = None
+    ayah: int | None = None
+    hadith_source: str | None = None
+    hadith_number: str | None = None
+    scholar: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -119,6 +129,7 @@ class DetectedReference:
 @dataclass
 class Topic:
     """An extracted topic from the lecture."""
+
     title: str
     description: str
     timestamp: Timestamp
@@ -138,6 +149,7 @@ class Topic:
 @dataclass
 class SummarySection:
     """A section of the lecture summary."""
+
     title: str
     content: str
     timestamp: Timestamp
@@ -157,6 +169,7 @@ class SummarySection:
 @dataclass
 class LectureSummary:
     """Complete summary of an Islamic lecture."""
+
     title: str
     duration_seconds: float
     primary_language: Language
@@ -230,17 +243,15 @@ SCHOLAR_PATTERNS = [
 def detect_language(text: str) -> Language:
     """Detect the primary language of the text."""
     # Simple heuristic based on character ranges
-    arabic_chars = len(re.findall(r'[\u0600-\u06FF]', text))
-    latin_chars = len(re.findall(r'[a-zA-Z]', text))
+    arabic_chars = len(re.findall(r"[\u0600-\u06FF]", text))
+    latin_chars = len(re.findall(r"[a-zA-Z]", text))
 
     if arabic_chars > latin_chars:
         return Language.ARABIC
     return Language.ENGLISH
 
 
-def detect_references(
-    segments: list[TranscriptSegment]
-) -> list[DetectedReference]:
+def detect_references(segments: list[TranscriptSegment]) -> list[DetectedReference]:
     """
     Detect Islamic references (Quran, Hadith, Scholarly) in transcript.
     """
@@ -253,35 +264,41 @@ def detect_references(
         for pattern in QURAN_PATTERNS:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
-                references.append(DetectedReference(
-                    reference_type=ReferenceType.QURAN,
-                    text=match.group(0),
-                    timestamp=segment.timestamp,
-                ))
+                references.append(
+                    DetectedReference(
+                        reference_type=ReferenceType.QURAN,
+                        text=match.group(0),
+                        timestamp=segment.timestamp,
+                    )
+                )
 
         # Detect Hadith references
         for pattern in HADITH_PATTERNS:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
                 source = match.group(1) if match.lastindex else None
-                references.append(DetectedReference(
-                    reference_type=ReferenceType.HADITH,
-                    text=match.group(0),
-                    timestamp=segment.timestamp,
-                    hadith_source=source,
-                ))
+                references.append(
+                    DetectedReference(
+                        reference_type=ReferenceType.HADITH,
+                        text=match.group(0),
+                        timestamp=segment.timestamp,
+                        hadith_source=source,
+                    )
+                )
 
         # Detect scholarly references
         for pattern in SCHOLAR_PATTERNS:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
                 scholar = match.group(1) if match.lastindex else None
-                references.append(DetectedReference(
-                    reference_type=ReferenceType.SCHOLARLY,
-                    text=match.group(0),
-                    timestamp=segment.timestamp,
-                    scholar=scholar,
-                ))
+                references.append(
+                    DetectedReference(
+                        reference_type=ReferenceType.SCHOLARLY,
+                        text=match.group(0),
+                        timestamp=segment.timestamp,
+                        scholar=scholar,
+                    )
+                )
 
     return references
 
@@ -322,7 +339,7 @@ def extract_topics(
     return topics
 
 
-def _extract_topic_from_segments(segments: list[TranscriptSegment]) -> Optional[Topic]:
+def _extract_topic_from_segments(segments: list[TranscriptSegment]) -> Topic | None:
     """Extract a topic from a group of segments."""
     if not segments:
         return None
@@ -333,8 +350,18 @@ def _extract_topic_from_segments(segments: list[TranscriptSegment]) -> Optional[
     # Look for Islamic terminology
     keywords = []
     islamic_terms = [
-        "صلاة", "زكاة", "صوم", "حج", "توحيد", "إيمان", "تقوى",
-        "prayer", "fasting", "charity", "pilgrimage", "faith"
+        "صلاة",
+        "زكاة",
+        "صوم",
+        "حج",
+        "توحيد",
+        "إيمان",
+        "تقوى",
+        "prayer",
+        "fasting",
+        "charity",
+        "pilgrimage",
+        "faith",
     ]
     for term in islamic_terms:
         if term in combined_text.lower():
@@ -378,8 +405,11 @@ def generate_summary(
             content=topic.description,
             timestamp=topic.timestamp,
             key_points=topic.keywords,
-            references=[r for r in references
-                       if topic.timestamp.start_seconds <= r.timestamp.start_seconds <= topic.timestamp.end_seconds],
+            references=[
+                r
+                for r in references
+                if topic.timestamp.start_seconds <= r.timestamp.start_seconds <= topic.timestamp.end_seconds
+            ],
         )
         sections.append(section)
 
@@ -398,7 +428,7 @@ def generate_summary(
 
 async def transcribe_audio(
     audio_data: bytes,
-    language_hint: Optional[Language] = None,
+    language_hint: Language | None = None,
 ) -> list[TranscriptSegment]:
     """
     Transcribe audio with Islamic terminology awareness.
@@ -444,8 +474,8 @@ async def transcribe_audio(
 
 async def summarize_lecture(
     audio_data: bytes,
-    title: Optional[str] = None,
-    language_hint: Optional[Language] = None,
+    title: str | None = None,
+    language_hint: Language | None = None,
 ) -> LectureSummary:
     """
     Process and summarize an Islamic lecture audio.
@@ -504,15 +534,12 @@ async def summarize_lecture(
     )
 
 
-# FastAPI router
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from pydantic import BaseModel
-
 router = APIRouter(prefix="/audio", tags=["Audio Summarization"])
 
 
 class SummarizationResponse(BaseModel):
     """Response model for lecture summarization."""
+
     success: bool
     data: dict
 
@@ -520,8 +547,8 @@ class SummarizationResponse(BaseModel):
 @router.post("/summarize", response_model=SummarizationResponse)
 async def summarize_audio_lecture(
     file: UploadFile = File(...),
-    title: Optional[str] = None,
-    language: Optional[str] = None,
+    title: str | None = None,
+    language: str | None = None,
 ):
     """
     Summarize an Islamic lecture audio file.
@@ -536,10 +563,7 @@ async def summarize_audio_lecture(
     # Validate file type
     allowed_types = ["audio/mpeg", "audio/wav", "audio/mp3", "audio/m4a", "audio/ogg"]
     if file.content_type not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported audio format. Allowed: {', '.join(allowed_types)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Unsupported audio format. Allowed: {', '.join(allowed_types)}")
 
     # Read audio data
     audio_data = await file.read()

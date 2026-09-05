@@ -6,46 +6,50 @@ diacritization, root extraction, morphological feature analysis, and
 word-by-word Quranic analysis backed by established linguistic resources.
 """
 
-import re
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
 from functools import lru_cache
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
 class PartOfSpeech(str, Enum):
     """Arabic parts of speech."""
-    NOUN = "noun"           # اسم
-    VERB = "verb"           # فعل
-    PARTICLE = "particle"   # حرف
-    ADJECTIVE = "adjective" # صفة
-    PRONOUN = "pronoun"     # ضمير
+
+    NOUN = "noun"  # اسم
+    VERB = "verb"  # فعل
+    PARTICLE = "particle"  # حرف
+    ADJECTIVE = "adjective"  # صفة
+    PRONOUN = "pronoun"  # ضمير
     PREPOSITION = "preposition"  # حرف جر
     CONJUNCTION = "conjunction"  # حرف عطف
-    ADVERB = "adverb"       # ظرف
+    ADVERB = "adverb"  # ظرف
 
 
 class VerbForm(str, Enum):
     """Arabic verb forms (أوزان)."""
-    FORM_I = "I"      # فَعَلَ
-    FORM_II = "II"    # فَعَّلَ
+
+    FORM_I = "I"  # فَعَلَ
+    FORM_II = "II"  # فَعَّلَ
     FORM_III = "III"  # فَاعَلَ
-    FORM_IV = "IV"    # أَفْعَلَ
-    FORM_V = "V"      # تَفَعَّلَ
-    FORM_VI = "VI"    # تَفَاعَلَ
+    FORM_IV = "IV"  # أَفْعَلَ
+    FORM_V = "V"  # تَفَعَّلَ
+    FORM_VI = "VI"  # تَفَاعَلَ
     FORM_VII = "VII"  # اِنْفَعَلَ
-    FORM_VIII = "VIII" # اِفْتَعَلَ
-    FORM_IX = "IX"    # اِفْعَلَّ
-    FORM_X = "X"      # اِسْتَفْعَلَ
+    FORM_VIII = "VIII"  # اِفْتَعَلَ
+    FORM_IX = "IX"  # اِفْعَلَّ
+    FORM_X = "X"  # اِسْتَفْعَلَ
 
 
 class Tense(str, Enum):
     """Arabic verb tenses."""
-    PAST = "past"           # ماضي
-    PRESENT = "present"     # مضارع
+
+    PAST = "past"  # ماضي
+    PRESENT = "present"  # مضارع
     IMPERATIVE = "imperative"  # أمر
     PERFECT = "perfect"
     IMPERFECT = "imperfect"
@@ -53,6 +57,7 @@ class Tense(str, Enum):
 
 class Person(str, Enum):
     """Grammatical person."""
+
     FIRST = "1st"
     SECOND = "2nd"
     THIRD = "3rd"
@@ -60,29 +65,32 @@ class Person(str, Enum):
 
 class Number(str, Enum):
     """Grammatical number."""
-    SINGULAR = "singular"   # مفرد
-    DUAL = "dual"          # مثنى
-    PLURAL = "plural"      # جمع
+
+    SINGULAR = "singular"  # مفرد
+    DUAL = "dual"  # مثنى
+    PLURAL = "plural"  # جمع
 
 
 class Gender(str, Enum):
     """Grammatical gender."""
+
     MASCULINE = "masculine"  # مذكر
-    FEMININE = "feminine"    # مؤنث
+    FEMININE = "feminine"  # مؤنث
 
 
 @dataclass
 class MorphologicalAnalysis:
     """Complete morphological analysis of an Arabic word."""
+
     surface_form: str
     root: str
     lemma: str
     pos: PartOfSpeech
-    verb_form: Optional[VerbForm] = None
-    tense: Optional[Tense] = None
-    person: Optional[Person] = None
-    number: Optional[Number] = None
-    gender: Optional[Gender] = None
+    verb_form: VerbForm | None = None
+    tense: Tense | None = None
+    person: Person | None = None
+    number: Number | None = None
+    gender: Gender | None = None
     diacritized: str = ""
     gloss: str = ""
     translation: str = ""
@@ -107,6 +115,7 @@ class MorphologicalAnalysis:
 @dataclass
 class RootOccurrence:
     """A Quranic occurrence of a root."""
+
     surah: int
     ayah: int
     word_position: int
@@ -127,6 +136,7 @@ class RootOccurrence:
 @dataclass
 class RootInfo:
     """Information about an Arabic root."""
+
     root: str
     meaning: str
     occurrences_count: int
@@ -210,7 +220,7 @@ DIACRITIZATION_PATTERNS = {
 
 def remove_diacritics(text: str) -> str:
     """Remove diacritical marks from Arabic text."""
-    return ''.join(c for c in text if c not in DIACRITICS)
+    return "".join(c for c in text if c not in DIACRITICS)
 
 
 def add_diacritics(text: str) -> str:
@@ -243,14 +253,14 @@ def extract_root(word: str) -> str:
     prefixes = ["ال", "و", "ف", "ب", "ك", "ل", "لل", "وال", "فال", "بال"]
     for prefix in prefixes:
         if clean.startswith(prefix) and len(clean) > len(prefix) + 2:
-            clean = clean[len(prefix):]
+            clean = clean[len(prefix) :]
             break
 
     # Remove common suffixes
     suffixes = ["ة", "ات", "ين", "ون", "ان", "ها", "هم", "هن", "كم", "نا"]
     for suffix in suffixes:
         if clean.endswith(suffix) and len(clean) > len(suffix) + 2:
-            clean = clean[:-len(suffix)]
+            clean = clean[: -len(suffix)]
             break
 
     # Extract consonants (simplified - real implementation uses patterns)
@@ -258,7 +268,7 @@ def extract_root(word: str) -> str:
 
     # Return first 3-4 consonants as root
     if len(consonants) >= 3:
-        return ''.join(consonants[:3])
+        return "".join(consonants[:3])
 
     return clean
 
@@ -369,33 +379,33 @@ def analyze_ayah_words(surah: int, ayah: int) -> list[MorphologicalAnalysis]:
     return [analyze_morphology(word) for word in words]
 
 
-# FastAPI router
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-
 router = APIRouter(prefix="/arabic", tags=["Arabic Morphology"])
 
 
 class AnalyzeRequest(BaseModel):
     """Request model for text analysis."""
+
     text: str
     add_diacritics: bool = True
 
 
 class AnalyzeResponse(BaseModel):
     """Response model for analysis."""
+
     success: bool
     data: list[dict]
 
 
 class RootLookupResponse(BaseModel):
     """Response model for root lookup."""
+
     success: bool
     data: dict
 
 
 class AyahWordsResponse(BaseModel):
     """Response model for ayah word analysis."""
+
     success: bool
     data: list[dict]
 
