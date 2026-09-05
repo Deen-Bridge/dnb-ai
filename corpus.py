@@ -3,15 +3,18 @@ from pathlib import Path
 from typing import Any
 
 DATA_PATH = Path(__file__).parent / "data" / "quran_uthmani.json"
+ALIGNMENT_DATA_PATH = Path(__file__).parent / "data" / "quran_phoneme_alignments.json"
 RELATIONSHIP_DATA_PATH = Path(__file__).parent / "data" / "quran_relationships.json"
 
 
 class QuranCorpus:
-    def __init__(self, data_file: Path = DATA_PATH, relationship_file: Path = RELATIONSHIP_DATA_PATH):
+    def __init__(self, data_file: Path = DATA_PATH, alignment_data_file: Path = ALIGNMENT_DATA_PATH, relationship_file: Path = RELATIONSHIP_DATA_PATH):
         self.data_file = data_file
+        self.alignment_data_file = alignment_data_file
         self.relationship_file = relationship_file
         self.surahs: dict[str, dict[str, Any]] = {}
         self.ayat: dict[str, dict[str, str]] = {}
+        self.alignments: dict[str, Any] = {}
         self.relationships: dict[str, list[dict[str, Any]]] = {}
         self.scholarly_notes: dict[str, list[str]] = {}
         self._load_corpus()
@@ -26,6 +29,12 @@ class QuranCorpus:
         else:
             self.surahs = {}
             self.ayat = {}
+
+        if self.alignment_data_file.exists():
+            with open(self.alignment_data_file, encoding="utf-8") as f:
+                self.alignments = json.load(f)
+        else:
+            self.alignments = {}
 
     def _load_relationships(self) -> None:
         if self.relationship_file.exists():
@@ -147,8 +156,23 @@ class QuranCorpus:
         return self.ayat.get(key)
 
     def has_hadith_corpus(self) -> bool:
-        # Stub accessor for compatibility with Issue #24
         return False
+
+    def get_phoneme_alignment(self, surah: int, ayah: int) -> dict[str, Any] | None:
+        key = f"{surah}:{ayah}"
+        return self.alignments.get(key)
+
+    def get_word_timestamps(self, surah: int, ayah: int) -> list[dict[str, Any]] | None:
+        alignment = self.get_phoneme_alignment(surah, ayah)
+        if alignment:
+            return alignment.get("words")
+        return None
+
+    def get_alignment_confidence(self, surah: int, ayah: int) -> float | None:
+        alignment = self.get_phoneme_alignment(surah, ayah)
+        if alignment:
+            return alignment.get("confidence")
+        return None
 
 
 # Shared instance across the application
