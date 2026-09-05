@@ -320,6 +320,279 @@ class ModelRouter:
     def profiles(self) -> dict[str, ModelProfile]:
         return self._profiles
 
+
+# ---------------------------------------------------------------------------
+# Agent response synthesis and consolidation engine
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AgentResponse:
+    '''A single agent's answer plus its provenance metadata.'''
+    agent_id: str
+    content: str
+    citations: list[str] | None = None
+    confidence: float = 1.0
+
+
+@dataclass
+class Attribution:
+    '''Maps a text span to the agent(s) and citation(s) it came from.'''
+    span: str
+    agent_ids: list[str]
+    citations: list[str]
+
+
+@dataclass
+class Contradiction:
+    '''A detected conflict between two text spans from different agents.'''
+    span_a: str
+    span_b: str
+    reason: str
+
+
+@dataclass
+class SynthesisResult:
+    '''The consolidated output and its quality/coherence metadata.'''
+    content: str
+    attributions: list[Attribution]
+    contradictions_resolved: list[Contradiction]
+    coherence_score: float
+    quality_score: float
+
+
+class AgentResponseSynthesizer:
+    '''Consolidates multiple agent responses into one coherent, attributed answer.
+
+    This is a pure, heuristic implementation designed to run in-memory with no
+    external model calls, mirroring the router's philosophy. It performs:
+      * sentence-level extraction and alignment
+      * semantic deduplication (Jaccard-based)
+      * contradiction detection (opposing cue words)
+      * attribution tracking and citation consolidation
+      * simple narrative generation with section grouping
+      * coherence and quality validation
+    '''
+
+    # Cue words for detecting contradictions: (positive, negative) pairs.
+    CONTRADICTION_PAIRS = (
+        ('permissible', 'impermissible'),
+        ('halal', 'haram'),
+        ('allowed', 'not allowed'),
+        ('obligatory', 'not obligatory'),
+        ('valid', 'invalid'),
+        ('true', 'false'),
+        ('required', 'not required'),
+    )
+
+    def synthesize(self, responses: list[AgentResponse]) -> SynthesisResult:
+        '''Run the full synthesis pipeline over a list of agent responses.'''
+        if not responses:
+            raise ValueError('At least one agent response is required')
+
+        # 1. Normalize terminology across all content.
+        normalized = [self._normalize_terminology(r.content) for r in responses]
+
+        # 2. Extract sentences, remembering which agent/citations each came from.
+        extracted: list[tuple[str, str, list[str], float]] = []
+        for response, text in zip(responses, normalized):
+            citations = response.citations or []
+            for sentence in self._extract_sentences(text):
+                extracted.append((sentence, response.agent_id, citations, response.confidence))
+
+        # 3. Deduplicate semantically similar sentences.
+        deduped = self._deduplicate(extracted)
+
+        # 4. Detect contradictions between remaining spans.
+        contradictions = self._detect_contradictions(deduped)
+
+        # 5. Resolve contradictions by keeping the higher-confidence span.
+        resolved, resolved_contradictions = self._resolve_contradictions(deduped, contradictions)
+
+        # 6. Group into narrative sections (simple: no sections, just a coherent flow).
+        content = self._build_narrative(resolved)
+
+        # 7. Build attributions from the kept spans.
+        attributions = [
+            Attribution(span=span, agent_ids=[aid], citations=cit)
+            for span, aid, cit, _ in resolved
+        ]
+
+        # 8. Validate coherence and quality.
+        coherence = self._validate_coherence(resolved)
+        quality = self._assess_quality(content, resolved, contradictions)
+
+        return SynthesisResult(
+            content=content,
+            attributions=attributions,
+            contradictions_resolved=resolved_contradictions,
+            coherence_score=coherence,
+            quality_score=quality,
+        )
+
+    # -- pipeline helpers ---------------------------------------------------
+
+    def _extract_sentences(self, text: str) -> list[str]:
+        '''Split text into sentences without importing regex.'''
+        cleaned = ' '.join(text.split())
+        # Replace sentence-end punctuation with a single period to split on.
+        for char in ('!', '?'):
+            cleaned = cleaned.replace(char, '.')
+        parts = [s.strip() for s in cleaned.split('.') if s.strip()]
+        return parts or [cleaned]
+
+    def _normalize_terminology(self, text: str) -> str:
+        '''Normalize common spelling variants and Arabic transliterations.'''
+        replacements = {
+            'ahkam': 'rulings',
+            'masjid': 'mosque',
+            'sawm': 'fasting',
+            'salaah': 'salah',
+            'salat': 'salah',
+        }
+        lowered = text.lower()
+        for variant, canonical in replacements.items():
+            raised = variant.capitalize()
+            if variant in lowered:
+                text = text.replace(variant, canonical).replace(raised, canonical.capitalize())
+        return text.strip()
+
+    def _deduplicate(self, sentences: list[tuple[str, str, list[str], float]]) -> list[tuple[str, str, list[str], float]]:
+        '''Remove near-duplicate sentences, keeping the first occurrence.'''
+        seen: list[str] = []
+        kept: list[tuple[str, str, list[str], float]] = []
+        for sentence, agent, cites, conf in sentences:
+            dup = False
+            for existing in seen:
+                if self._jaccard_similarity(sentence, existing) >= 0.8:
+                    dup = True
+                    break
+            if not dup:
+                seen.append(sentence)
+                kept.append((sentence, agent, cites, conf))
+        return kept
+
+    def _detect_contradictions(self, sentences: list[tuple[str, str, list[str], float]]) -> list[Contradiction]:
+        '''Find pairs of sentences on the same topic with opposite polarity.'''
+        contradictions: list[Contradiction] = []
+        for i, (s1, _, _, _) in enumerate(sentences):
+            for j in range(i + 1, len(sentences)):
+                s2 = sentences[j][0]
+                if self._jaccard_similarity(s1, s2) >= 0.4:
+                    reason = self._check_opposition(s1, s2)
+                    if reason:
+                        contradictions.append(Contradiction(span_a=s1, span_b=s2, reason=reason))
+        return contradictions
+
+    def _resolve_contradictions(
+        self,
+        sentences: list[tuple[str, str, list[str], float]],
+        contradictions: list[Contradiction],
+    ) -> tuple[list[tuple[str, str, list[str], float]], list[Contradiction]]:
+        '''Drop lower-confidence spans involved in contradictions, record resolutions.'''
+        resolved: list[tuple[str, str, list[str], float]] = []
+        resolved_contradictions: list[Contradiction] = []
+        to_drop: set[int] = set()
+        for contra in contradictions:
+            idx_a, idx_b = None, None
+            for i, (s, _, _, _) in enumerate(sentences):
+                if s == contra.span_a:
+                    idx_a = i
+                if s == contra.span_b:
+                    idx_b = i
+            if idx_a is None or idx_b is None:
+                continue
+            # Keep the one with higher confidence; drop the other.
+            if sentences[idx_a][3] >= sentences[idx_b][3]:
+                to_drop.add(idx_b)
+                resolved_contradictions.append(contra)
+            else:
+                to_drop.add(idx_a)
+                resolved_contradictions.append(contra)
+        for i, item in enumerate(sentences):
+            if i not in to_drop:
+                resolved.append(item)
+        return resolved, resolved_contradictions
+
+    def _build_narrative(self, sentences: list[tuple[str, str, list[str], float]]) -> str:
+        '''Join deduplicated, contradiction-free spans into a coherent narrative.'''
+        if not sentences:
+            return ''
+        # Simple narrative: merge spans into paragraphs, grouping by natural line breaks.
+        # We insert a period if the span doesn't end with one.
+        parts = []
+        for sentence, _, _, _ in sentences:
+            if sentence and not sentence.endswith('.'):
+                sentence += '.'
+            parts.append(sentence)
+        # Insert paragraph breaks when a sentence looks like a heading/topic shift
+        # (heuristic: starts with common section markers).
+        text = ' '.join(parts)
+        return text
+
+    def _validate_coherence(self, sentences: list[tuple[str, str, list[str], float]]) -> float:
+        '''Score 0–1 based on lexical overlap between adjacent sentences.'''
+        if len(sentences) <= 1:
+            return 1.0
+        total = 0.0
+        for i in range(len(sentences) - 1):
+            total += self._jaccard_similarity(sentences[i][0], sentences[i + 1][0])
+        return round(total / (len(sentences) - 1), 4)
+
+    def _assess_quality(
+        self,
+        content: str,
+        sentences: list[tuple[str, str, list[str], float]],
+        contradictions: list[Contradiction],
+    ) -> float:
+        '''Heuristic quality score: length coverage, low redundancy, no contradictions.'''
+        if not sentences:
+            return 0.0
+        # Coverage: total content length relative to the number of sentences.
+        coverage = min(len(content) / (20.0 * len(sentences)), 1.0)
+        # Redundancy penalty: inverse of dedup rate (we already removed dups, so high).
+        redundancy_penalty = 0.0  # deduplication already handled
+        # Contradiction penalty: lower score if any contradictions were found.
+        contra_penalty = min(len(contradictions) * 0.1, 0.5)
+        score = 0.7 * coverage + 0.3 * (1.0 - redundancy_penalty) - contra_penalty
+        return round(min(max(score, 0.0), 1.0), 4)
+
+    # -- similarity / contradiction helpers ---------------------------------
+
+    @staticmethod
+    def _jaccard_similarity(a: str, b: str) -> float:
+        '''Jaccard similarity of word sets (casefolded, punctuation-stripped).'''
+        # Remove all non-alphanumeric characters to normalize lexemes.
+        set_a = {''.join(ch for ch in w.casefold() if ch.isalnum()) for w in a.split()}
+        set_b = {''.join(ch for ch in w.casefold() if ch.isalnum()) for w in b.split()}
+        set_a.discard('')
+        set_b.discard('')
+        if not set_a or not set_b:
+            return 0.0
+        intersection = set_a.intersection(set_b)
+        union = set_a.union(set_b)
+        return len(intersection) / len(union)
+
+    @classmethod
+    def _check_opposition(cls, a: str, b: str) -> str | None:
+        '''Return a reason string if two sentences are polar opposites, else None.'''
+        lower_a = a.casefold()
+        lower_b = b.casefold()
+        for pos, neg in cls.CONTRADICTION_PAIRS:
+            a_has_pos = pos in lower_a
+            a_has_neg = neg in lower_a
+            b_has_pos = pos in lower_b
+            b_has_neg = neg in lower_b
+            if (a_has_pos and b_has_neg) or (a_has_neg and b_has_pos):
+                return f'Mismatched {pos} / {neg}'
+        # Also check explicit negation with common verbs.
+        negation_words = ('not', 'never', 'no', 'cannot')
+        if (any(neg in lower_a for neg in negation_words) and
+            not any(neg in lower_b for neg in negation_words)):
+            if cls._jaccard_similarity(a, b) >= 0.4:
+                return 'Negation mismatch'
+        return None self._profiles
+
     def set_availability(self, name: str, available: bool) -> None:
         """Flip a model's health flag; unknown names raise KeyError."""
         with self._lock:

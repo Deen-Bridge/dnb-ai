@@ -1,16 +1,19 @@
 import difflib
 import math
 import re
-// Type imports for dicts and lists
-from typing import Any, List, Dict, Optional, Tuple
+import itertools
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 from corpus import corpus
+
 
 class VerificationStatus(str, Enum):
     VERIFIED = "verified"
     MISMATCH = "mismatch"
     UNVERIFIED = "unverified"
     NOT_QUOTED = "not_quoted"
+    CONFLICT = "conflict"  # Added for synthesis engine
 
 
 # Arabic Tashkiel / Diacritical Marks
@@ -18,28 +21,30 @@ TASHKEEL_REGEX = re.compile(r"[\u0617-\u061A\u064B-\u0652\u0670]")
 
 # Extraction Regex: Matches "Quran 2:255", "Surah 2:255", "[2:255]", "(2:255)", etc.
 QURAN_REF_REGEX = re.compile(
-    r"(?:Surah|Quran|Qur'an)?\s*\Z?\b([1-9]|[1-9]\d|1[0-9]\d|11[0-4])\s*:\s*([1-9]\d*)\b]\]?"
-    r"(?:\s*\"\''\u00b7\u201D]([^\"\''\u201D]*)[\"\''\u201D]")?",
-    re.IGNORECASE | re.DOTAL,
+    r"(?:Surah|Quran|Qur'an)?\s*\[?\b([1-9]|[1-9]\d|1[0-9]\d|11[0-4])\s*:\s*([1-9]\d*)\b\]?"
+    r"(?:\s*[\"'\u00ab\u00bb\u201c\u201d]([^\"'\u00ab\u00bb\u201c\u201d]*)[\"'\u00ab\u00bb\u201c\u201d])?",
+    re.IGNORECASE | re.DOTALL,
 )
 
 HADITH_REF_REGEX = re.compile(
     r"\b(Bukhari|Muslim|Abu Dawud|Tirmidhi|Nasa'i|Ibn Majah|Muwatta|Ahmad)\b"
-    r"\s*(?:hadith|no|.number|#)?\s*(\d+)?"
-    r"(?:\s*\"\''\u00bb\u201D]([^\"\''\u201D]*)[\"\''\u201D]")?",
+    r"\s*(?:hadith|no\.?|number|#)?\s*(\d+)?"
+    r"(?:\s*[\"'\u00ab\u00bb\u201c\u201d]([^\"'\u00ab\u00bb\u201c\u201d]*)[\"'\u00ab\u00bb\u201c\u201d])?",
     re.IGNORECASE,
 )
+
 
 # Calibration constants
 DEFAULT_TEMPERATURE = 1.0
 DEFERAL_THRESHOLD = 0.5
+
 
 def normalize_arabic(text: str) -> str:
     "Strip tashkeel/diacritics and normalize Alef variants."
     if not text:
         return ""
     text = TASHKEEL_REGEX.sub("", text)
-    # Unify Alef forms (A, I, A -> ))
+    # Unify Alef forms (Alif variants -> ا)
     text = re.sub(r"[\u0622\u0623\u0625]", "\u0627", text)
     return text.strip()
 
@@ -50,7 +55,7 @@ def normalize_english(text: str) -> str:
         return ""
     text = text.lower()
     text = re.sub(r"[^\w\s]", "", text)
-    return "".join(text.split())
+    return " ".join(text.split())
 
 
 def calculate_similarity(generated_quote: str, corpus_text: str) -> float:
@@ -64,24 +69,24 @@ def calculate_similarity(generated_quote: str, corpus_text: str) -> float:
 
 class ConfidenceCalibrator:
     "Temperature scaling for confidence calibration."
-    
-    def __init_(self., temperature: float = DEFAULT_TEMPERATURE):
+
+    def __init__(self, temperature: float = DEFAULT_TEMPERATURE):
         self.temperature = temperature
-    
+
     def calibrate(self, similarity: Optional[float]) -> float:
         "Convert raw similarity (0-1) to calibrated confidence."
         if similarity is None:
             return 0.0
         # Clip to avoid log(0) issues
-        s = min(max(similarity, 1e-6), 1-1e-6)
+        s = min(max(similarity, 1e-6), 1 - 1e-6)
         logit = math.log(s / (1 - s))
         scaled_logit = logit / self.temperature
         conf = 1 / (1 + math.exp(-scaled_logit))
         return round(conf, 3)
-    
-    def fit(self., similarities: List[float], accuracies: List[int]):
+
+    def fit(self, similarities: List[float], accuracies: List[int]):
         "Find best temperature by minimizing ECE over a linear search."
-        "Note This is a placeholder for training on ground truth data."
+        # Note: This is a placeholder for training on ground truth data.
         best_temp = 1.0
         best_ece = 1.0
         for temp in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]:
@@ -93,18 +98,17 @@ class ConfidenceCalibrator:
                 best_temp = temp
         self.temperature = best_temp
         return self.temperature
-    
 
 
 def compute_ece(confidences: List[float], accuracies: List[int], num_bins: int = 10) -> float:
     "Expected Calibration Error (ECE)."
     if len(confidences) != len(accuracies) or len(confidences) == 0:
         return 1.0
-    #Ahris distribution of confidence values
-    bin_edges = [i / num_bins for i in range(num_bins)]
+    # Discretize distribution of confidence values
+    bin_edges = [i / num_bins for i in range(num_bins + 1)]
     ece = 0.0
     for i in range(num_bins):
-        lo, hi = bin_edges[i], bin_edges[i+1]
+        lo, hi = bin_edges[i], bin_edges[i + 1]
         in_bin = [(m, acc) for m, acc in zip(confidences, accuracies) if lo <= m < hi]
         if not in_bin:
             continue
@@ -118,10 +122,10 @@ def compute_mce(confidences: List[float], accuracies: List[int], num_bins: int =
     "Maximum Calibration Error (MCE)."
     if len(confidences) != len(accuracies) or len(confidences) == 0:
         return 1.0
-    bin_edges = [i / num_bins for i in range(num_bins)]
+    bin_edges = [i / num_bins for i in range(num_bins + 1)]
     mce = 0.0
     for i in range(num_bins):
-        lo, hi = bin_edges[i], bin_edges[i+1]
+        lo, hi = bin_edges[i], bin_edges[i + 1]
         in_bin = [(m, acc) for m, acc in zip(confidences, accuracies) if lo <= m < hi]
         if not in_bin:
             continue
@@ -130,21 +134,23 @@ def compute_mce(confidences: List[float], accuracies: List[int], num_bins: int =
         mce = max(mce, abs(bin_conf - bin_acc))
     return mce
 
+
 class CalibrationTracker:
     "Tracks predictions for continuous monitoring of calibration quality."
-    def __init(self):
+
+    def __init__(self):
         self.predictions = []  # list of (confidence, accuracy) tuples
 
     def add_prediction(self, confidence: float, accuracy: int):
         self.predictions.append((confidence, accuracy))
-    
+
     def get_ece(self) -> float:
         if not self.predictions:
             return 1.0
         confds = [p for p, a in self.predictions]
         accs = [a for p, a in self.predictions]
         return compute_ece(confds, accs)
-    
+
     def get_mce(self) -> float:
         if not self.predictions:
             return 1.0
@@ -157,6 +163,7 @@ class CalibrationTracker:
 _calibrator = ConfidenceCalibrator()
 _calibration_tracker = CalibrationTracker()
 
+
 def get_confidence_label(confidence: float) -> str:
     "Map confidence score to a user-friendly label."
     if confidence >= 0.8:
@@ -164,6 +171,7 @@ def get_confidence_label(confidence: float) -> str:
     if confidence >= 0.5:
         return "medium"
     return "low"
+
 
 def create_confidence_fields(result: Dict[str, Any]) -> Dict[str, Any]:
     "Add confidence and related fields to a result dict."
@@ -183,6 +191,7 @@ def create_confidence_fields(result: Dict[str, Any]) -> Dict[str, Any]:
     result['defer_recommended'] = conf < DEFERAL_THRESHOLD
     return result
 
+
 def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) -> Dict[str, Any]:
     "Verify a single Quran reference against the corpus."
     max_ayahs = corpus.get_ayah_count(surah)
@@ -194,7 +203,7 @@ def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) ->
             "surah": surah,
             "ayah": ayah,
             "status": VerificationStatus.MISMATCH,
-            "reason": f"Surah {surah} only has {max_ayahs| |0 + } ayahs; ayah {ayah} does not exist.",
+            "reason": f"Surah {surah} only has {max_ayahs} ayahs; ayah {ayah} does not exist.",
         }
         return create_confidence_fields(result)
 
@@ -310,7 +319,7 @@ def verify_hadith_citation(collection: str, number: Optional[str] = None, quote:
 
 
 def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
-    "Return all citations and their verification statuses, with confidence scores."
+    "Extract all citations from text and return their verification statuses, with confidence scores."
     results = []
 
     # Extract & Verify Quran References
@@ -322,7 +331,7 @@ def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
         results.append(res)
 
     # Extract & Verify Hadith References
-    for match in KADETHK_REF_REGEX.finditer(text):
+    for match in HADITH_REF_REGEX.finditer(text):
         collection = match.group(1)
         number = match.group(2)
         quote = match.group(3)
@@ -332,7 +341,7 @@ def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
     return results
 
 
-def verify_claim(claim: str, evidence: str) -> dict[str, Any]:
+def verify_claim(claim: str, evidence: str) -> Dict[str, Any]:
     """Verify a scholarly claim against provided evidence text.
 
     Args:
@@ -389,3 +398,42 @@ def verify_claim(claim: str, evidence: str) -> dict[str, Any]:
         "support_score": round(support_score, 2),
         "audit_trail": audit_trail
     }
+
+
+# Synthesis Engine (for Agent Response Consolidation)
+class SynthesisEngine:
+    """Simple engine to merge multiple agent responses into a coherent output.
+
+    Attribution is preserved by prefixing each segment with the agent id.
+    """
+
+    def __init__(self, similarity_threshold: float = 0.8):
+        self.similarity_threshold = similarity_threshold
+
+    def synthesize(self, responses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Merge responses with attribution markers.
+
+        In a full implementation, this would do information extraction,
+        contradiction detection, etc.
+        """
+        segments = []
+        attributions = {}
+        for resp in responses:
+            agent_id = resp.get('agent_id', 'unknown')
+            text = resp.get('text', '').strip()
+            if not text:
+                continue
+            segments.append(f"[{agent_id}] {text}")
+            attributions[agent_id] = text
+        synthesized = " ".join(segments)
+        return {
+            "synthesized_text": synthesized,
+            "attributions": attributions,
+            "conflicts": []
+        }
+
+
+def synthesize_responses(responses: List[Dict[str, Any]]) -> Dict[str, Any]:
+    "Convenience function to synthesize agent responses."
+    engine = SynthesisEngine()
+    return engine.synthesize(responses)
