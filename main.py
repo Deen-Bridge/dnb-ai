@@ -185,6 +185,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from urdu_processor import router as urdu_router
 from worship import router as worship_router
 
 logger = logging.getLogger(__name__)
@@ -383,6 +384,8 @@ app.include_router(image_analysis_router)
 app.include_router(context_router)
 # Swahili: language processing and response enhancement
 app.include_router(swahili_router)
+# Urdu language processing: normalization, Islamic terminology, and script analysis
+app.include_router(urdu_router)
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
 # normalization and dialectal terminology lexicon (#136)
 app.include_router(arabic_dialect_router)
