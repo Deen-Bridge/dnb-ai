@@ -185,6 +185,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from video_analysis import router as video_analysis_router
 from worship import router as worship_router
 
 logger = logging.getLogger(__name__)
@@ -379,6 +380,8 @@ app.include_router(arabic_ocr_router)
 # Image content analysis: canonical verse extraction, hadith detection, translation,
 # structured metadata and batch processing for scanned Islamic content (#135)
 app.include_router(image_analysis_router)
+# Screen-recording analysis for Islamic lectures (#146): references, slides, and transcripts
+app.include_router(video_analysis_router)
 # Context manager: session-based user preferences, topic continuity, and follow-up detection
 app.include_router(context_router)
 # Swahili: language processing and response enhancement
