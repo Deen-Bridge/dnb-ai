@@ -79,6 +79,7 @@ from confidence import (
     build_signals,
     thresholds as confidence_thresholds,
 )
+from confidence_tuning_api import router as confidence_tuning_router
 from config import get_settings
 from consistency import consistency_router, get_consistency_enforcer
 from context_manager import router as context_router
@@ -392,6 +393,8 @@ app.include_router(consistency_router)
 app.include_router(recitation_router)
 # Scholarly attribution validation: prevent fabricated/misattributed scholarly opinions
 app.include_router(scholarly_attribution_router)
+# Runtime confidence threshold tuning & admin management (#270)
+app.include_router(confidence_tuning_router)
 
 # Configure CORS
 app.add_middleware(
