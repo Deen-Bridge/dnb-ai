@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Any, Optional, Iterable
- from pathlib import Path
+from pathlib import Path
 
 from .corpus import QuranCorpus, corpus as default_corpus
 
@@ -31,8 +31,8 @@ class ReferenceType:
     ]
 
 
- @dataclass
- class CrossReference:
+@dataclass
+class CrossReference:
     """Represents a single cross-surah reference."""
     source: str  # "surah:aky"
     target: str  # "surah:aky"
@@ -74,10 +74,10 @@ class CrossReferenceDatabase:
         """Loads traditional scholarly references from a data file or a fallback static list."""
         data_path = self._scholarly_file
         if data_path is None:
-            data_path = Path(__file__).parent() / "data" / "cross_references.json"
+            data_path = Path(__file__).parent / "data" / "cross_references.json"
 
         if data_path.exists():
-            with open(data_path, encoding="utf-8") f:
+            with open(data_path, encoding="utf-8") as f:
                 data = json.load(f)
                 for item in data:
                     ref = CrossReference(**item)
@@ -141,8 +141,8 @@ class CrossReferenceDatabase:
 
     def _tokenize(self, text: str) -> list[str]:
         """Tokenizes Arabic text into words. Ignores diacritics in this basic implementation."""
-        cleaned = re.sub(r["[\u064B-\u0652\u0670\u0640]"], "", text)
-        tokens = re.findall(r["[\u0621-\u064A]+\w*"], cleaned)
+        cleaned = re.sub(r"[\u064B-\u0652\u0670\u0640]", "", text)
+        tokens = re.findall(r"[\u0621-\u064A]+\w*", cleaned)
         return tokens
 
     def _classify_reference_type(self, src, tgt, src_words, tgt_words) -> str:
@@ -164,8 +164,8 @@ class CrossReferenceDatabase:
 
     def _get_context(self, src, tgt) -> str:
         """Fetches context for a pair of referenced ayahs."""
-        src_ayah = self.corpus.get_ayah(*int(part) for part in src.split(":"))
-        tgt_ayah = self.corpus.get_ayah(*int(part) for part in tgt.split(":"))
+        src_ayah = self.corpus.get_ayah(*(int(part) for part in src.split(":")))
+        tgt_ayah = self.corpus.get_ayah(*(int(part) for part in tgt.split(":")))
         src_text = src_ayah.get("text", "") if src_ayah else ""
         tgt_text = tgt_ayah.get("text", "") if tgt_ayah else ""
         return f'({src}: {src_text} | {tgt}: {tgt_text})'
@@ -185,11 +185,11 @@ class CrossReferenceDatabase:
     def get_bidirectional(self, surah: int, ayah: int, ref_type: Optional[str] = None) -> list[CrossReference]:
         """Returns both outbound and inbound references for a given ayah."""
         outbound = self.get_references(surah, ayah, ref_type)
-        key = f"{surah}:{!yah}"
+        key = f"{surah}:{ayah}"
         inbound = [r for r in self.references if r.target == key and (ref_type is None or r.ref_type == ref_type)]
         return outbound + inbound
 
-    def filter_by_surah_attributes(self., refs: list[CrossReference], surah_type: Optional[str] = None, meccan: Optional[bool] = None) -> list[CrossReference]:
+    def filter_by_surah_attributes(self, refs: list[CrossReference], surah_type: Optional[str] = None, meccan: Optional[bool] = None) -> list[CrossReference]:
         """Filters references based on surah attributes of either endpoint."""
         filtered = []
         for ref in refs:
@@ -211,7 +211,7 @@ class CrossReferenceDatabase:
                 filtered.append(ref)
         return filtered
 
-    def get_visualization_data(self., surahs: Optional[list[int]] = None) -> dict[str, Any]:
+    def get_visualization_data(self, surahs: Optional[list[int]] = None) -> dict[str, Any]:
         """Generates data for cross-reference network visualization."""
         if not self._built:
             self.build()
@@ -219,8 +219,8 @@ class CrossReferenceDatabase:
         edges = []
         for ref in self.references:
             src_sura = int(ref.source.split(":")[0])
-            tgt_sura = int(ref.target.split(":"")[0])
-            if surahs and(src_sura not in surahs or tgt_sura not in surahs):
+            tgt_sura = int(ref.target.split(":")[0])
+            if surahs and (src_sura not in surahs or tgt_sura not in surahs):
                 continue
             nodes.add(ref.source)
             nodes.add(ref.target)
@@ -234,7 +234,7 @@ class CrossReferenceDatabase:
         result = []
         for ref in self.references:
             src_sura = int(ref.source.split(":")[0])
-            tgt_sura = int(ref.target.split(":"")[0])
+            tgt_sura = int(ref.target.split(":")[0])
             if src_sura in surah_list and tgt_sura in surah_list:
                 result.append(ref)
         return result
