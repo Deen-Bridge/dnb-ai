@@ -130,6 +130,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from misinformation_api import router as misinformation_router
 from model_router import router as model_routing_router
 from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
@@ -379,6 +380,8 @@ app.include_router(arabic_ocr_router)
 # Image content analysis: canonical verse extraction, hadith detection, translation,
 # structured metadata and batch processing for scanned Islamic content (#135)
 app.include_router(image_analysis_router)
+# Religious misinformation flagging: scans, misconception DB, and corrections (#181)
+app.include_router(misinformation_router)
 # Context manager: session-based user preferences, topic continuity, and follow-up detection
 app.include_router(context_router)
 # Swahili: language processing and response enhancement
