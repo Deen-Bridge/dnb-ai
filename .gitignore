@@ -36,6 +36,7 @@ venv/
 ENV/
 .venv_linux/
 venv_linux/
+venv_ci/
 
 
 # IDE
