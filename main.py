@@ -185,6 +185,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from vocabulary import router as vocabulary_router
 from worship import router as worship_router
 
 logger = logging.getLogger(__name__)
@@ -376,6 +377,8 @@ app.include_router(history_router)
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
 app.include_router(arabic_ocr_router)
+# Quranic vocabulary analysis: root extraction, frequency stats, search, and verse examples
+app.include_router(vocabulary_router)
 # Image content analysis: canonical verse extraction, hadith detection, translation,
 # structured metadata and batch processing for scanned Islamic content (#135)
 app.include_router(image_analysis_router)

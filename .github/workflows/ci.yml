@@ -154,6 +154,9 @@ jobs:
       - name: Run image content analysis tests
         run: pytest -q tests/test_image_analysis.py
 
+      - name: Run Quranic vocabulary analysis tests
+        run: pytest -q tests/test_vocabulary.py
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 
