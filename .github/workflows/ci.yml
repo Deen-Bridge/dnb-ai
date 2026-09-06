@@ -136,6 +136,9 @@ jobs:
       - name: Run Swahili language processing tests
         run: pytest -q tests/test_swahili.py
 
+      - name: Run Urdu language processing tests
+        run: pytest -q tests/test_urdu_processor.py
+
       - name: Run audio analysis tests
         run: pytest -q tests/test_audio_analysis.py
 
