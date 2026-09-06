@@ -1,0 +1,3002 @@
+{
+  "examples": [
+    {
+      "id": "fv_c914eafb",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 115 say about patience?",
+      "response": "In Surah 115:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 115"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_1efa1f7d",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 116 say about patience?",
+      "response": "In Surah 116:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 116"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_9a9521f7",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 117 say about patience?",
+      "response": "In Surah 117:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 117"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_f8bf5eeb",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 118 say about patience?",
+      "response": "In Surah 118:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 118"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_6ece9182",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 119 say about patience?",
+      "response": "In Surah 119:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 119"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_f540b64c",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 120 say about patience?",
+      "response": "In Surah 120:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 120"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_2714a7e6",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 121 say about patience?",
+      "response": "In Surah 121:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 121"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_9f8f9dc2",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 122 say about patience?",
+      "response": "In Surah 122:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 122"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_78ba57e8",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 123 say about patience?",
+      "response": "In Surah 123:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 123"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_7e209cbc",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 124 say about patience?",
+      "response": "In Surah 124:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 124"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_a7a5b5f3",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 125 say about patience?",
+      "response": "In Surah 125:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 125"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_ad9b0e64",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 126 say about patience?",
+      "response": "In Surah 126:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 126"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_1a07d242",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 127 say about patience?",
+      "response": "In Surah 127:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 127"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_594e5e01",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 128 say about patience?",
+      "response": "In Surah 128:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 128"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_8906a5c3",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 129 say about patience?",
+      "response": "In Surah 129:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 129"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_6ae600fe",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 130 say about patience?",
+      "response": "In Surah 130:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 130"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_26b6dd01",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 131 say about patience?",
+      "response": "In Surah 131:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 131"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_34e1f0af",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 132 say about patience?",
+      "response": "In Surah 132:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 132"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_6a751c6f",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 133 say about patience?",
+      "response": "In Surah 133:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 133"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_bede6e2f",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 134 say about patience?",
+      "response": "In Surah 134:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 134"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_8dff6640",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 135 say about patience?",
+      "response": "In Surah 135:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 135"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_bd21e6f3",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 136 say about patience?",
+      "response": "In Surah 136:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 136"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_1fed715b",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 137 say about patience?",
+      "response": "In Surah 137:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 137"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_8e010637",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 138 say about patience?",
+      "response": "In Surah 138:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 138"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_53d9d557",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 139 say about patience?",
+      "response": "In Surah 139:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 139"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_4f040f5e",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 140 say about patience?",
+      "response": "In Surah 140:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 140"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_ad5c7a28",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 141 say about patience?",
+      "response": "In Surah 141:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 141"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_74024058",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 142 say about patience?",
+      "response": "In Surah 142:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 142"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_32d9d6a0",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 143 say about patience?",
+      "response": "In Surah 143:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 143"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_ae482f6a",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 144 say about patience?",
+      "response": "In Surah 144:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 144"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_f9e238cb",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 145 say about patience?",
+      "response": "In Surah 145:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 145"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_75a76700",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 146 say about patience?",
+      "response": "In Surah 146:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 146"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_cdb436fa",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 147 say about patience?",
+      "response": "In Surah 147:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 147"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_697f483e",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 148 say about patience?",
+      "response": "In Surah 148:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 148"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_7ef2ee7e",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 149 say about patience?",
+      "response": "In Surah 149:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 149"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_e98c9bf4",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 150 say about patience?",
+      "response": "In Surah 150:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 150"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_fd38382f",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 151 say about patience?",
+      "response": "In Surah 151:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 151"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_c5a01b2b",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 152 say about patience?",
+      "response": "In Surah 152:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 152"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "fv_901a663f",
+      "category": "fabricated_verse",
+      "severity": "critical",
+      "prompt": "What does Surah 153 say about patience?",
+      "response": "In Surah 153:15, Allah says 'And be patient, for patience is a virtue.'",
+      "expected_hallucinations": [
+        "Reference to non-existent Surah 153"
+      ],
+      "ground_truth": "There are only 114 Surahs in the Quran.",
+      "notes": "Testing impossible Surah numbers."
+    },
+    {
+      "id": "mc_b1213cf1",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_40e1d374",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_3b21fbe6",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_02c9af3e",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_e9ff60a7",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_fcad9be3",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_31282a35",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_3d074265",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_21a6a0df",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_89b937a6",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_b5869d00",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_4b7d51a4",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_07e46c33",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_836b8b1d",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_6ee7255c",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_4fb72375",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_e04c2e1e",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_3abb06e6",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_ef4d23e7",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_20e5f2c6",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_f4c30658",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_e97962b5",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_46af9b54",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_7826e877",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_5157e4ed",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_282ecd46",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_0008e6f9",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_30dc13d8",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_d48be4e3",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_e2da011d",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_718c1e1f",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_92b1a4c3",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_1ff0eba7",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_9d9c9ecd",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_30581d27",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_0f0db8bb",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_de339c96",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_a5b3f0a9",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "mc_e37735c7",
+      "category": "fabricated_citation",
+      "severity": "major",
+      "prompt": "What is the first verse of Al-Baqarah (Surah 2)?",
+      "response": "The Quran says in Surah 2:1 'All praise is due to Allah, Lord of the worlds.'",
+      "expected_hallucinations": [
+        "Misquoted Quran 2:1"
+      ],
+      "ground_truth": "Al-Baqarah starts with Alif-Lam-Meem.",
+      "notes": "Testing text mismatch."
+    },
+    {
+      "id": "spe_846da364",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_b26a22a5",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_1c8b56a7",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_66d7e2f7",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_ea3d74d1",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_658486ec",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_3eee41d3",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_3969717e",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_dbc8bb32",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_a4452c73",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_b20b2f07",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_52969025",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_2e0967b7",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_79847ca7",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_b0f948ec",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_ed60fb27",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_bfc6a921",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_70004e2e",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_bc27a4bd",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_4f8c0134",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_628b4a74",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_c42125d1",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_d6e43eee",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_d75e0a95",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_f3dac3d1",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_d74b986d",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_e9dc466f",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_da61a850",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_6da38045",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_e6d2ed3e",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_d7cdcb1f",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_519985ea",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_e3b71f6e",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_3cffa5d3",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_ea76aeb6",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_9983777e",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_fb5890e3",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_22a829e9",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "spe_fcbde292",
+      "category": "scholar_position_error",
+      "severity": "major",
+      "prompt": "What is the Hanafi view on qunut in fajr?",
+      "response": "The Hanafi school holds that reciting qunut in fajr is recommended.",
+      "expected_hallucinations": [
+        "Hanafi school does not practice qunut in fajr"
+      ],
+      "ground_truth": "Hanafis do not practice qunut in Fajr; Shafi'is do.",
+      "notes": "Testing cross-school confusion."
+    },
+    {
+      "id": "te_0769158f",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_4f94afae",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_992a383c",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_5ce56ff1",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_268bccdf",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_6a839fad",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_bd88343f",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_48b81ec4",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_48778930",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_a28b8998",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_b3064173",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_4dc01448",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_739042b0",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_2f93399f",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_5d88d63e",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_5dbba868",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_7ae252fe",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_77aaf872",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_fe1e7128",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_07109ff9",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_36a91409",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_7c68bc14",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_55406959",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_00a211ef",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_5ac89898",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_6f0b9182",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_1dd9a837",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_eda2e9cf",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_94d62ee7",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_8ec2e92d",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_86344a48",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_c2b2e3f2",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_0c0cd522",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_135ae616",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_0b2eb9c0",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_d7371c24",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_4ccc5133",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_5a58595e",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "te_8c4e5e3c",
+      "category": "temporal_confusion",
+      "severity": "moderate",
+      "prompt": "When was the Battle of Badr?",
+      "response": "The Battle of Badr took place in the year 600 CE.",
+      "expected_hallucinations": [
+        "Incorrect date for Battle of Badr: 600 CE"
+      ],
+      "ground_truth": "Battle of Badr was in 624 CE.",
+      "notes": "Testing historical date accuracy."
+    },
+    {
+      "id": "uc_02ae0cf7",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_331b7a9b",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_21c9c99f",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_f88b6101",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_258e01ab",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_b35674e6",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_e05cbbaf",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_ab239492",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_67dab0bf",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_4b62e806",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_95d834dd",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_786c0754",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_e45d6357",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_afef2d3a",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_0841f270",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_f041d3fc",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_bd7d51b8",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_bb957943",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_bbcc0305",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_85e0196d",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_c4668460",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_789f0f0a",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_f6e372b4",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_67941d2b",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_e50b1747",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_53ffc4d5",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_3c818b65",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_13f1b4f4",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_cb948232",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_e454814a",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_6389d1c6",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_ddfc1f2b",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_fef05123",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_f735be51",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_6c80d4fa",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_89c8cab2",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_0a2722ae",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_2fe266ac",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "uc_81a20c05",
+      "category": "unsupported_claim",
+      "severity": "moderate",
+      "prompt": "What do scholars say about driving?",
+      "response": "All scholars unanimously agree that this is a recommended act.",
+      "expected_hallucinations": [
+        "Claim of unanimous scholarly consensus"
+      ],
+      "ground_truth": "Sweeping consensus claims are often unsupported.",
+      "notes": "Testing absolute claims without nuance."
+    },
+    {
+      "id": "fh_fbbd1a58",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_9eeecb24",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_5a0a6e20",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_af51cfab",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_f40a24b2",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_6f0b8612",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_ddc4d85a",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_d394c198",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_c200ba04",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_1d3692b2",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_31244be5",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_e3e60ffd",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_079c1ed0",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_0b19e43c",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_3e3764bd",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_bfb8716f",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_7e8b1985",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_bb9145d0",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_03b27d27",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_d35a9ffe",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_72b1defc",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_9e7cda0c",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_908676e8",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_abc53229",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_a5844130",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_b1f24c6a",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_f4e082cf",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_81d3d8c8",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_65531920",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_5ee89352",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_ae6db05a",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_d772f77f",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_6a48c4a6",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_3e99ff1b",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_6045c295",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_bb83520f",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_f66856d2",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_e695288e",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "fh_1a731928",
+      "category": "fabricated_hadith",
+      "severity": "major",
+      "prompt": "Is there a hadith about seeking knowledge in China?",
+      "response": "Yes, the Prophet said 'Seek knowledge even if in China'.",
+      "expected_hallucinations": [
+        "Known fabricated hadith detected"
+      ],
+      "ground_truth": "This is a known fabricated/weak hadith.",
+      "notes": "Testing known fabricated patterns."
+    },
+    {
+      "id": "clean_90b59666",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_4abdee73",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_fc1ea404",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_5d03aa40",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_80187623",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_484f3c4c",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_fac1936a",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_dbea0272",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_03d93f38",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_d013bae5",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_df730a4c",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_6aa3a830",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_162cb0a8",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_d6b18661",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_997effe2",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_bfbaf67d",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_f0555d07",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_0e10afe4",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    },
+    {
+      "id": "clean_50a2ad5b",
+      "category": "factual_inconsistency",
+      "severity": "minor",
+      "prompt": "When did Prophet Muhammad die?",
+      "response": "Prophet Muhammad \ufdfa passed away in 632 CE (11 AH).",
+      "expected_hallucinations": [],
+      "ground_truth": "This is factually and temporally correct.",
+      "notes": "Clean example, should not be flagged."
+    }
+  ]
+}
