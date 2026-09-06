@@ -320,6 +320,123 @@ class ModelRouter:
     def profiles(self) -> dict[str, ModelProfile]:
         return self._profiles
 
+    def set_availability(self, name: str, available: bool) -> None:
+        """Flip a model's health flag; unknown names raise KeyError."""
+        with self._lock:
+            self._profiles[name].available = available
+
+    def available_profiles(self) -> list[ModelProfile]:
+        return [p for p in self._profiles.values() if p.available]
+
+    def _score_profile(self, profile: ModelProfile, strategy: RoutingStrategy, features: QueryFeatures) -> float:
+        costs = [p.cost for p in self.available_profiles()]
+        latencies = [p.latency_ms for p in self.available_profiles()]
+        cost_span = max(costs) - min(costs) or 1.0
+        latency_span = max(latencies) - min(latencies) or 1.0
+        cost_fit = (max(costs) - profile.cost) / cost_span
+        latency_fit = (max(latencies) - profile.latency_ms) / latency_span
+        shift = features.complexity
+        w_accuracy = strategy.accuracy_weight + shift * (strategy.latency_weight + strategy.cost_weight)
+        w_latency = strategy.latency_weight * (1.0 - shift)
+        w_cost = strategy.cost_weight * (1.0 - shift)
+        total_weight = w_accuracy + w_latency + w_cost or 1.0
+        raw = (w_accuracy * profile.effective_accuracy + w_latency * latency_fit + w_cost * cost_fit) / total_weight
+        return round(raw, 6)
+
+    def _eligible(self, profile: ModelProfile, constraints: RoutingConstraints) -> bool:
+        if profile.effective_accuracy < constraints.min_accuracy:
+            return False
+        if constraints.max_latency_ms is not None and profile.latency_ms > constraints.max_latency_ms:
+            return False
+        if constraints.max_cost is not None and profile.cost > constraints.max_cost:
+            return False
+        return True
+
+    def route(self, query: str, constraints: RoutingConstraints | None = None, experiment: list[str] | None = None) -> RoutingDecision:
+        start = time.perf_counter()
+        constraints = constraints or RoutingConstraints()
+        features = classify_query(query)
+        strategy_name = constraints.strategy or bucket_strategy(query, experiment)
+        strategy = STRATEGIES.get(strategy_name, STRATEGIES[DEFAULT_STRATEGY])
+        candidates = [p for p in self.available_profiles() if self._eligible(p, constraints)]
+        if not candidates:
+            raise NoModelAvailableError(
+                "No available model satisfies the routing constraints "
+                f"(min_accuracy={constraints.min_accuracy}, max_latency_ms={constraints.max_latency_ms}, "
+                f"max_cost={constraints.max_cost})."
+            )
+        scores = {p.name: self._score_profile(p, strategy, features) for p in candidates}
+        ranked = sorted(candidates, key=lambda p: (-scores[p.name], p.name))
+        chosen = ranked[0]
+        fallbacks = [p.name for p in ranked[1:]]
+        rationale = (
+            f"strategy={strategy.name}; complexity={features.complexity_band} "
+            f"({features.complexity:.2f}); domains={features.domains or ['general']}; "
+            f"chose {chosen.name} (score={scores[chosen.name]:.3f}, "
+            f"acc={chosen.effective_accuracy:.2f}, cost={chosen.cost}, latency={chosen.latency_ms:.0f}ms)"
+        )
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        with self._lock:
+            self._counter += 1
+            decision_id = f"rt-{self._counter:06d}"
+            decision = RoutingDecision(
+                decision_id=decision_id,
+                query_preview=query[:80],
+                chosen_model=chosen.name,
+                strategy=strategy.name,
+                features=features,
+                scores=scores,
+                fallbacks=fallbacks,
+                rationale=rationale,
+                decision_latency_ms=round(elapsed_ms, 4),
+            )
+            self._decisions[decision_id] = decision
+            self._decision_order.append(decision_id)
+        return decision
+
+    def record_feedback(self, decision_id: str, outcome: float) -> ModelProfile:
+        if not 0.0 <= outcome <= 1.0:
+            raise ValueError("feedback outcome must be in [0, 1]")
+        with self._lock:
+            decision = self._decisions.get(decision_id)
+            if decision is None:
+                raise KeyError(f"unknown decision_id {decision_id!r}")
+            decision.feedback_outcome = outcome
+            profile = self._profiles[decision.chosen_model]
+            delta = self.FEEDBACK_LEARNING_RATE * (outcome - 0.5) * 2.0
+            profile.quality_bias = min(max(profile.quality_bias + delta, -self.MAX_QUALITY_BIAS), self.MAX_QUALITY_BIAS)
+            return profile
+
+    def get_decision(self, decision_id: str) -> RoutingDecision | None:
+        return self._decisions.get(decision_id)
+
+    def metrics(self) -> RoutingMetrics:
+        with self._lock:
+            decisions = [self._decisions[d] for d in self._decision_order]
+        by_model: dict[str, int] = {}
+        by_strategy: dict[str, int] = {}
+        feedback_values: list[float] = []
+        for decision in decisions:
+            by_model[decision.chosen_model] = by_model.get(decision.chosen_model, 0) + 1
+            by_strategy[decision.strategy] = by_strategy.get(decision.strategy, 0) + 1
+            if decision.feedback_outcome is not None:
+                feedback_values.append(decision.feedback_outcome)
+        return RoutingMetrics(
+            total_decisions=len(decisions),
+            decisions_by_model=by_model,
+            decisions_by_strategy=by_strategy,
+            avg_decision_latency_ms=round(sum(d.decision_latency_ms for d in decisions) / len(decisions), 4) if decisions else 0.0,
+            feedback_count=len(feedback_values),
+            avg_feedback=round(sum(feedback_values) / len(feedback_values), 4) if feedback_values else None,
+        )
+
+    def reset(self) -> None:
+        with self._lock:
+            self._profiles = _default_profiles()
+            self._decisions.clear()
+            self._decision_order.clear()
+            self._counter = 0
+
 
 # ---------------------------------------------------------------------------
 # Agent response synthesis and consolidation engine
@@ -591,7 +708,7 @@ class AgentResponseSynthesizer:
             not any(neg in lower_b for neg in negation_words)):
             if cls._jaccard_similarity(a, b) >= 0.4:
                 return 'Negation mismatch'
-        return None self._profiles
+        return None
 
     def set_availability(self, name: str, available: bool) -> None:
         """Flip a model's health flag; unknown names raise KeyError."""

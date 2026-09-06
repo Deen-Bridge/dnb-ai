@@ -668,7 +668,12 @@ class CrossReferenceStore:
             source_ayah=183,
             target_surah=2,
             target_ayah=187,
-            reference_type=ReferenceType.RELATED_RULING
+            reference_type=ReferenceType.RELATED_RULING,
+            context="Both verses establish guidance and rulings for Ramadan fasting.",
+            commentary="The first verse establishes the obligation of fasting, while the second explains its permitted times and boundaries.",
+            source="quran",
+        ),
+    ]
 
 class ThematicRetriever:
     """Main API for thematic Quran retrieval."""
