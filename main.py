@@ -84,6 +84,7 @@ from consistency import consistency_router, get_consistency_enforcer
 from context_manager import router as context_router
 from crosslingual import CrosslingualSearchRequest, CrosslingualSearchResponse, crosslingual_search
 from errors import APIException
+from experiment_rollback_api import router as experiment_rollback_router
 from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
@@ -392,6 +393,8 @@ app.include_router(consistency_router)
 app.include_router(recitation_router)
 # Scholarly attribution validation: prevent fabricated/misattributed scholarly opinions
 app.include_router(scholarly_attribution_router)
+# Safe experimentation, canary deployment, and automated rollback (#269)
+app.include_router(experiment_rollback_router)
 
 # Configure CORS
 app.add_middleware(
@@ -2804,6 +2807,19 @@ async def resume_experiment(experiment_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
     cfg.kill_switch = False
     return {"status": "ok", "experiment_id": experiment_id, "kill_switch": False}
+
+
+@app.post("/experiments/{experiment_id}/rollback", dependencies=[Depends(require_admin)])
+async def rollback_experiment_endpoint(
+    experiment_id: str,
+    to_version: int | None = None,
+) -> dict[str, Any]:
+    """Roll back an experiment to previous stable version or control."""
+    try:
+        experiment_harness.rollback(experiment_id, to_version=to_version)
+        return {"status": "ok", "experiment_id": experiment_id, "action": "rollback"}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found") from e
 
 
 @app.delete("/experiments/{experiment_id}", dependencies=[Depends(require_admin)])

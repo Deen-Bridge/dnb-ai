@@ -109,7 +109,7 @@ jobs:
         run: pytest -q tests/test_personal_context.py
 
       - name: Run prompt registry and A/B experiment tests
-        run: pytest -q tests/test_prompt_registry.py
+        run: pytest -q tests/test_prompt_registry.py tests/test_experiment_rollback.py
 
       - name: Run Islamic answer evaluation harness tests
         run: pytest -q tests/test_evals.py

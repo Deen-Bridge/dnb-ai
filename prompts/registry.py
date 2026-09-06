@@ -113,6 +113,38 @@ class ExperimentHarness:
     def register_experiment(self, config: ExperimentConfig) -> None:
         """Register an experiment configuration."""
         self._experiments[config.experiment_id] = config
+        try:
+            from experiment_rollback import (
+                ExperimentTargetType,
+                ExperimentVariant,
+                get_rollback_manager,
+            )
+
+            ctl = ExperimentVariant(
+                name=config.control.name,
+                template_name=config.control.template_name,
+                template_version=config.control.template_version,
+                weight=config.control.weight,
+                is_control=True,
+            )
+            vars_list = [
+                ExperimentVariant(
+                    name=v.name,
+                    template_name=v.template_name,
+                    template_version=v.template_version,
+                    weight=v.weight,
+                )
+                for v in config.variants
+            ]
+            get_rollback_manager().create_experiment(
+                experiment_id=config.experiment_id,
+                name=config.experiment_id,
+                target_type=ExperimentTargetType.PROMPT,
+                control=ctl,
+                variants=vars_list,
+            )
+        except Exception:
+            pass
 
     def unregister_experiment(self, experiment_id: str) -> None:
         """Remove an experiment."""
@@ -121,6 +153,20 @@ class ExperimentHarness:
     def active_experiments(self) -> list[str]:
         """Return experiment IDs that are registered and not killed."""
         return [eid for eid, cfg in self._experiments.items() if not cfg.kill_switch]
+
+    def rollback(self, experiment_id: str, to_version: int | None = None) -> None:
+        """Roll back experiment to previous configuration or control."""
+        config = self._experiments.get(experiment_id)
+        if config is None:
+            raise KeyError(f"Unknown experiment: {experiment_id}")
+        try:
+            from experiment_rollback import get_rollback_manager
+
+            mgr = get_rollback_manager()
+            state = mgr.rollback(experiment_id, to_version=to_version)
+            config.kill_switch = state.kill_switch
+        except Exception:
+            config.kill_switch = True
 
     def assign(self, experiment_id: str, session_id: str) -> ExperimentAssignment:
         """Deterministically assign *session_id* to a variant.
@@ -138,6 +184,20 @@ class ExperimentHarness:
                 variant_name=config.control.name,
                 kill_switch_active=True,
             )
+
+        try:
+            from experiment_rollback import get_rollback_manager
+
+            exp_state = get_rollback_manager().get_experiment(experiment_id)
+            if exp_state:
+                chosen_var, was_fallback = get_rollback_manager().assign_variant(experiment_id, session_id)
+                return ExperimentAssignment(
+                    experiment_id=experiment_id,
+                    variant_name=chosen_var.name,
+                    kill_switch_active=was_fallback,
+                )
+        except Exception:
+            pass
 
         # Weighted sticky assignment using a deterministic hash.
         all_variants = [config.control] + config.variants
