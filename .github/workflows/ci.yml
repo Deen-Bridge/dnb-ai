@@ -154,6 +154,9 @@ jobs:
       - name: Run image content analysis tests
         run: pytest -q tests/test_image_analysis.py
 
+      - name: Run tool reliability tests
+        run: pytest -q tests/test_tool_reliability.py
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 
