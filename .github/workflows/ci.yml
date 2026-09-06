@@ -154,6 +154,9 @@ jobs:
       - name: Run image content analysis tests
         run: pytest -q tests/test_image_analysis.py
 
+      - name: Run video analysis tests
+        run: pytest -q tests/test_video_analysis.py
+
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
 
