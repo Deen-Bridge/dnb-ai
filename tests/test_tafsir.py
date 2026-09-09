@@ -9,20 +9,32 @@ import asyncio
 import time
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from semantic_cache import get_keyed_cache
 from tafsir import (
+    DEFAULT_COMPARISON_TAFSIR_KEYS,
     DEFAULT_TAFSIR_KEYS,
     MAX_AYAT_PER_REQUEST,
+    MAX_REFERENCES_PER_BATCH,
+    MAX_TOTAL_AYAT_PER_BATCH,
+    MIN_COMPARISON_TAFSIRS,
     TAFSIR_REGISTRY,
     AyahRef,
+    FakeComparisonGenerator,
     FakeTafsirSource,
+    InvalidBatchRequest,
     InvalidReference,
+    TafsirBatchRequest,
+    TafsirComparisonRequest,
     TafsirRequest,
     TafsirWork,
     VerseText,
     _normalize_surah_name,
     build_chat_tafsir_context,
+    build_tafsir_batch_response,
+    build_tafsir_comparison,
     build_tafsir_prompt_block,
     build_tafsir_response,
     detect_ayah_references,
@@ -32,6 +44,7 @@ from tafsir import (
     parse_reference,
     parse_tafsir_payload,
     resolve_requested_tafsirs,
+    router,
     strip_html,
     summarize_tafsir_context,
     surah_by_name,
@@ -119,6 +132,39 @@ def make_source(**overrides) -> FakeTafsirSource:
     }
     verses.update(overrides.pop("verses", {}))
     return FakeTafsirSource(tafsirs=tafsirs, verses=verses)
+
+
+def make_comparison_source() -> FakeTafsirSource:
+    """Serve one comparison passage for every registered work."""
+    tafsirs: dict[tuple[str, str], dict] = {}
+    for index, work in enumerate(TAFSIR_REGISTRY.values()):
+        if index < 10:
+            text = (
+                "<p>Human beings are in loss unless they believe, perform righteous deeds, "
+                "and encourage one another to truth and patience.</p>"
+            )
+        elif index == 10:
+            text = "<p>The passage emphasizes the limited nature of worldly time and accountability.</p>"
+        else:
+            text = "<p>The final quality is patient perseverance in obedience and communal counsel.</p>"
+        for language, slug in work.slugs.items():
+            tafsirs[(slug, "103:2")] = {
+                "verses": {"103:2": {"id": 6178}},
+                "resource_name": work.name,
+                "translated_name": {"name": work.name, "language_name": language},
+                "text": text,
+            }
+    source = FakeTafsirSource(
+        verses={
+            "103:2": VerseText(
+                arabic="إن الإنسان لفي خسر",
+                translation="Indeed, mankind is in loss,",
+                translation_language="en",
+            )
+        },
+    )
+    source.tafsirs.update(tafsirs)
+    return source
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +590,202 @@ class TestBuildResponse:
             run(build_tafsir_response(TafsirRequest(reference="2:300"), make_source()))
 
 
+class TestBuildBatchResponse:
+    def test_returns_results_keyed_by_reference(self):
+        source = make_source(
+            tafsirs={
+                ("en-tafisr-ibn-kathir", "2:255"): IBN_KATHIR_103,
+                ("en-tafisr-ibn-kathir", "112:1"): IBN_KATHIR_103,
+            },
+            verses={
+                "2:255": VerseText(translation="Allah! There is no deity except Him.", translation_language="en"),
+                "112:1": VerseText(translation="Say, He is Allah, [who is] One.", translation_language="en"),
+            },
+        )
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(
+                    references=["2:255", "103:1-3", "112:1-4"],
+                    tafsirs=["ibn-kathir"],
+                ),
+                source,
+            )
+        )
+        assert set(response.results) == {"2:255", "103:1-3", "112:1-4"}
+        assert response.errors == {}
+        assert response.results["2:255"].language == "en"
+        assert [ayah.ayah for ayah in response.results["103:1-3"].ayat] == ["103:1", "103:2", "103:3"]
+
+    def test_invalid_reference_is_returned_as_an_inline_error(self):
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(references=["103:2", "2:300"], tafsirs=["ibn-kathir"]),
+                make_source(),
+            )
+        )
+        assert "103:2" in response.results
+        assert "2:300" in response.errors
+        assert "Al-Baqarah" in response.errors["2:300"]
+
+    def test_retrieval_failure_is_returned_as_an_inline_error(self):
+        class FailingSource(FakeTafsirSource):
+            async def fetch_verse(self, verse_key, language):
+                if verse_key == "103:2":
+                    raise RuntimeError("upstream unavailable")
+                return await super().fetch_verse(verse_key, language)
+
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(references=["103:2", "103:3"], tafsirs=["ibn-kathir"]),
+                FailingSource(),
+            )
+        )
+        assert "103:2" not in response.results
+        assert response.errors["103:2"] == "Failed to retrieve tafsir for this reference."
+        assert "103:3" in response.results
+
+    def test_references_are_retrieved_concurrently(self):
+        class SlowSource(FakeTafsirSource):
+            async def fetch_tafsir(self, slug, verse_key):
+                await asyncio.sleep(0.05)
+                return await super().fetch_tafsir(slug, verse_key)
+
+            async def fetch_verse(self, verse_key, language):
+                await asyncio.sleep(0.05)
+                return await super().fetch_verse(verse_key, language)
+
+        source = SlowSource(
+            tafsirs={("en-tafisr-ibn-kathir", f"103:{number}"): IBN_KATHIR_103 for number in range(1, 4)},
+            verses={
+                f"103:{number}": VerseText(translation="By time,", translation_language="en") for number in range(1, 4)
+            },
+        )
+        started = time.monotonic()
+        response = run(
+            build_tafsir_batch_response(
+                TafsirBatchRequest(references=["103:1", "103:2", "103:3"], tafsirs=["ibn-kathir"]),
+                source,
+            )
+        )
+        assert time.monotonic() - started < 0.25
+        assert len(response.results) == 3
+
+    def test_total_ayah_limit_is_checked_before_fetching(self):
+        source = make_source()
+        references = [f"{number}:1-2" for number in range(1, MAX_REFERENCES_PER_BATCH)] + ["103:1-3"]
+        with pytest.raises(InvalidBatchRequest, match=str(MAX_TOTAL_AYAT_PER_BATCH)):
+            run(build_tafsir_batch_response(TafsirBatchRequest(references=references), source))
+        assert source.tafsir_calls == []
+        assert source.verse_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Comparative analysis
+# ---------------------------------------------------------------------------
+
+
+class TestTafsirComparison:
+    def test_defaults_to_all_registered_works_and_groups_consensus(self):
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+            )
+        )
+        assert len(DEFAULT_COMPARISON_TAFSIR_KEYS) >= MIN_COMPARISON_TAFSIRS
+        assert len(response.sources) == len(DEFAULT_COMPARISON_TAFSIR_KEYS)
+        assert len(response.clusters) == 3
+        assert set(response.consensus[0].source_keys) == set(DEFAULT_COMPARISON_TAFSIR_KEYS[:10])
+        assert response.consensus[0].support_ratio == pytest.approx(10 / 12, abs=0.0001)
+        assert response.divergences[0].positions
+        assert {item.key for item in response.sources} == set(DEFAULT_COMPARISON_TAFSIR_KEYS)
+
+        death_years = [item.death_year_ah for item in response.sources if item.death_year_ah is not None]
+        assert death_years == sorted(death_years)
+
+    def test_source_metadata_contains_era_method_and_perspective(self):
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+            )
+        )
+        tabari = next(item for item in response.sources if item.key == "tabari")
+        assert tabari.era == "classical"
+        assert tabari.death_year_ah == 310
+        assert "narration" in tabari.methodologies
+        assert tabari.perspective == "Sunni"
+
+    def test_missing_sources_are_excluded_from_evidence_and_reported(self):
+        source = make_comparison_source()
+        missing_key = DEFAULT_COMPARISON_TAFSIR_KEYS[-1]
+        missing_work = TAFSIR_REGISTRY[missing_key]
+        source.tafsirs.pop((missing_work.slugs[missing_work.languages[0]], "103:2"))
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=source,
+            )
+        )
+        assert missing_key not in {item.key for item in response.sources}
+        assert any(item.key == missing_key for item in response.unavailable)
+        assert missing_key not in response.synthesis.cited_source_keys
+
+    def test_custom_generator_is_schema_validated_and_source_attributed(self):
+        response_json = (
+            '{"consensus":[{"statement":"Humanity is described as being in loss.",'
+            '"source_keys":["ibn-kathir","tabari"],"support_ratio":0.1}],'
+            '"divergences":[{"topic":"Emphasis","description":"The works emphasize different details.",'
+            '"positions":[{"statement":"Faith and action are central.","source_keys":["ibn-kathir"]},'
+            '{"statement":"Time and accountability are central.","source_keys":["tazkirul-quran"]}]}],'
+            '"unique_insights":[{"statement":"Communal counsel is highlighted.",'
+            '"source_keys":["ahsanul-bayaan"]}],"synthesis":{'
+            '"summary":"The readings overlap while retaining differences.",'
+            '"evolution":"Classical and contemporary works are represented.",'
+            '"methodological_notes":"Narrative and thematic methods appear.",'
+            '"balance_note":"All claims remain tied to retrieved works.",'
+            '"cited_source_keys":["ibn-kathir"]}}'
+        )
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+                generator=FakeComparisonGenerator(response_json),
+            )
+        )
+        assert response.synthesis.summary.startswith("The readings overlap")
+        assert response.synthesis.cited_source_keys == ["ibn-kathir"]
+        assert response.consensus[0].support_ratio == pytest.approx(2 / 12, abs=0.0001)
+        assert response.divergences[0].positions[1].source_keys == ["tazkirul-quran"]
+
+    def test_invalid_synthesis_citations_fall_back_to_deterministic_summary(self):
+        response_json = (
+            '{"consensus":[],"divergences":[],"unique_insights":[],'
+            '"synthesis":{"summary":"bad", "evolution":"bad", "methodological_notes":"bad", '
+            '"balance_note":"bad", "cited_source_keys":["unknown"]}}'
+        )
+        response = run(
+            build_tafsir_comparison(
+                TafsirComparisonRequest(reference="103:2"),
+                source=make_comparison_source(),
+                generator=FakeComparisonGenerator(response_json),
+            )
+        )
+        assert response.synthesis.summary.startswith("Compared 12 retrieved tafsir works")
+        assert set(response.synthesis.cited_source_keys) == {item.key for item in response.sources}
+
+    @pytest.mark.parametrize(
+        "comparison_request",
+        [
+            TafsirComparisonRequest.model_construct(reference="103:1", tafsirs=["ibn-kathir"]),
+            TafsirComparisonRequest(reference="103:1-2"),
+        ],
+    )
+    def test_comparison_requires_ten_distinct_works_and_one_ayah(self, comparison_request):
+        with pytest.raises(InvalidReference):
+            run(build_tafsir_comparison(comparison_request, source=make_comparison_source()))
+
+
 # ---------------------------------------------------------------------------
 # Endpoint behaviour
 # ---------------------------------------------------------------------------
@@ -583,6 +825,57 @@ class TestEndpoint:
         assert set(DEFAULT_TAFSIR_KEYS) <= keys
         for source in sources:
             assert source.name and source.author and source.languages
+
+    def test_batch_endpoint_returns_partial_results(self):
+        from tafsir import QuranComTafsirSource, get_tafsir_batch, set_source
+
+        set_source(make_source())
+        try:
+            response = run(get_tafsir_batch(TafsirBatchRequest(references=["103:2", "2:300"], tafsirs=["ibn-kathir"])))
+        finally:
+            set_source(QuranComTafsirSource())
+        assert "103:2" in response.results
+        assert "2:300" in response.errors
+
+    def test_batch_endpoint_rejects_total_ayah_limit(self):
+        from fastapi import HTTPException
+
+        from tafsir import QuranComTafsirSource, get_tafsir_batch, set_source
+
+        set_source(make_source())
+        try:
+            with pytest.raises(HTTPException) as exc:
+                run(get_tafsir_batch(TafsirBatchRequest(references=["2:1-10", "3:1-10", "4:1"])))
+        finally:
+            set_source(QuranComTafsirSource())
+        assert exc.value.status_code == 400
+        assert str(MAX_TOTAL_AYAT_PER_BATCH) in str(exc.value.detail)
+
+    @pytest.mark.parametrize(
+        "references",
+        [
+            [],
+            [f"2:{number}" for number in range(1, MAX_REFERENCES_PER_BATCH + 2)],
+        ],
+    )
+    def test_batch_endpoint_validates_reference_count(self, references):
+        app = FastAPI()
+        app.include_router(router)
+
+        async def post_batch():
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                return await client.post("/tafsir/batch", json={"references": references})
+
+        response = run(post_batch())
+        assert response.status_code == 422
+
+    def test_batch_endpoint_is_documented_in_openapi(self):
+        app = FastAPI()
+        app.include_router(router)
+        operation = app.openapi()["paths"]["/tafsir/batch"]["post"]
+        assert operation["summary"] == "Get Tafsir Batch"
+        request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+        assert request_schema["$ref"].endswith("/TafsirBatchRequest")
 
 
 # ---------------------------------------------------------------------------

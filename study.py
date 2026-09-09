@@ -13,8 +13,10 @@ import os
 from enum import Enum
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from errors import APIException
 
 logger = logging.getLogger(__name__)
 
@@ -489,13 +491,18 @@ def _generate_content(
         max_retries + 1,
         kind.value,
     )
-    raise HTTPException(
+    raise APIException(
         status_code=502,
         detail={
             "error": "Content generation failed after multiple attempts",
             "last_validation_error": last_error,
             "retries_used": max_retries + 1,
         },
+        hint=(
+            "The AI model could not produce schema-compliant questions or flashcards. "
+            "Try simplifying the topic, shortening the lesson text, or adjusting the difficulty level, "
+            "then retry in a few moments."
+        ),
     )
 
 
@@ -514,9 +521,13 @@ async def generate_study_content(request: StudyGenerateRequest):
     if isinstance(request.source, LessonTextSource):
         text_len = len(request.source.lesson_text)
         if text_len > MAX_LESSON_TEXT_LENGTH:
-            raise HTTPException(
+            raise APIException(
                 status_code=422,
                 detail=f"lesson_text must not exceed {MAX_LESSON_TEXT_LENGTH} characters (got {text_len})",
+                hint=(
+                    f"Shorten the input text to under {MAX_LESSON_TEXT_LENGTH} characters "
+                    f"(current length is {text_len} characters) or split it into smaller study sections."
+                ),
             )
 
     use_fake = os.getenv("USE_FAKE_GENERATOR", "0") == "1"

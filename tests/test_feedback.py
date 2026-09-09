@@ -147,7 +147,7 @@ class TestRateLimiter:
         assert len(limiter._buckets) == 50
         import time
 
-        time.sleep(0.06)
+        time.sleep(0.1)
         # One more call sweeps everything now outside the window.
         limiter.is_allowed("fresh")
         assert len(limiter._buckets) == 1
@@ -262,7 +262,7 @@ class TestRedisIndexHygiene:
         assert limiter.is_allowed("a") is False
         import time
 
-        time.sleep(0.06)
+        time.sleep(0.1)
         assert limiter.is_allowed("a") is True
 
 

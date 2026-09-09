@@ -22,6 +22,7 @@ All network and embedding calls go through seams (per-signal fetchers and
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -32,6 +33,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 import semantic_cache
+from async_runtime import http_client_pool
 from memory.models import PersonalContextBundle, PersonalRecord
 from memory.store import MemoryStore
 from stellar import PurchaseTransaction, fetch_user_transactions
@@ -132,15 +134,10 @@ async def _fetch_json(
     """
     url = f"{DNB_BACKEND_URL}{path}"
     headers = {"Authorization": f"Bearer {auth_token.strip()}"}
-    owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=PERSONAL_FETCH_TIMEOUT)
-    try:
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
-        payload = response.json()
-    finally:
-        if owns_client:
-            await client.aclose()
+    client = client or http_client_pool.get()
+    response = await client.get(url, headers=headers, timeout=PERSONAL_FETCH_TIMEOUT)
+    response.raise_for_status()
+    payload = response.json()
     return _as_items(payload)
 
 
@@ -379,15 +376,21 @@ async def ingest_personal_records(
     Each fetcher is isolated: one raising (missing endpoint, 404, transport
     error) simply omits that signal — the turn never fails over ingestion.
     """
-    records: list[PersonalRecord] = []
-    for name, fetcher in _FETCHERS:
+
+    async def fetch_signal(
+        name: str,
+        fetcher: Callable[..., Awaitable[list[PersonalRecord]]],
+    ) -> list[PersonalRecord]:
         try:
             fetched = await fetcher(user_id, auth_token, client=client)
         except Exception as exc:  # noqa: BLE001 - each signal is best-effort
             logger.info("Personal signal '%s' unavailable for this turn: %s", name, exc)
-            continue
+            return []
         # Defensive: a fetcher must only ever stamp the caller's user_id.
-        records.extend(r for r in fetched if r.user_id == user_id)
+        return [record for record in fetched if record.user_id == user_id]
+
+    fetched_signals = await asyncio.gather(*(fetch_signal(name, fetcher) for name, fetcher in _FETCHERS))
+    records = [record for signal in fetched_signals for record in signal]
     return records
 
 

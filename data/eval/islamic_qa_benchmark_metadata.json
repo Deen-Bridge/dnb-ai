@@ -1,0 +1,43 @@
+{
+  "dataset_name": "Islamic QA Benchmark Dataset",
+  "schema_version": "1.0.0",
+  "total_records": 530,
+  "domain_coverage_count": 10,
+  "domain_distribution": {
+    "aqeedah": 53,
+    "fiqh_ibadat": 53,
+    "fiqh_muamalat": 53,
+    "fiqh_munakahat_mirath": 53,
+    "ulum_al_quran": 53,
+    "mustalah_al_hadith": 53,
+    "seerah": 53,
+    "tarikh_islami": 53,
+    "tasawwuf_adab_akhlaq": 53,
+    "contemporary_issues": 53
+  },
+  "difficulty_distribution": {
+    "easy": 31,
+    "medium": 439,
+    "hard": 60
+  },
+  "citation_statistics": {
+    "total_citations": 1109,
+    "citation_types": {
+      "quran": 382,
+      "scholarly": 432,
+      "hadith": 295
+    }
+  },
+  "ikhtilaf_count": 9,
+  "abstention_count": 2,
+  "average_inter_annotator_agreement": 0.9536,
+  "languages": [
+    "en",
+    "ar"
+  ],
+  "curation": {
+    "curator": "DeenBridge Islamic Benchmark Team",
+    "scholar_validated": true,
+    "minimum_iaa_threshold": 0.85
+  }
+}

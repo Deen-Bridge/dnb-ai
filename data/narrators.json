@@ -1,0 +1,492 @@
+[
+  {
+    "id": "bukhari",
+    "name": "Muhammad ibn Isma'il al-Bukhari",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Bukhari",
+    "laqab": "Amir al-Mu'minin fi'l-Hadith",
+    "birth_year": 810,
+    "death_year": 870,
+    "birth_year_hijri": 194,
+    "death_year_hijri": 256,
+    "region": "Bukhara, Central Asia",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["ahmad-hanbal", "ali-madini", "malik-ibn-anas"],
+    "students": ["muslim", "tirmidhi"],
+    "narrated_hadiths_count": 7275,
+    "biography_summary": "Imam al-Bukhari was born in Bukhara and memorized the Quran by age 9. He traveled extensively across the Islamic world collecting hadiths, and compiled Sahih al-Bukhari, considered the most authentic collection of hadith. He selected approximately 7,275 hadiths from over 600,000 narrations he examined."
+  },
+  {
+    "id": "muslim",
+    "name": "Muslim ibn al-Hajjaj al-Naysaburi",
+    "kunyah": "Abu al-Husayn",
+    "nisba": "al-Naysaburi",
+    "laqab": "Amir al-Mu'minin fi'l-Hadith",
+    "birth_year": 821,
+    "death_year": 875,
+    "birth_year_hijri": 206,
+    "death_year_hijri": 261,
+    "region": "Nishapur, Khorasan",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["bukhari", "ahmad-hanbal"],
+    "students": ["abu-dawud", "ibn-majah"],
+    "narrated_hadiths_count": 7500,
+    "biography_summary": "Imam Muslim was born in Nishapur and studied under al-Bukhari, Ahmad ibn Hanbal, and others. He compiled Sahih Muslim, the second most authentic hadith collection. His work is distinguished by its meticulous isnad chains and organizational structure."
+  },
+  {
+    "id": "abu-dawud",
+    "name": "Sulayman ibn al-Ash'ath al-Sijistani",
+    "kunyah": "Abu Dawud",
+    "nisba": "al-Sijistani",
+    "laqab": "none",
+    "birth_year": 817,
+    "death_year": 889,
+    "birth_year_hijri": 202,
+    "death_year_hijri": 275,
+    "region": "Sistan, Persia",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["muslim", "ahmad-hanbal"],
+    "students": ["al-nasai"],
+    "narrated_hadiths_count": 5274,
+    "biography_summary": "Abu Dawud compiled Sunan Abu Dawud, one of the four major Sunan collections. He traveled widely to gather hadiths and focused primarily on hadiths related to legal rulings (ahkam). He corresponded with Imam Ahmad about his methodology."
+  },
+  {
+    "id": "tirmidhi",
+    "name": "Muhammad ibn 'Isa al-Tirmidhi",
+    "kunyah": "Abu 'Isa",
+    "nisba": "al-Tirmidhi",
+    "laqab": "none",
+    "birth_year": 824,
+    "death_year": 892,
+    "birth_year_hijri": 209,
+    "death_year_hijri": 279,
+    "region": "Termez, Central Asia",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "al-Hakim": "thiqah"
+    },
+    "teachers": ["bukhari", "malik-ibn-anas"],
+    "students": ["al-nasai"],
+    "narrated_hadiths_count": 3956,
+    "biography_summary": "Imam al-Tirmidhi compiled Jami' al-Tirmidhi, notable for grading hadiths and noting scholarly differences. Al-Bukhari praised his expertise. His collection uniquely categorizes hadiths by fiqh ruling and records variant chains."
+  },
+  {
+    "id": "ibn-majah",
+    "name": "Muhammad ibn Yazid al-Qazwini",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Qazwini",
+    "laqab": "Ibn Majah",
+    "birth_year": 824,
+    "death_year": 887,
+    "birth_year_hijri": 209,
+    "death_year_hijri": 273,
+    "region": "Qazvin, Persia",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "hasan",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["ahmad-hanbal", "bukhari"],
+    "students": [],
+    "narrated_hadiths_count": 4341,
+    "biography_summary": "Ibn Majah compiled Sunan Ibn Majah, the fourth of the six major hadith collections. He studied in Iraq, Syria, and Egypt. His collection includes some hadiths not found in the other five Sunan."
+  },
+  {
+    "id": "al-nasai",
+    "name": "Ahmad ibn Shu'ayb al-Nasa'i",
+    "kunyah": "Abu Abd al-Rahman",
+    "nisba": "al-Nasa'i",
+    "laqab": "none",
+    "birth_year": 829,
+    "death_year": 915,
+    "birth_year_hijri": 215,
+    "death_year_hijri": 303,
+    "region": "Nasa, Khwarazm",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["abu-dawud", "tirmidhi"],
+    "students": [],
+    "narrated_hadiths_count": 5758,
+    "biography_summary": "Al-Nasa'i compiled Sunan al-Nasa'i, considered the most precise of the Sunan collections. He was known for his strict methodology in verifying narrators and chose the strongest chains (sahih) for each hadith."
+  },
+  {
+    "id": "ahmad-hanbal",
+    "name": "Ahmad ibn Hanbal al-Shaybani",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Shaybani",
+    "laqab": "none",
+    "birth_year": 780,
+    "death_year": 855,
+    "birth_year_hijri": 164,
+    "death_year_hijri": 241,
+    "region": "Baghdad, Iraq",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["malik-ibn-anas", "abu-yusuf"],
+    "students": ["bukhari", "muslim", "abu-dawud"],
+    "narrated_hadiths_count": 28000,
+    "biography_summary": "Imam Ahmad ibn Hanbal was the founder of the Hanbali school of jurisprudence and a towering figure in hadith sciences. He compiled the Musnad, one of the largest hadith collections. He endured persecution during the Mihna trial for upholding the traditionalist creed."
+  },
+  {
+    "id": "malik-ibn-anas",
+    "name": "Malik ibn Anas al-Asbahi",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Asbahi",
+    "laqab": "none",
+    "birth_year": 711,
+    "death_year": 795,
+    "birth_year_hijri": 93,
+    "death_year_hijri": 179,
+    "region": "Madinah, Arabia",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "al-Shafi'i": "thiqah"
+    },
+    "teachers": ["abi-zinad", "ibn-shihab-al-zuhri"],
+    "students": ["ahmad-hanbal", "al-shafii", "bukhari"],
+    "narrated_hadiths_count": 18000,
+    "biography_summary": "Imam Malik was the founder of the Maliki school of jurisprudence and author of al-Muwatta', one of the earliest compilations of hadith and fiqh. He spent his entire life in Madinah, and his work reflects the living practice of its scholars."
+  },
+  {
+    "id": "al-shafii",
+    "name": "Muhammad ibn Idris al-Shafi'i",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Qurashi al-Hashimi",
+    "laqab": "none",
+    "birth_year": 767,
+    "death_year": 820,
+    "birth_year_hijri": 150,
+    "death_year_hijri": 204,
+    "region": "Makkah / Egypt",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["malik-ibn-anas", "muhammad-shaybani"],
+    "students": ["al-muzani"],
+    "narrated_hadiths_count": 1000,
+    "biography_summary": "Imam al-Shafi'i was the founder of the Shafi'i school of jurisprudence and the father of Islamic legal theory (usul al-fiqh). His al-Risala systematized the sources of law. He studied under Imam Malik in Madinah."
+  },
+  {
+    "id": "abu-hanifa",
+    "name": "Nu'man ibn Thabit al-Taymi",
+    "kunyah": "Abu Hanifa",
+    "nisba": "al-Kufi",
+    "laqab": "none",
+    "birth_year": 699,
+    "death_year": 767,
+    "birth_year_hijri": 80,
+    "death_year_hijri": 150,
+    "region": "Kufa, Iraq",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "al-Kasai": "thiqah"
+    },
+    "teachers": ["imam-zayd", "ataa-bin-abbi-rabah"],
+    "students": ["abu-yusuf", "muhammad-shaybani"],
+    "narrated_hadiths_count": 500,
+    "biography_summary": "Abu Hanifa was the founder of the Hanafi school, the oldest and most widespread school of Islamic jurisprudence. He emphasized qiyas (analogical reasoning) and ra'y (scholarly opinion) alongside hadith, and trained in Kufa's intellectual environment."
+  },
+  {
+    "id": "abu-yusuf",
+    "name": "Ya'qub ibn Ibrahim al-Ansari",
+    "kunyah": "Abu Yusuf",
+    "nisba": "al-Ansari al-Kufi",
+    "laqab": "none",
+    "birth_year": 731,
+    "death_year": 798,
+    "birth_year_hijri": 113,
+    "death_year_hijri": 182,
+    "region": "Kufa / Baghdad, Iraq",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah",
+      "Ibn Hibban": "thiqah"
+    },
+    "teachers": ["abu-hanifa"],
+    "students": ["ahmad-hanbal"],
+    "narrated_hadiths_count": 300,
+    "biography_summary": "Abu Yusuf was Abu Hanifa's most prominent student and the first Chief Justice (Qadi al-Qudat) of the Abbasid caliphate. He authored Kitab al-Kharaj, the earliest systematic work on Islamic taxation."
+  },
+  {
+    "id": "muhammad-shaybani",
+    "name": "Muhammad ibn al-Hasan al-Shaybani",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Shaybani al-Kufi",
+    "laqab": "none",
+    "birth_year": 749,
+    "death_year": 805,
+    "birth_year_hijri": 132,
+    "death_year_hijri": 189,
+    "region": "Kufa / Baghdad, Iraq",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah"
+    },
+    "teachers": ["abu-hanifa", "abu-yusuf"],
+    "students": ["al-shafii"],
+    "narrated_hadiths_count": 200,
+    "biography_summary": "Al-Shaybani was the third major student of Abu Hanifa and a key transmitter of Hanafi legal thought. He authored several foundational texts of Hanafi fiqh, and al-Shafi'i studied under him in Baghdad."
+  },
+  {
+    "id": "ibn-hajar-asqalani",
+    "name": "Ahmad ibn Ali ibn Hajar al-Asqalani",
+    "kunyah": "Shihab al-Din Abu al-Fadl",
+    "nisba": "al-Asqalani",
+    "laqab": "Amir al-Mu'minin fi'l-Hadith",
+    "birth_year": 1372,
+    "death_year": 1449,
+    "birth_year_hijri": 773,
+    "death_year_hijri": 852,
+    "region": "Cairo, Egypt",
+    "reliability_assessment": {
+      "al-Suyuti": "thiqah",
+      "Ibn Taghribirdi": "thiqah"
+    },
+    "teachers": ["ibn-hajar-haytami"],
+    "students": ["sakhawi"],
+    "narrated_hadiths_count": 100,
+    "biography_summary": "Ibn Hajar al-Asqalani was a medieval Egyptian scholar of hadith and Islamic history. His Fath al-Bari is the most celebrated commentary on Sahih al-Bukhari. He is widely regarded as one of the greatest hadith scholars in Islamic history."
+  },
+  {
+    "id": "al-nawawi",
+    "name": "Yahya ibn Sharaf al-Nawawi",
+    "kunyah": "Muhyi al-Din Abu Zakariya",
+    "nisba": "al-Nawawi",
+    "laqab": "Muhyi al-Din",
+    "birth_year": 1233,
+    "death_year": 1277,
+    "birth_year_hijri": 631,
+    "death_year_hijri": 676,
+    "region": "Damascus, Syria",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "al-Suyuti": "thiqah",
+      "Ibn Kathir": "thiqah"
+    },
+    "teachers": ["ibn-abd-al-daa"],
+    "students": ["ibn-taymiyya"],
+    "narrated_hadiths_count": 200,
+    "biography_summary": "Al-Nawawi was a Shafi'i jurist and hadith scholar renowned for his Forty Hadith, Riyad al-Salihin, and his commentary on Sahih Muslim. He lived an ascetic life in Damascus, devoting himself to scholarship and worship."
+  },
+  {
+    "id": "ibn-taymiyya",
+    "name": "Ahmad ibn Abd al-Halim ibn Taymiyya",
+    "kunyah": "Taqi al-Din Abu al-Abbas",
+    "nisba": "al-Harrani",
+    "laqab": "none",
+    "birth_year": 1263,
+    "death_year": 1328,
+    "birth_year_hijri": 661,
+    "death_year_hijri": 728,
+    "region": "Damascus, Syria",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Kathir": "thiqah"
+    },
+    "teachers": ["al-nawawi"],
+    "students": ["ibn-kathir"],
+    "narrated_hadiths_count": 150,
+    "biography_summary": "Ibn Taymiyya was a Hanbali scholar and theologian known for his extensive writings on creed, jurisprudence, and the refutation of philosophical and theological positions he considered deviant. His works have been highly influential in modern Islamic thought."
+  },
+  {
+    "id": "ibn-kathir",
+    "name": "Isma'il ibn Umar ibn Kathir",
+    "kunyah": "Abu al-Fida",
+    "nisba": "al-Bashrawi",
+    "laqab": "Ibn Kathir",
+    "birth_year": 1301,
+    "death_year": 1373,
+    "birth_year_hijri": 701,
+    "death_year_hijri": 774,
+    "region": "Damascus, Syria",
+    "reliability_assessment": {
+      "al-Suyuti": "thiqah",
+      "Ibn Taghribirdi": "thiqah"
+    },
+    "teachers": ["ibn-taymiyya", "al-dhahabi"],
+    "students": ["al-suyuti"],
+    "narrated_hadiths_count": 50,
+    "biography_summary": "Ibn Kathir was a student of al-Dhahabi and Ibn Taymiyya. He is best known for his tafsir Tafsir al-Qur'an al-Azim, which interprets the Quran through hadiths and the opinions of the salaf. He also authored a comprehensive history, al-Bidaya wa'l-Nihaya."
+  },
+  {
+    "id": "al-dhahabi",
+    "name": "Shams al-Din Muhammad ibn Ahmad al-Dhahabi",
+    "kunyah": "Shams al-Din",
+    "nisba": "al-Dimashqi",
+    "laqab": "none",
+    "birth_year": 1274,
+    "death_year": 1348,
+    "birth_year_hijri": 673,
+    "death_year_hijri": 748,
+    "region": "Damascus, Syria",
+    "reliability_assessment": {
+      "Ibn Kathir": "thiqah",
+      "al-Suyuti": "thiqah"
+    },
+    "teachers": ["ibn-taymiyya"],
+    "students": ["ibn-kathir"],
+    "narrated_hadiths_count": 30,
+    "biography_summary": "Al-Dhahabi was a Syrian historian and hadith scholar. His Siyar A'lam al-Nubala' (Biographies of Noble Figures) is one of the most important biographical dictionaries in Islamic scholarship. He also wrote Mizan al-I'tidal on weak narrators."
+  },
+  {
+    "id": "al-hakim",
+    "name": "Muhammad ibn Abd Allah al-Hakim al-Naysaburi",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Naysaburi",
+    "laqab": "none",
+    "birth_year": 933,
+    "death_year": 1014,
+    "birth_year_hijri": 321,
+    "death_year_hijri": 405,
+    "region": "Nishapur, Khorasan",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "al-Suyuti": "thiqah"
+    },
+    "teachers": [],
+    "students": [],
+    "narrated_hadiths_count": 9000,
+    "biography_summary": "Al-Hakim al-Naysaburi was the author of al-Mustadrak 'ala al-Sahihayn, a collection of hadiths he argued met the criteria of al-Bukhari and Muslim but were omitted from their collections. His work is a major reference for hadith study."
+  },
+  {
+    "id": "al-suyuti",
+    "name": "Jalal al-Din Abu al-Fadl Abd al-Rahman ibn Abi Bakr al-Suyuti",
+    "kunyah": "Jalal al-Din",
+    "nisba": "al-Misri",
+    "laqab": "Jalal al-Din",
+    "birth_year": 1445,
+    "death_year": 1505,
+    "birth_year_hijri": 849,
+    "death_year_hijri": 911,
+    "region": "Cairo, Egypt",
+    "reliability_assessment": {
+      "modern-scholars": "thiqah"
+    },
+    "teachers": ["ibn-kathir"],
+    "students": [],
+    "narrated_hadiths_count": 200,
+    "biography_summary": "Al-Suyuti was an Egyptian polymath who authored works on virtually every Islamic science. His al-Itqan fi Ulum al-Qur'an is a landmark in Quranic sciences, and he wrote prolifically on hadith, fiqh, Arabic linguistics, and history."
+  },
+  {
+    "id": "ibn-hajar-haytami",
+    "name": "Ahmad ibn Muhammad ibn Hajar al-Haytami",
+    "kunyah": "Shihab al-Din",
+    "nisba": "al-Misri",
+    "laqab": "none",
+    "birth_year": 1504,
+    "death_year": 1567,
+    "birth_year_hijri": 909,
+    "death_year_hijri": 974,
+    "region": "Cairo, Egypt",
+    "reliability_assessment": {
+      "modern-scholars": "thiqah"
+    },
+    "teachers": ["al-suyuti"],
+    "students": ["ibn-hajar-asqalani"],
+    "narrated_hadiths_count": 50,
+    "biography_summary": "Al-Haytami was a Shafi'i jurist and hadith scholar of Makkah and Egypt. He authored al-Sawa'iq al-Muhriqa, a response to Shi'i critiques of the Companions, and was a key teacher of Ibn Hajar al-Asqalani."
+  },
+  {
+    "id": "ali-madini",
+    "name": "Ali ibn al-Madini",
+    "kunyah": "Abu al-Hasan",
+    "nisba": "al-Madini",
+    "laqab": "none",
+    "birth_year": 778,
+    "death_year": 848,
+    "birth_year_hijri": 161,
+    "death_year_hijri": 234,
+    "region": "Madinah / Baghdad",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah"
+    },
+    "teachers": ["malik-ibn-anas"],
+    "students": ["bukhari"],
+    "narrated_hadiths_count": 400,
+    "biography_summary": "Ali ibn al-Madini was one of the foremost experts on narrator criticism (al-jarh wa'l-ta'dil). His Kitab al-Ilal (Book of Hidden Defects in Hadith) is a foundational work in hadith sciences. Al-Bukhari was his student."
+  },
+  {
+    "id": "abu-zinad",
+    "name": "Abd Allah ibn Zayd Abu Zinad al-Ajali",
+    "kunyah": "Abu Zinad",
+    "nisba": "al-Ajali",
+    "laqab": "none",
+    "birth_year": 669,
+    "death_year": 748,
+    "birth_year_hijri": 49,
+    "death_year_hijri": 131,
+    "region": "Madinah / Basra",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah"
+    },
+    "teachers": ["zayd-ibn-aslam"],
+    "students": ["malik-ibn-anas"],
+    "narrated_hadiths_count": 600,
+    "biography_summary": "Abu Zinad was a Tabi'i hadith scholar based in Basra who visited Madinah frequently. He was one of the key teachers of Imam Malik and transmitted many hadiths from the senior scholars of the Successor generation."
+  },
+  {
+    "id": "ibn-shihab-al-zuhri",
+    "name": "Muhammad ibn Muslim ibn Shihab al-Zuhri",
+    "kunyah": "Abu Bakr",
+    "nisba": "al-Zuhri",
+    "laqab": "none",
+    "birth_year": 678,
+    "death_year": 742,
+    "birth_year_hijri": 58,
+    "death_year_hijri": 124,
+    "region": "Madinah",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah"
+    },
+    "teachers": ["anas-ibn-malik"],
+    "students": ["malik-ibn-anas", "sufyan-thawri"],
+    "narrated_hadiths_count": 2000,
+    "biography_summary": "Al-Zuhri was one of the most prolific narrators of the early Islamic period and one of the first to systematize the collection of sira (Prophetic biography). He served as a court scholar for several Umayyad caliphs."
+  },
+  {
+    "id": "sufyan-thawri",
+    "name": "Sufyan ibn Sa'id al-Thawri",
+    "kunyah": "Abu Abdullah",
+    "nisba": "al-Kufi",
+    "laqab": "none",
+    "birth_year": 716,
+    "death_year": 778,
+    "birth_year_hijri": 97,
+    "death_year_hijri": 161,
+    "region": "Kufa / Basra, Iraq",
+    "reliability_assessment": {
+      "al-Dhahabi": "thiqah",
+      "Ibn Hajar": "thiqah"
+    },
+    "teachers": ["ibn-shihab-al-zuhri"],
+    "students": ["malik-ibn-anas"],
+    "narrated_hadiths_count": 3000,
+    "biography_summary": "Sufyan al-Thawri was a major early hadith scholar and jurist who founded the now-extinct Thawri school of law. He was known for his piety, his opposition to political tyranny, and his extensive knowledge of hadith and fiqh."
+  }
+]

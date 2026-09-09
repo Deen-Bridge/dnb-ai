@@ -32,13 +32,14 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
 
+from async_runtime import http_client_pool
 from semantic_cache import get_keyed_cache
 
 logger = logging.getLogger(__name__)
@@ -164,24 +165,19 @@ async def fetch_gold_price(
     Returns None when every source fails, which is the caller's cue to fall
     back to the configured default.
     """
-    owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=GOLD_PRICE_TIMEOUT)
-    try:
-        for source in GOLD_PRICE_SOURCES:
-            try:
-                response = await client.get(source.url)
-                response.raise_for_status()
-                payload = response.json()
-            except (httpx.HTTPError, ValueError) as exc:
-                logger.warning("Gold price source %s failed: %s", source.name, exc)
-                continue
-            price = parse_price(payload, source)
-            if price is not None:
-                return {"price": price, "source": source.name}
-        return None
-    finally:
-        if owns_client:
-            await client.aclose()
+    client = client or http_client_pool.get()
+    for source in GOLD_PRICE_SOURCES:
+        try:
+            response = await client.get(source.url, timeout=GOLD_PRICE_TIMEOUT)
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Gold price source %s failed: %s", source.name, exc)
+            continue
+        price = parse_price(payload, source)
+        if price is not None:
+            return {"price": price, "source": source.name}
+    return None
 
 
 def _fallback_quote(reason: str) -> NisabQuote:
@@ -227,7 +223,7 @@ async def get_nisab(
         source=result["source"],
         gold_price_usd_per_ounce=str(price_per_ounce),
         gold_price_usd_per_gram=str((price_per_ounce / GRAMS_PER_TROY_OUNCE).quantize(Decimal("0.01"))),
-        as_of=datetime.now(UTC).isoformat(timespec="seconds"),
+        as_of=datetime.now(timezone.utc).isoformat(timespec="seconds"),  # noqa: UP017
     )
     if use_cache:
         cache.put(CACHE_KEY, quote.model_dump(), ttl_seconds=NISAB_CACHE_TTL_SECONDS)

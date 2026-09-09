@@ -43,6 +43,7 @@ The platform is composed of three services:
 - 🗺️ **Personalized learning paths** — an ordered, justified "what to study next" drawn strictly from a caller-supplied course catalog, with grounding enforced in code so the model can never recommend a non-catalog or already-completed course
 - 📖 **Tafsir-grounded ayah explanations** — retrieved from named classical works, never paraphrased from model memory
 - 📚 **Structured citations** — Quran and Hadith references returned as validated, typed objects on every answer, bounds-checked against the 114-surah index
+- 🎙️ **Voice-note transcription & Islamic audio analysis** — offline language/dialect ID, recitation detection, question extraction, terminology recognition, speaker estimate, timeline and noise assessment over transcribed audio
 - ⚡ **FastAPI** with automatic OpenAPI docs at `/docs`
 
 ## 🔗 API
@@ -58,11 +59,15 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
+| `GET` | `/metrics` | Prometheus format metrics for monitoring & alerting (see [Observability](docs/observability.md)) |
+| `GET` | `/metrics/json` | JSON telemetry snapshot (model calls, latency, tokens, cache) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/learning-path` | Personalized, catalog-grounded study path from a learner profile + progress (see [Learning-path contract](#learning-path-contract-for-dnb-backend)) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
+| `POST` | `/tafsir/compare` | Compare 10–12 retrieved tafsir works with consensus, divergence, methodology, and chronology |
 | `GET` | `/tafsir/sources` | Tafsir works available for retrieval, and their languages |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
+| `GET` | `/uncertainty/taxonomy` | Islamic epistemology taxonomy and uncertainty quantification categories |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
 | `GET` | `/review/{id}` | A single review item (reviewer token) |
@@ -199,6 +204,13 @@ services:
 | `TOP_K` | Top-K sampling value | 40 |
 | `MAX_OUTPUT_TOKENS` | Maximum response tokens | 2048 |
 | `PORT` | Server port used by Uvicorn | 8000 |
+| `LLM_MAX_CONCURRENCY` | Maximum simultaneous model generations per process; excess requests wait without blocking the event loop | `100` |
+| `ASYNC_BACKGROUND_WORKERS` | Workers for prioritized persistence, memory extraction, and summarization tasks | `4` |
+| `ASYNC_BACKGROUND_QUEUE_SIZE` | Maximum queued response-side tasks before new work is rejected and logged | `1000` |
+| `ASYNC_SHUTDOWN_GRACE_SECONDS` | Time allowed for background work to drain before cancellation during shutdown | `10` |
+| `HTTP_MAX_CONNECTIONS` | Maximum outbound HTTP connections retained by the shared pool | `200` |
+| `HTTP_MAX_KEEPALIVE_CONNECTIONS` | Maximum idle keep-alive connections retained by the shared pool | `50` |
+| `HTTP_KEEPALIVE_EXPIRY_SECONDS` | Idle lifetime for pooled outbound HTTP connections | `30` |
 | `SEMANTIC_CACHE_ENABLED` | Enable semantic response cache (`1`/`true`/`yes`) | `0` (disabled) |
 | `SEMANTIC_CACHE_THRESHOLD` | Minimum cosine similarity for a cache hit | `0.95` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | Entry time-to-live in seconds | `86400` (24h) |
@@ -229,6 +241,9 @@ services:
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+| `METRICS_TOKEN` | Bearer token / secret header for `/metrics` endpoint protection | — (unprotected) |
+| `METRICS_IP_ALLOWLIST` | Comma-separated allowed IPs/CIDRs for `/metrics` | — (unprotected) |
+| `ENABLE_METRICS` | Toggle HTTP metrics instrumentation | `true` |
 
 ### Multilingual support (language field)
 
@@ -468,7 +483,7 @@ by double newlines (`\n\n`):
 3. **Done** — terminal event with the complete response, chat history, and
    metadata (confidence, hadith references, fiqh info, tafsir info, zakat info):
    ```json
-   data: {"type": "done", "chat_id": "<uuid>", "history": [...], "text": "...", "confidence": {...}}
+   data: {"type": "done", "chat_id": "<uuid>", "history": [...], "text": "...", "cached": false, "confidence": {...}}
    ```
 
 4. **Error** — if an upstream error occurs mid-stream, a terminal error event
@@ -492,6 +507,39 @@ curl -N -X POST http://localhost:8000/chat/stream \
 ```
 
 The `-N` flag disables curl's output buffering so text appears incrementally.
+
+#### Response caching
+
+The streaming path consults the same two-tier cache as `POST /chat` — exact
+match first, embedding similarity second — under the same `cache_scope`, so an
+answer cached by either endpoint is served by both, and one user's answers are
+never read by another. On a hit no model call is made: the stored answer is
+replayed as ordinary `content` deltas, the `done` event carries
+`"cached": true`, and the session is seeded with the turn so a follow-up still
+has context.
+
+Every response carries `X-Cache-Tier: exact | semantic | miss` and
+`X-Semantic-Cache: hit | miss | bypass`; `X-Cache-Bypass: 1` on the request
+forces a fresh generation. Eligibility is the one `cache_eligible()` predicate
+both endpoints share: first message of a chat — decided from the session store,
+not from process-local state, so a resumed conversation is never mistaken for a
+new one — no `context`, no tafsir/zakat/purchase/personal retrieval, no
+`language` or `madhhab` (both reshape the answer without changing the prompt
+the key is built from), and an input-gate verdict of plain `allow`. Only
+non-abstained answers are written.
+
+The cache is off by default. Set `SEMANTIC_CACHE_ENABLED=1` to turn it on; the
+full configuration table is in [`docs/latency.md`](docs/latency.md). Until it
+is set, every response reports `X-Semantic-Cache: miss`.
+
+A replay carries the same `confidence` block the original asker saw, so the
+`done` event has the same shape whichever branch served the turn.
+
+Measured against a stub provider streaming four 0.4 s chunks, a repeat question
+goes from 1625 ms to 12 ms end-to-end (99.2 %), with first text on screen at
+9 ms instead of 409 ms. Reproduce with
+`python -m scripts.bench_stream_cache`; the method and the full table are in
+[`docs/latency.md`](docs/latency.md).
 
 #### Safety, telemetry, and confidence
 
@@ -559,6 +607,36 @@ In `/chat`, a verse-explanation question ("what does Surah al-'Asr mean?",
 passages, with the model instructed to attribute each claim to a named mufassir
 and to surface — not flatten — points where the mufassirun differ. The response
 carries a `tafsir` block naming the works whose text actually backed the answer.
+
+#### Comparative tafsir
+
+`POST /tafsir/compare` compares one ayah across the configured Quran.com tafsir
+catalog. The default request retrieves all 12 registered works, while a custom
+request must name 10–12 distinct works. The response includes:
+
+- source text with author, language, historical era, death year where known,
+  methodology labels, and the broad perspective label recorded for that work;
+- deterministic token-similarity clusters with support ratios for high-support
+  groupings;
+- separate attributed positions for divergences and source-specific insights;
+- chronological coverage and methodology notes;
+- an optional low-temperature model synthesis whose consensus, divergence,
+  insight, and citation fields are validated against the retrieved source keys.
+
+Unavailable works remain visible under `unavailable` and never count as
+evidence. Language fallback is labelled with the language actually retrieved.
+The endpoint accepts one ayah rather than a range so that each comparison has a
+single subject and its consensus and divergence claims cannot mix unrelated
+verses. The configured catalog currently represents classical, modern, and
+contemporary works, primarily within the perspectives exposed by Quran.com; the
+response reports that coverage instead of implying unsupported sectarian
+balance.
+
+```bash
+curl -X POST http://localhost:8000/tafsir/compare \
+  -H 'Content-Type: application/json' \
+  -d '{"reference": "103:2", "language": "en"}'
+```
 
 ### Zakat (on-chain, with a live nisab)
 
@@ -628,6 +706,33 @@ link per hash. Without history the assistant says it cannot see purchases;
 memos are treated as untrusted data so injection text cannot change behavior.
 Purchase answers are never written to the semantic cache and include a
 `purchases` block on the response.
+
+### Voice-note transcription & audio analysis
+
+Voice notes and short audio clips can be transcribed and analyzed with a
+deterministic offline pipeline, with optional Gemini or Whisper backends for
+actual speech-to-text:
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `POST` | `/audio/transcribe` | Transcribe an uploaded clip (`MP3`, `WAV`, `M4A`, `OGG`, ≤ 25 MiB) into timestamped segments |
+| `POST` | `/audio/analyze` | Transcribe *and* run the full offline Islamic-audio analysis |
+| `POST` | `/audio/generate` | Draft a grounded answer from a transcript |
+| `GET` | `/audio/terminology` | List the recognised Islamic terminology glossary (~60 entries) |
+| `GET` | `/audio/formats` | List supported formats and MIME types |
+
+The `analyze` pipeline adds, entirely offline: language/dialect identification
+(Arabic dialect families: Egyptian, Levantine, Gulf, Maghrebi), Quranic
+recitation detection, question extraction with timestamps, Islamic-terminology
+recognition, a conservative speaker estimate, a timeline of key moments, and an
+emotional/spiritual tone read via the same engine as `/sentiment`.
+
+Backends are selected from the environment: `GEMINI_API_KEY` enables the default
+Gemini transcriber and responder, `WHISPER_API_KEY` / `WHISPER_API_BASE` route to
+any OpenAI-compatible Whisper endpoint, and with neither key set the endpoints
+behave read-only (formats + terminology) or answer with the built-in template
+responder. WAV uploads also get a noise/SNR assessment that recommends a
+denoising profile.
 
 ### Answer feedback & the quality loop
 
@@ -773,7 +878,7 @@ Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI ru
 
 ## 🌊 Contributing & Drips Wave
 
-This repository participates in the **[Stellar Drips Wave](https://www.drips.network/wave/stellar)** bounty program — contributors earn Points (and real rewards) for resolving this repo's issues during a Wave, with complexity tiers set in the Drips Wave app.
+This repository is hoping to  participates in the  **[Stellar Drips Wave](https://www.drips.network/wave/stellar)** bounty program — contributors earn Points (and real rewards) for resolving this repo's issues during a Wave, with complexity tiers set in the Drips Wave app.
 
 - All pull requests target the **`dev`** branch (`main` is releases only)
 - CI must pass before review

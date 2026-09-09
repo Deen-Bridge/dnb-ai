@@ -34,6 +34,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from async_runtime import TaskPriority, background_tasks
+
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "")
@@ -163,6 +165,21 @@ class ReviewStore:
                 self._local[item.id] = item
         else:
             self._local[item.id] = item
+        try:
+            import metrics
+
+            if self._use_redis:
+                # In Redis, queue depth will be accurate on stats / gauge refresh.
+                background_tasks.submit(
+                    metrics.refresh_scholar_queue_depth,
+                    priority=TaskPriority.LOW,
+                    name="refresh-scholar-queue-depth",
+                )
+            else:
+                pending_count = sum(1 for it in self._local.values() if it.status is ReviewStatus.PENDING)
+                metrics.set_scholar_queue_depth(pending_count)
+        except Exception:  # noqa: BLE001
+            pass
         logger.info(
             "Queued answer %s for scholar review (confidence=%.2f)",
             item.id,
@@ -269,6 +286,21 @@ class ReviewStore:
         else:
             self._local[item.id] = item
 
+        try:
+            import metrics
+
+            if self._use_redis:
+                background_tasks.submit(
+                    metrics.refresh_scholar_queue_depth,
+                    priority=TaskPriority.LOW,
+                    name="refresh-scholar-queue-depth",
+                )
+            else:
+                pending_count = sum(1 for it in self._local.values() if it.status is ReviewStatus.PENDING)
+                metrics.set_scholar_queue_depth(pending_count)
+        except Exception:  # noqa: BLE001
+            pass
+
         logger.info("Review %s recorded: %s", item.id, verdict.value)
         return item
 
@@ -307,6 +339,12 @@ class ReviewStore:
             await self._redis.delete(PENDING_INDEX, REVIEWED_INDEX)
         else:
             self._local.clear()
+        try:
+            import metrics
+
+            metrics.set_scholar_queue_depth(0)
+        except Exception:  # noqa: BLE001
+            pass
 
     # -- internals ----------------------------------------------------------
 

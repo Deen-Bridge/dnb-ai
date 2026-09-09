@@ -33,9 +33,10 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, Query
 from pydantic import BaseModel, Field, model_validator
 
+from errors import APIException
 from review_store import (
     AlreadyReviewedError,
     ReviewItem,
@@ -58,14 +59,19 @@ def require_reviewer(token: str | None) -> None:
     than leaving the queue readable by anyone who guesses the path.
     """
     if not SCHOLAR_REVIEW_TOKEN:
-        raise HTTPException(
+        raise APIException(
             status_code=503,
-            detail=("Scholar review is not configured. Set SCHOLAR_REVIEW_TOKEN to enable the reviewer endpoints."),
+            detail="Scholar review is not configured. Set SCHOLAR_REVIEW_TOKEN to enable the reviewer endpoints.",
+            hint="Configure the SCHOLAR_REVIEW_TOKEN environment variable in server configuration to enable access to the scholar review queue.",
         )
     # Constant-time comparison: a timing-distinguishable check on a shared
     # secret is worth avoiding even on a low-traffic endpoint.
     if not token or not secrets.compare_digest(token, SCHOLAR_REVIEW_TOKEN):
-        raise HTTPException(status_code=401, detail="A valid X-Review-Token header is required.")
+        raise APIException(
+            status_code=401,
+            detail="A valid X-Review-Token header is required.",
+            hint="Provide the configured review token in the 'X-Review-Token' HTTP header (e.g., 'X-Review-Token: <token>').",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +233,11 @@ async def get_item(item_id: str, x_review_token: str | None = Header(None)) -> R
     require_reviewer(x_review_token)
     item = await get_review_store().get(item_id)
     if item is None:
-        raise HTTPException(status_code=404, detail=f"No review item {item_id}.")
+        raise APIException(
+            status_code=404,
+            detail=f"No review item {item_id}.",
+            hint="Verify the item_id UUID. Use 'GET /review/pending' to list all currently queued items awaiting review.",
+        )
     return item
 
 
@@ -253,12 +263,17 @@ async def record_verdict(
             reviewer_note=request.note,
         )
     except AlreadyReviewedError as exc:
-        raise HTTPException(
+        raise APIException(
             status_code=409,
-            detail=(f"Item {item_id} was already reviewed ({exc.item.status.value}); it cannot be decided twice."),
+            detail=f"Item {item_id} was already reviewed ({exc.item.status.value}); it cannot be decided twice.",
+            hint="This review item has already received a verdict and is finalized. Use 'GET /review/reviewed' to view decided items.",
         ) from exc
     if item is None:
-        raise HTTPException(status_code=404, detail=f"No review item {item_id}.")
+        raise APIException(
+            status_code=404,
+            detail=f"No review item {item_id}.",
+            hint="Verify the item_id exists in the review queue. Use 'GET /review/pending' to check pending items.",
+        )
 
     # Both sinks block — one on disk, one on the embedding API — so they run
     # off the event loop rather than stalling every other in-flight request.

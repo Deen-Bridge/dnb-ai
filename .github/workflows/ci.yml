@@ -57,6 +57,9 @@ jobs:
           python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings | tee /tmp/ci-backfill-2.log
           grep -q "0 added, 0 updated" /tmp/ci-backfill-2.log
 
+      - name: Run hybrid search tests
+        run: pytest -q tests/test_hybrid_search.py
+
       - name: Run fiqh tests
         run: pytest -q tests/test_fiqh.py
 
@@ -66,8 +69,8 @@ jobs:
       - name: Run structured citation tests
         run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 
-      - name: Run confidence and abstention tests
-        run: pytest -q tests/test_confidence.py
+      - name: Run confidence, uncertainty, and abstention tests
+        run: pytest -q tests/test_confidence.py tests/test_uncertainty.py
 
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
@@ -111,11 +114,45 @@ jobs:
       - name: Run Islamic answer evaluation harness tests
         run: pytest -q tests/test_evals.py
 
+      - name: Run streaming cache tests
+        run: pytest -q tests/test_stream_cache.py
+
+      - name: Verify the streaming cache measurably cuts latency (offline)
+        timeout-minutes: 5
+        run: python -m scripts.bench_stream_cache --rounds 3 --chunk-delay 0.2
+
       - name: Run chat endpoint tests
         run: pytest -q tests/test_chat_api.py
 
       - name: Run chat request validation tests
         run: pytest -q tests/test_chat_validation.py
+
+      - name: Run async runtime tests
+        run: pytest -q tests/test_async_runtime.py
+
+      - name: Run factual consistency tests
+        run: pytest -q tests/test_factual_consistency.py
+
+      - name: Run Swahili language processing tests
+        run: pytest -q tests/test_swahili.py
+
+      - name: Run audio analysis tests
+        run: pytest -q tests/test_audio_analysis.py
+
+      - name: Run thematic Quran retrieval tests
+        run: pytest -q tests/test_thematic_quran.py
+
+      - name: Run Quranic concordance tests
+        run: pytest -q tests/test_concordance.py
+
+      - name: Validate theme-verse concordance dataset
+        run: python scripts/build_theme_mappings.py --check
+
+      - name: Run manuscript upload tests
+        run: pytest -q tests/test_manuscript_upload.py
+
+      - name: Run image content analysis tests
+        run: pytest -q tests/test_image_analysis.py
 
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
@@ -133,9 +170,10 @@ jobs:
       - name: Verify container starts and /ping returns 200
         run: |
           docker run -d --name test-ai -p 8000:8000 -e GEMINI_API_KEY=dummy deenbridge-ai:ci
-          sleep 5
-          curl -sf http://localhost:8000/ping
+          timeout 30s bash -c 'until curl -sf http://localhost:8000/ping; do sleep 1; done'
+          docker logs test-ai
           docker stop test-ai
+          docker rm test-ai
 
   perf:
     name: Performance Budget
@@ -151,7 +189,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install locust==2.42.2
+          pip install locust>=2.42.2
       - name: Start mock service
         env:
           MOCK_UPSTREAMS: '1'
@@ -159,10 +197,24 @@ jobs:
           MOCK_HORIZON_LATENCY_MS: '25'
           SAFETY_PIPELINE_ENABLED: 'false'
           AUTH_DISABLED: 'true'
+          RATE_LIMIT_ENABLED: 'false'
           GEMINI_API_KEY: ''
         run: |
           uvicorn main:app --host 127.0.0.1 --port 8000 > /tmp/deenbridge-ai.log 2>&1 &
-          for attempt in $(seq 1 30); do curl -sf http://127.0.0.1:8000/ping && break || sleep 1; done
+          success=0
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/ping; then
+              echo "Mock service started successfully on attempt $attempt"
+              success=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Mock service failed to start. Logs:"
+            cat /tmp/deenbridge-ai.log
+            exit 1
+          fi
       - name: Run load test
         run: |
           locust -f loadtest/locustfile.py --headless -H http://127.0.0.1:8000 -u 10 -r 2 -t 45s --csv=/tmp/locust --only-summary
