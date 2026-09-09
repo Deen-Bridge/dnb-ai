@@ -33,7 +33,7 @@ The platform is composed of three services:
 
 ## ✨ Features
 
-- 🤖 **Islamic context-aware responses** grounded in a curated system prompt
+- 🤖 **Islamic context-aware responses** — persona delivered via system instruction on every request, with injection-resistance guardrails
 - 🌍 **Multilingual support** — Arabic, English, Urdu, Malay, French, and more; always quotes Quran in Arabic script with translation
 - 🧵 **Conversation history** per chat session
 - 🛡️ **Content safety filters** on model output
