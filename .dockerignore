@@ -1,0 +1,46 @@
+# Dependencies and virtual environments
+venv/
+.venv/
+env/
+.eggs/
+*.egg-info/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment and secrets
+.env
+.env.*
+
+# Version control
+.git/
+.gitignore
+
+# CI/CD and editor config
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test and build artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg
+
+# Logs and review data
+*.log
+data/review/
+
+# Misc
+Makefile
+.coderabbit.yaml
+test/
+CONTRIBUTING.md
+README.md
+LICENSE
+render.yaml

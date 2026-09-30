@@ -1,0 +1,24 @@
+# Optional but recommended: `pip install pre-commit && pre-commit install`
+# runs the same checks CI runs, before the commit is made.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.0
+    hooks:
+      - id: mypy
+        # mypy needs the app's own dependencies to resolve imports the way CI does.
+        additional_dependencies:
+          - fastapi==0.115.12
+          - pydantic>=2.5.3
+          - pydantic-settings>=2.0.0
+          - httpx==0.28.1
+          - numpy==2.2.4
+          - types-PyYAML
+        pass_filenames: false
+        args: ["."]

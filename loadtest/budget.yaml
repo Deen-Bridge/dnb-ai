@@ -1,0 +1,24 @@
+chat-single:
+  max_p95_ms: 2500
+  min_rps: 0.2
+  max_error_rate: 0.10
+chat-multi-1:
+  max_p95_ms: 2500
+  min_rps: 0.1
+  max_error_rate: 0.10
+chat-multi-2:
+  max_p95_ms: 2500
+  min_rps: 0.1
+  max_error_rate: 0.10
+zakat-success:
+  max_p95_ms: 1500
+  min_rps: 0.2
+  max_error_rate: 0.10
+zakat-400:
+  max_p95_ms: 1000
+  min_rps: 0.1
+  max_error_rate: 0.10
+zakat-404:
+  max_p95_ms: 1500
+  min_rps: 0.1
+  max_error_rate: 0.10

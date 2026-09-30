@@ -48,9 +48,8 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
@@ -79,27 +78,27 @@ class ChainType(str, Enum):
 
 # Weakest-first — used both to resolve a composite raw string ("Hasan Sahih")
 # and to aggregate across multiple graders (weakest applicable grade wins).
-_STRENGTH_PRIORITY: Tuple[Strength, ...] = (
+_STRENGTH_PRIORITY: tuple[Strength, ...] = (
     Strength.MAWDU,
     Strength.DAIF,
     Strength.HASAN,
     Strength.SAHIH,
 )
 
-_STRENGTH_KEYWORDS: Dict[Strength, Tuple[str, ...]] = {
+_STRENGTH_KEYWORDS: dict[Strength, tuple[str, ...]] = {
     Strength.MAWDU: ("mawdu", "batil"),
     Strength.DAIF: ("daif", "da'if", "munkar", "shadh"),
     Strength.HASAN: ("hasan",),
     Strength.SAHIH: ("sahih",),
 }
 
-_CHAIN_PRIORITY: Tuple[ChainType, ...] = (
+_CHAIN_PRIORITY: tuple[ChainType, ...] = (
     ChainType.MAUQUF,
     ChainType.MAQTU,
     ChainType.MURSAL,
 )
 
-_CHAIN_KEYWORDS: Dict[ChainType, Tuple[str, ...]] = {
+_CHAIN_KEYWORDS: dict[ChainType, tuple[str, ...]] = {
     ChainType.MAUQUF: ("mauquf", "muquf"),
     ChainType.MAQTU: ("maqtu",),
     ChainType.MURSAL: ("mursal",),
@@ -110,7 +109,7 @@ def _contains_word(haystack: str, word: str) -> bool:
     return re.search(r"\b" + re.escape(word) + r"\b", haystack) is not None
 
 
-def parse_grade_string(raw: str) -> Tuple[Strength, ChainType]:
+def parse_grade_string(raw: str) -> tuple[Strength, ChainType]:
     """Decompose one grader's free-text grade into (strength, chain_type).
 
     Unrecognized or blank strings (e.g. "-") yield Strength.UNKNOWN. Chain
@@ -126,15 +125,15 @@ def parse_grade_string(raw: str) -> Tuple[Strength, ChainType]:
             break
 
     chain_type = ChainType.MARFU
-    for candidate in _CHAIN_PRIORITY:
-        if any(_contains_word(lowered, kw) for kw in _CHAIN_KEYWORDS[candidate]):
-            chain_type = candidate
+    for chain_candidate in _CHAIN_PRIORITY:
+        if any(_contains_word(lowered, kw) for kw in _CHAIN_KEYWORDS[chain_candidate]):
+            chain_type = chain_candidate
             break
 
     return strength, chain_type
 
 
-def aggregate_strength(strengths: List[Strength]) -> Strength:
+def aggregate_strength(strengths: list[Strength]) -> Strength:
     """Weakest-wins aggregation across multiple graders' strengths."""
     present = [s for s in strengths if s != Strength.UNKNOWN]
     if not present:
@@ -145,7 +144,7 @@ def aggregate_strength(strengths: List[Strength]) -> Strength:
     return Strength.UNKNOWN
 
 
-def aggregate_chain_type(chain_types: List[ChainType]) -> ChainType:
+def aggregate_chain_type(chain_types: list[ChainType]) -> ChainType:
     """If any grader flags a non-marfu chain, surface that (most cautious)."""
     for candidate in _CHAIN_PRIORITY:
         if candidate in chain_types:
@@ -157,7 +156,7 @@ def aggregate_chain_type(chain_types: List[ChainType]) -> ChainType:
 # Collection alias normalization
 # ---------------------------------------------------------------------------
 
-COLLECTION_NAMES: Dict[str, str] = {
+COLLECTION_NAMES: dict[str, str] = {
     "bukhari": "Sahih al-Bukhari",
     "muslim": "Sahih Muslim",
     "abudawud": "Sunan Abu Dawud",
@@ -167,7 +166,7 @@ COLLECTION_NAMES: Dict[str, str] = {
     "malik": "Muwatta Malik",
 }
 
-_COLLECTION_ALIASES: Dict[str, str] = {
+_COLLECTION_ALIASES: dict[str, str] = {
     "bukhari": "bukhari",
     "al bukhari": "bukhari",
     "al-bukhari": "bukhari",
@@ -218,10 +217,10 @@ def _clean(name: str) -> str:
 # _COLLECTION_ALIASES is authored with mixed punctuation for readability;
 # build a lookup keyed by the same normalization used on user input so
 # "Jami' at-Tirmidhi" and "jami at tirmidhi" resolve identically.
-_NORMALIZED_ALIASES: Dict[str, str] = {_clean(k): v for k, v in _COLLECTION_ALIASES.items()}
+_NORMALIZED_ALIASES: dict[str, str] = {_clean(k): v for k, v in _COLLECTION_ALIASES.items()}
 
 
-def normalize_collection(name: str) -> Optional[str]:
+def normalize_collection(name: str) -> str | None:
     """Map a free-text collection name/alias to its canonical key, or None."""
     if not name:
         return None
@@ -257,11 +256,11 @@ class RawReference:
     raw: str
     collection: str
     number: int
-    book: Optional[int]
-    span: Tuple[int, int]
+    book: int | None
+    span: tuple[int, int]
 
 
-def parse_references(text: str) -> List[RawReference]:
+def parse_references(text: str) -> list[RawReference]:
     """Find hadith citations in *text* and normalize the collection + number.
 
     Handles common phrasings such as "Sahih al-Bukhari 1", "Bukhari #1", and
@@ -269,12 +268,12 @@ def parse_references(text: str) -> List[RawReference]:
     recognized collection + number are simply not returned — they'll surface
     as ordinary text, not a false claim of grading.
     """
-    references: List[RawReference] = []
+    references: list[RawReference] = []
     for match in _ALIAS_PATTERN.finditer(text):
         collection = _COLLECTION_ALIASES.get(match.group(1).lower())
         if collection is None:
             continue
-        tail = text[match.end():match.end() + 60]
+        tail = text[match.end() : match.end() + 60]
         number_match = _NUMBER_AFTER_PATTERN.match(tail)
         if not number_match:
             continue
@@ -285,7 +284,7 @@ def parse_references(text: str) -> List[RawReference]:
             end += 1
         references.append(
             RawReference(
-                raw=text[match.start():end].strip(),
+                raw=text[match.start() : end].strip(),
                 collection=collection,
                 number=number,
                 book=book,
@@ -304,18 +303,18 @@ def parse_references(text: str) -> List[RawReference]:
 class GradeRecord:
     collection: str
     hadith_number: int
-    book: Optional[int]
-    book_number: Optional[int]
+    book: int | None
+    book_number: int | None
     grade: Strength
     chain_type: ChainType
-    graders: List[Dict[str, str]] = field(default_factory=list)
+    graders: list[dict[str, str]] = field(default_factory=list)
 
 
 class GradingSource:
     """Pluggable lookup interface — a future RAG layer can implement this
     against retrieved hadith instead of the bundled offline dataset."""
 
-    def get(self, collection: str, number: int, book: Optional[int] = None) -> Optional[GradeRecord]:
+    def get(self, collection: str, number: int, book: int | None = None) -> GradeRecord | None:
         raise NotImplementedError
 
 
@@ -325,23 +324,27 @@ class BundledGradingSource(GradingSource):
     def __init__(self, data_dir: Path = DATA_DIR):
         self._data_dir = data_dir
 
-    @lru_cache(maxsize=None)
-    def _index(self, collection: str) -> Optional[Dict[str, Dict]]:
+    # B019: the grading sources are process-lifetime singletons, so this
+    # per-instance cache is bounded by the bundled collection count, not by
+    # request volume. Changing the caching strategy would be a behaviour
+    # change and belongs in its own PR.
+    @cache  # noqa: B019
+    def _index(self, collection: str) -> dict[str, dict] | None:
         path = self._data_dir / f"{collection}.json"
         if not path.exists():
             return None
         with open(path, encoding="utf-8") as f:
             payload = json.load(f)
 
-        by_number: Dict[int, Dict] = {}
-        by_book_number: Dict[Tuple[int, int], Dict] = {}
+        by_number: dict[int, dict] = {}
+        by_book_number: dict[tuple[int, int], dict] = {}
         for record in payload.get("hadiths", []):
             by_number[record["n"]] = record
             if record.get("book") is not None and record.get("bn") is not None:
                 by_book_number[(record["book"], record["bn"])] = record
         return {"by_number": by_number, "by_book_number": by_book_number}
 
-    def get(self, collection: str, number: int, book: Optional[int] = None) -> Optional[GradeRecord]:
+    def get(self, collection: str, number: int, book: int | None = None) -> GradeRecord | None:
         index = self._index(collection)
         if index is None:
             return None
@@ -377,37 +380,49 @@ def get_default_source() -> GradingSource:
 
 class HadithReference(BaseModel):
     raw: str
-    collection: Optional[str] = None
-    hadith_number: Optional[int] = None
+    collection: str | None = None
+    hadith_number: int | None = None
     grade: str
-    grader: Optional[str] = None
-    chain_type: Optional[str] = None
+    grader: str | None = None
+    chain_type: str | None = None
     verified: bool
     flagged: bool
-    note: Optional[str] = None
+    note: str | None = None
 
 
 _CAVEAT_KEYWORDS = (
-    "weak", "da'if", "daif", "fabricat", "not authentic", "not to be relied",
-    "not reliable", "should not be relied", "for encouragement", "targhib",
-    "tarhib", "not be used as evidence", "grading unverified", "unverified",
-    "not a strong basis", "narrated for",
+    "weak",
+    "da'if",
+    "daif",
+    "fabricat",
+    "not authentic",
+    "not to be relied",
+    "not reliable",
+    "should not be relied",
+    "for encouragement",
+    "targhib",
+    "tarhib",
+    "not be used as evidence",
+    "grading unverified",
+    "unverified",
+    "not a strong basis",
+    "narrated for",
 )
 
 _CAVEAT_WINDOW = 150
 
 
-def _has_nearby_caveat(text: str, span: Tuple[int, int]) -> bool:
+def _has_nearby_caveat(text: str, span: tuple[int, int]) -> bool:
     start = max(0, span[0] - _CAVEAT_WINDOW)
     end = min(len(text), span[1] + _CAVEAT_WINDOW)
     window = text[start:end].lower()
     return any(keyword in window for keyword in _CAVEAT_KEYWORDS)
 
 
-def annotate(text: str, source: Optional[GradingSource] = None) -> List[HadithReference]:
+def annotate(text: str, source: GradingSource | None = None) -> list[HadithReference]:
     """Parse hadith citations out of *text* and grade each one."""
     source = source or _default_source
-    results: List[HadithReference] = []
+    results: list[HadithReference] = []
     for ref in parse_references(text):
         record = source.get(ref.collection, ref.number, ref.book)
         has_caveat = _has_nearby_caveat(text, ref.span)
@@ -457,7 +472,7 @@ def annotate(text: str, source: Optional[GradingSource] = None) -> List[HadithRe
     return results
 
 
-def build_caution_note(text: str, references: List[HadithReference]) -> Optional[str]:
+def build_caution_note(text: str, references: list[HadithReference]) -> str | None:
     """Compose a single caution suffix for the response, or None if not needed.
 
     Two triggers, per the grading policy:
@@ -467,19 +482,17 @@ def build_caution_note(text: str, references: List[HadithReference]) -> Optional
       the whole answer.
     """
     flagged = [r for r in references if r.flagged]
-    sole_unverified = (
-        len(references) == 1 and not references[0].verified
-    )
+    sole_unverified = len(references) == 1 and not references[0].verified
 
     if not flagged and not sole_unverified:
         return None
 
     lines = ["Note on hadith authenticity in this answer:"]
     for r in flagged:
-        lines.append(f"- \"{r.raw}\" — {r.note}.")
+        lines.append(f'- "{r.raw}" — {r.note}.')
     if sole_unverified:
         lines.append(
-            f"- \"{references[0].raw}\" is the only hadith cited here and its grading "
+            f'- "{references[0].raw}" is the only hadith cited here and its grading '
             "could not be verified against the bundled dataset — treat it as unverified, "
             "not as an authentic narration."
         )

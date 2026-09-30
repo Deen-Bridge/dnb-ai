@@ -37,19 +37,24 @@ introducing a second cache system.
 from __future__ import annotations
 
 import asyncio
+import collections
+import copy
 import html
 import json
 import logging
 import os
 import re
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, cast
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from async_runtime import http_client_pool
+from errors import APIException
 from semantic_cache import get_keyed_cache
 
 logger = logging.getLogger(__name__)
@@ -62,16 +67,16 @@ QURAN_API_BASE = os.getenv("QURAN_API_BASE", "https://api.quran.com/api/v4")
 QURAN_API_TIMEOUT = float(os.getenv("QURAN_API_TIMEOUT", "15"))
 
 # Quran.com translation resource ids, by language.
-TRANSLATION_IDS: Dict[str, int] = {
-    "en": 20,   # Saheeh International
-    "ur": 97,   # Maulana Fateh Muhammad Jalandhari
+TRANSLATION_IDS: dict[str, int] = {
+    "en": 20,  # Saheeh International
+    "ur": 97,  # Maulana Fateh Muhammad Jalandhari
     "bn": 163,  # Taisirul Quran
-    "ru": 79,   # Elmir Kuliev
+    "ru": 79,  # Elmir Kuliev
 }
 DEFAULT_TRANSLATION_LANGUAGE = "en"
 
 # Language codes used in TAFSIR_REGISTRY, spelled out for display.
-LANGUAGE_NAMES: Dict[str, str] = {
+LANGUAGE_NAMES: dict[str, str] = {
     "en": "english",
     "ar": "arabic",
     "ur": "urdu",
@@ -81,6 +86,14 @@ LANGUAGE_NAMES: Dict[str, str] = {
 
 MAX_AYAT_PER_REQUEST = int(os.getenv("TAFSIR_MAX_AYAT", "10"))
 MAX_TAFSIRS_PER_REQUEST = 6
+MAX_COMPARISON_TAFSIRS = 12
+MIN_COMPARISON_TAFSIRS = 10
+COMPARISON_REPRESENTATIVE_SENTENCES = 2
+COMPARISON_REPRESENTATIVE_CHARS = 500
+DEFAULT_SIMILARITY_THRESHOLD = 0.35
+
+MAX_REFERENCES_PER_BATCH = 10
+MAX_TOTAL_AYAT_PER_BATCH = 20
 
 # Wall-clock budget for retrieving tafsir inside a /chat turn. Retrieval runs
 # concurrently, but a slow upstream must not hold a chat turn open indefinitely:
@@ -116,19 +129,21 @@ class TafsirWork(BaseModel):
     key: str
     name: str
     author: str
-    slugs: Dict[str, str] = Field(
-        ..., description="Language code -> Quran.com tafsir slug"
-    )
+    slugs: dict[str, str] = Field(..., description="Language code -> Quran.com tafsir slug")
+    era: str = Field(default="unknown", description="Broad historical period of the work")
+    death_year_ah: int | None = Field(default=None, description="Author's death year in the Hijri calendar, when known")
+    methodologies: list[str] = Field(default_factory=list, description="Methodological descriptors for comparison")
+    perspective: str = Field(default="not classified", description="Broad perspective label; not a sectarian ruling")
 
-    def slug_for(self, language: str) -> Optional[str]:
+    def slug_for(self, language: str) -> str | None:
         return self.slugs.get(language)
 
     @property
-    def languages(self) -> List[str]:
+    def languages(self) -> list[str]:
         return sorted(self.slugs)
 
 
-TAFSIR_REGISTRY: Dict[str, TafsirWork] = {
+TAFSIR_REGISTRY: dict[str, TafsirWork] = {
     work.key: work
     for work in [
         TafsirWork(
@@ -141,72 +156,118 @@ TAFSIR_REGISTRY: Dict[str, TafsirWork] = {
                 "ur": "tafseer-ibn-e-kaseer-urdu",
                 "bn": "bn-tafseer-ibn-e-kaseer",
             },
+            era="classical",
+            death_year_ah=774,
+            methodologies=["narration", "hadith", "linguistic"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="tabari",
             name="Jami' al-Bayan (Tafsir al-Tabari)",
             author="Ibn Jarir al-Tabari (d. 310 AH)",
             slugs={"ar": "ar-tafsir-al-tabari"},
+            era="classical",
+            death_year_ah=310,
+            methodologies=["narration", "linguistic", "variant_readings"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="qurtubi",
             name="Al-Jami' li-Ahkam al-Qur'an (Tafsir al-Qurtubi)",
             author="Al-Qurtubi (d. 671 AH)",
             slugs={"ar": "ar-tafseer-al-qurtubi"},
+            era="classical",
+            death_year_ah=671,
+            methodologies=["juristic", "linguistic", "narration"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="saadi",
             name="Taysir al-Karim al-Rahman (Tafsir al-Sa'di)",
             author="Abd al-Rahman al-Sa'di (d. 1376 AH)",
             slugs={"ar": "ar-tafseer-al-saddi", "ru": "ru-tafseer-al-saddi"},
+            era="modern",
+            death_year_ah=1376,
+            methodologies=["thematic", "linguistic", "concise"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="baghawi",
             name="Ma'alim al-Tanzil (Tafsir al-Baghawi)",
             author="Al-Baghawi (d. 516 AH)",
             slugs={"ar": "ar-tafsir-al-baghawi"},
+            era="classical",
+            death_year_ah=516,
+            methodologies=["narration", "linguistic"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="muyassar",
             name="Al-Tafsir al-Muyassar",
             author="King Fahd Complex scholarly committee",
             slugs={"ar": "ar-tafsir-muyassar"},
+            era="contemporary",
+            methodologies=["concise", "thematic"],
+            perspective="institutional",
         ),
         TafsirWork(
             key="wasit",
             name="Al-Tafsir al-Wasit",
             author="Muhammad Sayyid Tantawi (d. 1431 AH)",
             slugs={"ar": "ar-tafsir-al-wasit"},
+            era="contemporary",
+            death_year_ah=1431,
+            methodologies=["linguistic", "thematic", "juristic"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="maarif-ul-quran",
             name="Ma'arif al-Qur'an",
             author="Mufti Muhammad Shafi (d. 1396 AH)",
             slugs={"en": "en-tafsir-maarif-ul-quran"},
+            era="modern",
+            death_year_ah=1396,
+            methodologies=["juristic", "narration", "thematic"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="bayan-ul-quran",
             name="Bayan ul Quran",
             author="Dr. Israr Ahmad (d. 1431 AH)",
             slugs={"ur": "tafsir-bayan-ul-quran"},
+            era="contemporary",
+            death_year_ah=1431,
+            methodologies=["thematic", "linguistic"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="fi-zilal",
             name="Fi Zilal al-Qur'an",
             author="Sayyid Qutb (d. 1386 AH)",
             slugs={"ur": "tafsir-fe-zalul-quran-syed-qatab"},
+            era="modern",
+            death_year_ah=1386,
+            methodologies=["thematic", "literary", "social"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="tazkirul-quran",
             name="Tazkirul Quran",
             author="Maulana Wahiduddin Khan (d. 1443 AH)",
             slugs={"en": "tazkirul-quran-en", "ur": "tazkiru-quran-ur"},
+            era="contemporary",
+            death_year_ah=1443,
+            methodologies=["thematic", "linguistic", "concise"],
+            perspective="Sunni",
         ),
         TafsirWork(
             key="ahsanul-bayaan",
             name="Tafsir Ahsanul Bayaan",
             author="Bayaan Foundation",
             slugs={"bn": "bn-tafsir-ahsanul-bayaan"},
+            era="contemporary",
+            methodologies=["concise", "thematic"],
+            perspective="institutional",
         ),
     ]
 }
@@ -214,9 +275,10 @@ TAFSIR_REGISTRY: Dict[str, TafsirWork] = {
 # Four classical works spanning narration-based (Ibn Kathir, al-Tabari), legal
 # (al-Qurtubi) and concise-summary (al-Sa'di) approaches — chosen so a default
 # request already shows more than one methodology.
-DEFAULT_TAFSIR_KEYS: Tuple[str, ...] = ("ibn-kathir", "tabari", "qurtubi", "saadi")
+DEFAULT_TAFSIR_KEYS: tuple[str, ...] = ("ibn-kathir", "tabari", "qurtubi", "saadi")
+DEFAULT_COMPARISON_TAFSIR_KEYS: tuple[str, ...] = tuple(TAFSIR_REGISTRY)
 
-TAFSIR_ALIASES: Dict[str, str] = {
+TAFSIR_ALIASES: dict[str, str] = {
     "ibnkathir": "ibn-kathir",
     "ibn kathir": "ibn-kathir",
     "ibn-katheer": "ibn-kathir",
@@ -237,7 +299,7 @@ TAFSIR_ALIASES: Dict[str, str] = {
 }
 
 
-def normalize_tafsir_key(raw: str) -> Optional[str]:
+def normalize_tafsir_key(raw: str) -> str | None:
     """Map a user-supplied tafsir name to a registry key, or None."""
     cleaned = " ".join((raw or "").strip().casefold().split())
     if not cleaned:
@@ -263,19 +325,19 @@ class Surah(BaseModel):
     arabic_name: str
     revelation_place: str
     ayah_count: int
-    aliases: List[str] = []
+    aliases: list[str] = []
 
 
 @lru_cache(maxsize=1)
-def load_surah_index() -> Tuple[Surah, ...]:
+def load_surah_index() -> tuple[Surah, ...]:
     with DATA_PATH.open(encoding="utf-8") as f:
         return tuple(Surah(**row) for row in json.load(f))
 
 
 @lru_cache(maxsize=1)
-def _name_lookup() -> Dict[str, int]:
+def _name_lookup() -> dict[str, int]:
     """Normalized surah name/alias -> surah number."""
-    lookup: Dict[str, int] = {}
+    lookup: dict[str, int] = {}
     for surah in load_surah_index():
         for label in [surah.name, surah.arabic_name, *surah.aliases]:
             lookup.setdefault(_normalize_surah_name(label), surah.number)
@@ -286,12 +348,18 @@ def _name_lookup() -> Dict[str, int]:
 # the lām assimilates and the consonant doubles — At-Tawbah, Ash-Shams,
 # Adh-Dhariyat — so the article cannot simply be matched as "al". Longest forms
 # first, so "adh" is tried before "ad".
-_SUN_ARTICLES: Tuple[Tuple[str, str], ...] = (
-    ("ash", "sh"), ("adh", "dh"), ("ath", "th"),
-    ("as", "s"), ("ad", "d"), ("an", "n"),
-    ("ar", "r"), ("at", "t"), ("az", "z"),
+_SUN_ARTICLES: tuple[tuple[str, str], ...] = (
+    ("ash", "sh"),
+    ("adh", "dh"),
+    ("ath", "th"),
+    ("as", "s"),
+    ("ad", "d"),
+    ("an", "n"),
+    ("ar", "r"),
+    ("at", "t"),
+    ("az", "z"),
 )
-_MOON_ARTICLES: Tuple[str, ...] = ("al", "ul")
+_MOON_ARTICLES: tuple[str, ...] = ("al", "ul")
 
 
 def _strip_article(collapsed: str) -> str:
@@ -303,16 +371,12 @@ def _strip_article(collapsed: str) -> str:
     name.
     """
     for article, consonant in _SUN_ARTICLES:
-        remainder = collapsed[len(article):]
-        if (
-            collapsed.startswith(article)
-            and remainder.startswith(consonant)
-            and len(remainder) > 2
-        ):
+        remainder = collapsed[len(article) :]
+        if collapsed.startswith(article) and remainder.startswith(consonant) and len(remainder) > 2:
             return remainder
     for article in _MOON_ARTICLES:
         if collapsed.startswith(article) and len(collapsed) > len(article) + 2:
-            return collapsed[len(article):]
+            return collapsed[len(article) :]
     return collapsed
 
 
@@ -327,21 +391,19 @@ def _normalize_surah_name(name: str) -> str:
     lowered = (name or "").casefold()
     lowered = re.sub(r"^surah?t?\s+", "", lowered)
     lowered = re.sub(r"[^\w؀-ۿ\s]", "", lowered)
-    lowered = re.sub(
-        r"^(al|ul|as|ash|adh|ath|ad|an|ar|at|az)\s+", r"\1", lowered
-    )
+    lowered = re.sub(r"^(al|ul|as|ash|adh|ath|ad|an|ar|at|az)\s+", r"\1", lowered)
     collapsed = re.sub(r"\s+", "", lowered)
     return _strip_article(collapsed)
 
 
-def surah_by_number(number: int) -> Optional[Surah]:
+def surah_by_number(number: int) -> Surah | None:
     index = load_surah_index()
     if 1 <= number <= len(index):
         return index[number - 1]
     return None
 
 
-def surah_by_name(name: str) -> Optional[Surah]:
+def surah_by_name(name: str) -> Surah | None:
     number = _name_lookup().get(_normalize_surah_name(name))
     return surah_by_number(number) if number else None
 
@@ -378,18 +440,15 @@ def validate_reference(surah: int, ayah: int) -> AyahRef:
     """
     record = surah_by_number(surah)
     if record is None:
-        raise InvalidReference(
-            f"Surah {surah} does not exist. Surah numbers run from 1 to 114."
-        )
+        raise InvalidReference(f"Surah {surah} does not exist. Surah numbers run from 1 to 114.")
     if ayah < 1 or ayah > record.ayah_count:
         raise InvalidReference(
-            f"Ayah {ayah} does not exist in surah {surah} ({record.name}), "
-            f"which has {record.ayah_count} ayat."
+            f"Ayah {ayah} does not exist in surah {surah} ({record.name}), which has {record.ayah_count} ayat."
         )
     return AyahRef(surah=surah, ayah=ayah)
 
 
-def parse_reference(reference: str) -> List[AyahRef]:
+def parse_reference(reference: str) -> list[AyahRef]:
     """Parse ``"103:1"``, ``"103:1-3"`` or ``"Al-Asr 1-3"`` into ayah refs.
 
     Raises ``InvalidReference`` for anything unparseable or out of bounds.
@@ -402,31 +461,25 @@ def parse_reference(reference: str) -> List[AyahRef]:
     parts = numeric.groupdict() if numeric else _match_named_reference(raw)
     if parts is None:
         raise InvalidReference(
-            f"Could not parse '{reference}'. Use a surah:ayah reference such as "
-            "'103:1' or a range such as '103:1-3'."
+            f"Could not parse '{reference}'. Use a surah:ayah reference such as '103:1' or a range such as '103:1-3'."
         )
 
-    surah = int(parts["surah"])
-    start = int(parts["start"])
-    end = int(parts["end"]) if parts.get("end") else start
+    surah = int(cast(str, parts["surah"]))
+    start = int(cast(str, parts["start"]))
+    end = int(cast(str, parts["end"])) if parts.get("end") else start
 
     if end < start:
-        raise InvalidReference(
-            f"Invalid range {start}-{end}: the last ayah comes before the first."
-        )
+        raise InvalidReference(f"Invalid range {start}-{end}: the last ayah comes before the first.")
 
     first = validate_reference(surah, start)
     last = validate_reference(surah, end)
     span = last.ayah - first.ayah + 1
     if span > MAX_AYAT_PER_REQUEST:
-        raise InvalidReference(
-            f"Range covers {span} ayat; at most {MAX_AYAT_PER_REQUEST} may be "
-            "requested at once."
-        )
+        raise InvalidReference(f"Range covers {span} ayat; at most {MAX_AYAT_PER_REQUEST} may be requested at once.")
     return [AyahRef(surah=surah, ayah=n) for n in range(first.ayah, last.ayah + 1)]
 
 
-def _match_named_reference(raw: str) -> Optional[Dict[str, Optional[str]]]:
+def _match_named_reference(raw: str) -> dict[str, str | None] | None:
     """Match 'Al-Asr 1-3' / 'surah al-baqarah 255' by surah name."""
     named = re.match(
         r"^(?P<name>[^\d]+?)\s*[:,]?\s*(?P<start>\d{1,3})"
@@ -452,9 +505,21 @@ def _match_named_reference(raw: str) -> Optional[Dict[str, Optional[str]]]:
 # Reused by main.py's /chat handler. Kept here (next to reference parsing)
 # rather than duplicated in the chat path.
 EXPLANATION_CUES = (
-    "tafsir", "tafseer", "explain", "explanation", "meaning", "what does",
-    "what do", "interpret", "commentary", "mufassir", "asbab", "context of",
-    "significance of", "why was", "revealed",
+    "tafsir",
+    "tafseer",
+    "explain",
+    "explanation",
+    "meaning",
+    "what does",
+    "what do",
+    "interpret",
+    "commentary",
+    "mufassir",
+    "asbab",
+    "context of",
+    "significance of",
+    "why was",
+    "revealed",
 )
 
 INLINE_REFERENCE_PATTERN = re.compile(
@@ -487,7 +552,7 @@ NAMED_SURAH_PATTERNS = (
 )
 
 
-def detect_ayah_references(prompt: str) -> List[AyahRef]:
+def detect_ayah_references(prompt: str) -> list[AyahRef]:
     """Return ayah references a verse-explanation question is asking about.
 
     Empty when the prompt is not a verse-explanation question, or when it names
@@ -502,10 +567,10 @@ def detect_ayah_references(prompt: str) -> List[AyahRef]:
     if not any(cue in lowered for cue in EXPLANATION_CUES):
         return []
 
-    refs: List[AyahRef] = []
+    refs: list[AyahRef] = []
     seen: set[str] = set()
 
-    def add(surah: int, start: int, end: Optional[int]) -> None:
+    def add(surah: int, start: int, end: int | None) -> None:
         last = end if end is not None else start
         if last < start or last - start + 1 > MAX_AYAT_PER_REQUEST:
             last = start
@@ -577,12 +642,9 @@ class TafsirText(BaseModel):
     author: str
     language: str
     text: str
-    verse_range: Optional[str] = Field(
+    verse_range: str | None = Field(
         None,
-        description=(
-            "Ayah range this passage covers when the tafsir treats several "
-            "ayat together, e.g. '103:1-3'"
-        ),
+        description=("Ayah range this passage covers when the tafsir treats several ayat together, e.g. '103:1-3'"),
     )
 
 
@@ -594,15 +656,15 @@ class TafsirUnavailable(BaseModel):
 
 
 class VerseText(BaseModel):
-    arabic: Optional[str] = None
-    translation: Optional[str] = None
-    translation_language: Optional[str] = None
+    arabic: str | None = None
+    translation: str | None = None
+    translation_language: str | None = None
 
 
 class TafsirSource:
     """Retrieval seam. Tests substitute ``FakeTafsirSource`` for this."""
 
-    async def fetch_tafsir(self, slug: str, verse_key: str) -> Optional[Dict[str, Any]]:
+    async def fetch_tafsir(self, slug: str, verse_key: str) -> dict[str, Any] | None:
         raise NotImplementedError
 
     async def fetch_verse(self, verse_key: str, language: str) -> VerseText:
@@ -617,24 +679,28 @@ class QuranComTafsirSource(TafsirSource):
     failing the whole request.
     """
 
-    def __init__(self, base_url: str = QURAN_API_BASE, timeout: float = QURAN_API_TIMEOUT):
+    def __init__(
+        self,
+        base_url: str = QURAN_API_BASE,
+        timeout: float = QURAN_API_TIMEOUT,
+        client: httpx.AsyncClient | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.client = client
 
-    async def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         url = f"{self.base_url}/{path.lstrip('/')}"
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, params=params)
+            client = self.client or http_client_pool.get()
+            response = await client.get(url, params=params, timeout=self.timeout)
         except httpx.HTTPError as exc:
             logger.warning("Quran API request failed for %s: %s", path, exc)
             return None
         if response.status_code == 404:
             return None
         if response.status_code >= 400:
-            logger.warning(
-                "Quran API returned %s for %s", response.status_code, path
-            )
+            logger.warning("Quran API returned %s for %s", response.status_code, path)
             return None
         try:
             return response.json()
@@ -642,7 +708,7 @@ class QuranComTafsirSource(TafsirSource):
             logger.warning("Quran API returned non-JSON for %s", path)
             return None
 
-    async def fetch_tafsir(self, slug: str, verse_key: str) -> Optional[Dict[str, Any]]:
+    async def fetch_tafsir(self, slug: str, verse_key: str) -> dict[str, Any] | None:
         payload = await self._get(f"tafsirs/{slug}/by_ayah/{verse_key}")
         if not payload:
             return None
@@ -650,7 +716,7 @@ class QuranComTafsirSource(TafsirSource):
 
     async def fetch_verse(self, verse_key: str, language: str) -> VerseText:
         translation_id = TRANSLATION_IDS.get(language)
-        params: Dict[str, Any] = {"fields": "text_uthmani"}
+        params: dict[str, Any] = {"fields": "text_uthmani"}
         if translation_id is not None:
             params["translations"] = translation_id
         payload = await self._get(f"verses/by_key/{verse_key}", params)
@@ -671,15 +737,15 @@ class FakeTafsirSource(TafsirSource):
 
     def __init__(
         self,
-        tafsirs: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
-        verses: Optional[Dict[str, VerseText]] = None,
+        tafsirs: dict[tuple[str, str], dict[str, Any]] | None = None,
+        verses: dict[str, VerseText] | None = None,
     ) -> None:
         self.tafsirs = tafsirs or {}
         self.verses = verses or {}
-        self.tafsir_calls: List[Tuple[str, str]] = []
-        self.verse_calls: List[Tuple[str, str]] = []
+        self.tafsir_calls: list[tuple[str, str]] = []
+        self.verse_calls: list[tuple[str, str]] = []
 
-    async def fetch_tafsir(self, slug: str, verse_key: str) -> Optional[Dict[str, Any]]:
+    async def fetch_tafsir(self, slug: str, verse_key: str) -> dict[str, Any] | None:
         self.tafsir_calls.append((slug, verse_key))
         return self.tafsirs.get((slug, verse_key))
 
@@ -705,9 +771,7 @@ def _tafsir_cache():
     return get_keyed_cache("tafsir")
 
 
-def parse_tafsir_payload(
-    work: TafsirWork, language: str, payload: Dict[str, Any]
-) -> Optional[TafsirText]:
+def parse_tafsir_payload(work: TafsirWork, language: str, payload: dict[str, Any]) -> TafsirText | None:
     """Turn a source payload into an attributed ``TafsirText``.
 
     The work's name comes from the payload, so the label on a passage is the
@@ -751,11 +815,11 @@ def parse_tafsir_payload(
 
 async def fetch_tafsirs_for_ayah(
     ref: AyahRef,
-    keys: List[str],
+    keys: list[str],
     language: str,
     allow_language_fallback: bool = True,
-    source: Optional[TafsirSource] = None,
-) -> Tuple[List[TafsirText], List[TafsirUnavailable]]:
+    source: TafsirSource | None = None,
+) -> tuple[list[TafsirText], list[TafsirUnavailable]]:
     """Retrieve each requested tafsir for one ayah.
 
     Returns ``(available, unavailable)``. A work that has no entry for the ayah,
@@ -763,13 +827,13 @@ async def fetch_tafsirs_for_ayah(
     reason — the rest of the response is still returned.
     """
     src = source or get_source()
-    available: List[TafsirText] = []
-    unavailable: List[TafsirUnavailable] = []
+    available: list[TafsirText] = []
+    unavailable: list[TafsirUnavailable] = []
 
     # Resolve which edition of each work to fetch first, then fetch them
     # concurrently: four works fetched one after another would stack four
     # timeouts on a slow upstream, and they do not depend on each other.
-    plans: List[Tuple[TafsirWork, str, str]] = []
+    plans: list[tuple[TafsirWork, str, str]] = []
     for key in keys:
         work = TAFSIR_REGISTRY.get(key)
         if work is None:
@@ -784,22 +848,18 @@ async def fetch_tafsirs_for_ayah(
                         key=work.key,
                         name=work.name,
                         author=work.author,
-                        reason=(
-                            f"Not available in '{language}'. Available in: "
-                            f"{', '.join(work.languages)}."
-                        ),
+                        reason=(f"Not available in '{language}'. Available in: {', '.join(work.languages)}."),
                     )
                 )
                 continue
             used_language = work.languages[0]
-            slug = work.slug_for(used_language)
+            # `languages` are exactly the keys of `slugs`, so this always hits.
+            slug = cast(str, work.slug_for(used_language))
         plans.append((work, used_language, slug))
 
-    payloads = await asyncio.gather(
-        *(_fetch_tafsir_cached(src, slug, ref) for _, _, slug in plans)
-    )
+    payloads = await asyncio.gather(*(_fetch_tafsir_cached(src, slug, ref) for _, _, slug in plans))
 
-    for (work, used_language, _), payload in zip(plans, payloads):
+    for (work, used_language, _), payload in zip(plans, payloads, strict=True):
         if payload is None:
             unavailable.append(
                 TafsirUnavailable(
@@ -827,9 +887,7 @@ async def fetch_tafsirs_for_ayah(
     return available, unavailable
 
 
-async def _fetch_tafsir_cached(
-    src: TafsirSource, slug: str, ref: AyahRef
-) -> Optional[Dict[str, Any]]:
+async def _fetch_tafsir_cached(src: TafsirSource, slug: str, ref: AyahRef) -> dict[str, Any] | None:
     """One tafsir payload, from the keyed cache when it is already there."""
     cache = _tafsir_cache()
     cache_key = f"{slug}|{ref.key}"
@@ -844,9 +902,7 @@ async def _fetch_tafsir_cached(
     return payload
 
 
-async def fetch_verse_text(
-    ref: AyahRef, language: str, source: Optional[TafsirSource] = None
-) -> VerseText:
+async def fetch_verse_text(ref: AyahRef, language: str, source: TafsirSource | None = None) -> VerseText:
     """Ayah text plus translation, cached per ayah (both are immutable)."""
     src = source or get_source()
     cache = _tafsir_cache()
@@ -871,12 +927,9 @@ class TafsirRequest(BaseModel):
         description="Ayah reference: '103:1', a range '103:1-3', or 'Al-Asr 1-3'",
         json_schema_extra={"examples": ["103:1-3", "2:255", "Al-Fatihah 1"]},
     )
-    tafsirs: Optional[List[str]] = Field(
+    tafsirs: list[str] | None = Field(
         None,
-        description=(
-            "Tafsir keys to include (see GET /tafsir/sources). "
-            f"Defaults to {list(DEFAULT_TAFSIR_KEYS)}."
-        ),
+        description=(f"Tafsir keys to include (see GET /tafsir/sources). Defaults to {list(DEFAULT_TAFSIR_KEYS)}."),
     )
     language: str = Field(
         DEFAULT_TRANSLATION_LANGUAGE,
@@ -894,28 +947,191 @@ class TafsirRequest(BaseModel):
 class AyahTafsir(BaseModel):
     ayah: str
     surah_name: str
-    arabic: Optional[str] = None
-    translation: Optional[str] = None
-    translation_language: Optional[str] = None
-    tafsirs: List[TafsirText]
-    unavailable: List[TafsirUnavailable] = []
+    arabic: str | None = None
+    translation: str | None = None
+    translation_language: str | None = None
+    tafsirs: list[TafsirText]
+    unavailable: list[TafsirUnavailable] = []
 
 
 class TafsirResponse(BaseModel):
     reference: str
     language: str
-    ayat: List[AyahTafsir]
+    ayat: list[AyahTafsir]
     disclaimer: str = DISCLAIMER
+
+
+class ComparisonSource(BaseModel):
+    """Metadata and retrieved text for one work in a comparison."""
+
+    key: str
+    name: str
+    author: str
+    language: str
+    era: str
+    death_year_ah: int | None = None
+    methodologies: list[str] = Field(default_factory=list)
+    perspective: str
+    text: str
+    verse_range: str | None = None
+
+
+class InterpretationCluster(BaseModel):
+    """A reproducible semantic grouping of similar source passages."""
+
+    id: str
+    label: str
+    source_keys: list[str]
+    representative: str
+    similarity_threshold: float
+
+
+class ComparisonConsensus(BaseModel):
+    """A consensus claim supported by the listed retrieved works."""
+
+    statement: str = Field(..., min_length=1)
+    source_keys: list[str] = Field(..., min_length=2)
+    support_ratio: float = Field(..., ge=0.0, le=1.0)
+
+
+class ComparisonPosition(BaseModel):
+    statement: str = Field(..., min_length=1)
+    source_keys: list[str] = Field(..., min_length=1)
+
+
+class ComparisonDivergence(BaseModel):
+    """A difference between interpretations, with source attribution."""
+
+    topic: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    positions: list[ComparisonPosition] = Field(..., min_length=2)
+
+
+class ComparisonInsight(BaseModel):
+    """A distinctive observation attributed to one or more works."""
+
+    statement: str = Field(..., min_length=1)
+    source_keys: list[str] = Field(..., min_length=1)
+
+
+class ComparisonSynthesis(BaseModel):
+    """A source-aware synthesis suitable for display to a learner."""
+
+    summary: str = Field(..., min_length=1)
+    evolution: str = Field(..., min_length=1)
+    methodological_notes: str = Field(..., min_length=1)
+    balance_note: str = Field(..., min_length=1)
+    cited_source_keys: list[str] = Field(default_factory=list)
+
+
+class GeneratedComparisonAnalysis(BaseModel):
+    """Schema-validated model analysis before source-key guardrails."""
+
+    consensus: list[ComparisonConsensus] = Field(default_factory=list)
+    divergences: list[ComparisonDivergence] = Field(default_factory=list)
+    unique_insights: list[ComparisonInsight] = Field(default_factory=list)
+    synthesis: ComparisonSynthesis
+
+
+class TafsirComparisonRequest(BaseModel):
+    reference: str = Field(
+        ...,
+        description="One ayah reference, such as '103:2', '2:255', or 'Al-Fatihah 1'",
+        json_schema_extra={"examples": ["103:2", "2:255", "Al-Fatihah 1"]},
+    )
+    tafsirs: list[str] | None = Field(
+        None,
+        min_length=MIN_COMPARISON_TAFSIRS,
+        max_length=MAX_COMPARISON_TAFSIRS,
+        description=(
+            f"At least {MIN_COMPARISON_TAFSIRS} and at most {MAX_COMPARISON_TAFSIRS} tafsir keys. "
+            "Defaults to every registered work."
+        ),
+    )
+    language: str = Field(DEFAULT_TRANSLATION_LANGUAGE, description="Preferred language for retrieved tafsir text")
+    allow_language_fallback: bool = Field(
+        True,
+        description="Use a work's original language when the preferred language is unavailable",
+    )
+    similarity_threshold: float = Field(
+        DEFAULT_SIMILARITY_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Token similarity threshold used to group interpretation passages",
+    )
+
+
+class TafsirComparisonResponse(BaseModel):
+    reference: str
+    language: str
+    ayah: AyahTafsir
+    sources: list[ComparisonSource]
+    unavailable: list[TafsirUnavailable]
+    clusters: list[InterpretationCluster]
+    consensus: list[ComparisonConsensus]
+    divergences: list[ComparisonDivergence]
+    unique_insights: list[ComparisonInsight]
+    synthesis: ComparisonSynthesis
+    disclaimer: str = DISCLAIMER
+
+
+class TafsirBatchRequest(BaseModel):
+    references: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_REFERENCES_PER_BATCH,
+        description=(
+            f"A non-empty array of ayah references. At most {MAX_REFERENCES_PER_BATCH} "
+            f"references and {MAX_TOTAL_AYAT_PER_BATCH} total ayat may be requested."
+        ),
+        json_schema_extra={"examples": [["2:255", "103:1-3", "112:1-4"]]},
+    )
+    tafsirs: list[str] | None = Field(
+        None,
+        description=(f"Tafsir keys to include (see GET /tafsir/sources). Defaults to {list(DEFAULT_TAFSIR_KEYS)}."),
+    )
+    language: str = Field(
+        DEFAULT_TRANSLATION_LANGUAGE,
+        description="Preferred language code for tafsir text and translation",
+    )
+    allow_language_fallback: bool = Field(
+        True,
+        description=(
+            "When a tafsir is not published in the requested language, return "
+            "it in its original language (labelled) instead of omitting it"
+        ),
+    )
+
+
+class TafsirBatchResult(BaseModel):
+    language: str
+    ayat: list[AyahTafsir]
+    disclaimer: str = DISCLAIMER
+
+
+class TafsirBatchResponse(BaseModel):
+    results: dict[str, TafsirBatchResult] = Field(
+        default_factory=dict,
+        description="Successfully retrieved results keyed by their requested reference.",
+    )
+    errors: dict[str, str] = Field(
+        default_factory=dict,
+        description="References that could not be retrieved, keyed by their requested reference.",
+    )
 
 
 class TafsirSourceInfo(BaseModel):
     key: str
     name: str
     author: str
-    languages: List[str]
+    languages: list[str]
+    era: str
+    death_year_ah: int | None = None
+    methodologies: list[str] = Field(default_factory=list)
+    perspective: str
 
 
-def resolve_requested_tafsirs(requested: Optional[List[str]]) -> List[str]:
+def resolve_requested_tafsirs(requested: list[str] | None) -> list[str]:
     """Normalize requested tafsir keys, or fall back to the default set.
 
     Raises ``InvalidReference`` when nothing requested is recognized — silently
@@ -924,8 +1140,8 @@ def resolve_requested_tafsirs(requested: Optional[List[str]]) -> List[str]:
     if not requested:
         return list(DEFAULT_TAFSIR_KEYS)
 
-    resolved: List[str] = []
-    unknown: List[str] = []
+    resolved: list[str] = []
+    unknown: list[str] = []
     for raw in requested[:MAX_TAFSIRS_PER_REQUEST]:
         key = normalize_tafsir_key(raw)
         if key is None:
@@ -935,20 +1151,49 @@ def resolve_requested_tafsirs(requested: Optional[List[str]]) -> List[str]:
 
     if not resolved:
         raise InvalidReference(
-            f"Unknown tafsir(s): {', '.join(unknown)}. "
-            f"Available: {', '.join(sorted(TAFSIR_REGISTRY))}."
+            f"Unknown tafsir(s): {', '.join(unknown)}. Available: {', '.join(sorted(TAFSIR_REGISTRY))}."
         )
     if unknown:
         logger.info("Ignoring unknown tafsir(s): %s", ", ".join(unknown))
     return resolved
 
 
+def resolve_comparison_tafsirs(requested: list[str] | None) -> list[str]:
+    """Resolve a comparison's source list without the ordinary six-work cap."""
+    if not requested:
+        return list(DEFAULT_COMPARISON_TAFSIR_KEYS)
+
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for raw in requested:
+        key = normalize_tafsir_key(raw)
+        if key is None:
+            unknown.append(raw)
+        elif key not in resolved:
+            resolved.append(key)
+
+    if unknown:
+        logger.info("Ignoring unknown comparison tafsir(s): %s", ", ".join(unknown))
+    if not resolved:
+        raise InvalidReference(
+            f"Unknown tafsir(s): {', '.join(unknown)}. Available: {', '.join(sorted(TAFSIR_REGISTRY))}."
+        )
+    if len(resolved) < MIN_COMPARISON_TAFSIRS:
+        raise InvalidReference(
+            f"A comparison needs at least {MIN_COMPARISON_TAFSIRS} distinct tafsir works; "
+            f"{len(resolved)} were recognized."
+        )
+    if len(resolved) > MAX_COMPARISON_TAFSIRS:
+        raise InvalidReference(f"A comparison can include at most {MAX_COMPARISON_TAFSIRS} tafsir works.")
+    return resolved
+
+
 async def assemble_ayah(
     ref: AyahRef,
-    keys: List[str],
+    keys: list[str],
     language: str,
     allow_language_fallback: bool = True,
-    source: Optional[TafsirSource] = None,
+    source: TafsirSource | None = None,
 ) -> AyahTafsir:
     """Verse text plus every requested tafsir for one ayah.
 
@@ -978,9 +1223,7 @@ async def assemble_ayah(
     )
 
 
-async def build_tafsir_response(
-    request: TafsirRequest, source: Optional[TafsirSource] = None
-) -> TafsirResponse:
+async def build_tafsir_response(request: TafsirRequest, source: TafsirSource | None = None) -> TafsirResponse:
     """Assemble the /tafsir response. Raises ``InvalidReference`` on bad input."""
     refs = parse_reference(request.reference)
     keys = resolve_requested_tafsirs(request.tafsirs)
@@ -999,8 +1242,516 @@ async def build_tafsir_response(
         )
     )
 
-    return TafsirResponse(
-        reference=request.reference, language=language, ayat=list(ayat)
+    return TafsirResponse(reference=request.reference, language=language, ayat=list(ayat))
+
+
+class InvalidBatchRequest(ValueError):
+    """Raised when a batch exceeds a request-wide limit."""
+
+
+async def build_tafsir_batch_response(
+    request: TafsirBatchRequest,
+    source: TafsirSource | None = None,
+) -> TafsirBatchResponse:
+    """Retrieve multiple references concurrently while preserving partial results."""
+    parsed_references: dict[str, list[AyahRef]] = {}
+    errors: dict[str, str] = {}
+    total_ayat = 0
+
+    for reference in request.references:
+        try:
+            refs = parse_reference(reference)
+        except InvalidReference as exc:
+            errors[reference] = str(exc)
+            continue
+
+        total_ayat += len(refs)
+        if total_ayat > MAX_TOTAL_AYAT_PER_BATCH:
+            raise InvalidBatchRequest(
+                f"Batch covers {total_ayat} ayat; at most {MAX_TOTAL_AYAT_PER_BATCH} total ayat may be requested."
+            )
+        parsed_references[reference] = refs
+
+    keys = resolve_requested_tafsirs(request.tafsirs)
+    language = (request.language or DEFAULT_TRANSLATION_LANGUAGE).strip().casefold()
+
+    async def retrieve(reference: str, refs: list[AyahRef]) -> tuple[str, TafsirBatchResult | None, str | None]:
+        try:
+            ayat = list(
+                await asyncio.gather(
+                    *(
+                        assemble_ayah(
+                            ref,
+                            keys,
+                            language,
+                            allow_language_fallback=request.allow_language_fallback,
+                            source=source,
+                        )
+                        for ref in refs
+                    )
+                )
+            )
+        except Exception as exc:
+            logger.warning("Batch tafsir lookup failed for %s: %s", reference, exc)
+            return reference, None, "Failed to retrieve tafsir for this reference."
+        return reference, TafsirBatchResult(language=language, ayat=ayat), None
+
+    retrieved = await asyncio.gather(*(retrieve(reference, refs) for reference, refs in parsed_references.items()))
+    results: dict[str, TafsirBatchResult] = {}
+    for reference, result, error in retrieved:
+        if result is not None:
+            results[reference] = result
+        elif error is not None:
+            errors[reference] = error
+
+    return TafsirBatchResponse(results=results, errors=errors)
+
+
+# ---------------------------------------------------------------------------
+# Comparative analysis
+# ---------------------------------------------------------------------------
+
+
+_WORD_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
+_COMPARISON_STOPWORDS = frozenset(
+    {
+        "a",
+        "about",
+        "after",
+        "all",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "he",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "their",
+        "this",
+        "to",
+        "was",
+        "which",
+        "with",
+    }
+)
+
+
+def _comparison_tokens(text: str) -> collections.Counter[str]:
+    """Return normalized content-word counts for deterministic similarity."""
+    tokens = (
+        token
+        for token in _WORD_PATTERN.findall(text.casefold())
+        if len(token) > 2 and token not in _COMPARISON_STOPWORDS
+    )
+    return collections.Counter(tokens)
+
+
+def _semantic_similarity(left: str, right: str) -> float:
+    """Approximate semantic similarity using weighted content-word cosine."""
+    left_counts = _comparison_tokens(left)
+    right_counts = _comparison_tokens(right)
+    if not left_counts or not right_counts:
+        return 0.0
+    vocabulary = left_counts.keys() | right_counts.keys()
+    dot = sum(left_counts[token] * right_counts[token] for token in vocabulary)
+    left_norm = sum(value * value for value in left_counts.values()) ** 0.5
+    right_norm = sum(value * value for value in right_counts.values()) ** 0.5
+    return dot / (left_norm * right_norm)
+
+
+def _comparison_sentence(text: str) -> str:
+    """Keep evidence labels concise while preserving the source's wording."""
+    sentences = re.split(r"(?<=[.!?؟])\s+", text.strip())
+    selected = [sentence.strip() for sentence in sentences if sentence.strip()]
+    if not selected:
+        representative = text.strip()
+    else:
+        representative = " ".join(selected[:COMPARISON_REPRESENTATIVE_SENTENCES])
+    if len(representative) > COMPARISON_REPRESENTATIVE_CHARS:
+        return representative[:COMPARISON_REPRESENTATIVE_CHARS].rstrip() + "..."
+    return representative
+
+
+def _cluster_comparison_sources(
+    sources: list[ComparisonSource],
+    threshold: float,
+) -> list[InterpretationCluster]:
+    """Group passages by similarity to a stable cluster representative."""
+    clusters: list[InterpretationCluster] = []
+    for source in sources:
+        best_cluster: InterpretationCluster | None = None
+        best_score = 0.0
+        for cluster in clusters:
+            score = _semantic_similarity(source.text, cluster.representative)
+            if score >= threshold and score > best_score:
+                best_cluster = cluster
+                best_score = score
+        if best_cluster is None:
+            clusters.append(
+                InterpretationCluster(
+                    id=f"cluster-{len(clusters) + 1}",
+                    label=f"Interpretive grouping {len(clusters) + 1}",
+                    source_keys=[source.key],
+                    representative=_comparison_sentence(source.text),
+                    similarity_threshold=threshold,
+                )
+            )
+        else:
+            best_cluster.source_keys.append(source.key)
+    return clusters
+
+
+def _build_comparison_consensus(
+    clusters: list[InterpretationCluster],
+    sources_by_key: dict[str, ComparisonSource],
+) -> list[ComparisonConsensus]:
+    """Treat a high-support cluster as consensus without overstating certainty."""
+    total = len(sources_by_key)
+    if not total:
+        return []
+    minimum_support = max(2, int(total * 0.75 + 0.999))
+    consensus: list[ComparisonConsensus] = []
+    for cluster in clusters:
+        if len(cluster.source_keys) < minimum_support:
+            continue
+        consensus.append(
+            ComparisonConsensus(
+                statement=cluster.representative,
+                source_keys=list(cluster.source_keys),
+                support_ratio=round(len(cluster.source_keys) / total, 4),
+            )
+        )
+    return consensus
+
+
+def _build_comparison_divergences(
+    clusters: list[InterpretationCluster],
+) -> list[ComparisonDivergence]:
+    """Expose competing clusters as distinct attributed positions."""
+    if len(clusters) < 2:
+        return []
+    ordered = sorted(clusters, key=lambda cluster: len(cluster.source_keys), reverse=True)
+    return [
+        ComparisonDivergence(
+            topic="Interpretive emphasis",
+            description="The retrieved works cluster around distinct readings of the verse.",
+            positions=[
+                ComparisonPosition(statement=cluster.representative, source_keys=list(cluster.source_keys))
+                for cluster in ordered
+            ],
+        )
+    ]
+
+
+def _build_comparison_insights(
+    clusters: list[InterpretationCluster],
+) -> list[ComparisonInsight]:
+    """Mark singleton clusters as distinctive observations, not consensus."""
+    return [
+        ComparisonInsight(statement=cluster.representative, source_keys=list(cluster.source_keys))
+        for cluster in clusters
+        if len(cluster.source_keys) == 1
+    ]
+
+
+def _comparison_evolution(sources: list[ComparisonSource]) -> str:
+    """Summarize the chronological distribution without asserting causation."""
+    by_era: dict[str, list[str]] = {}
+    for source in sorted(sources, key=lambda item: item.death_year_ah or 9999):
+        by_era.setdefault(source.era, []).append(source.name)
+    parts = [f"{era}: {len(names)} work(s)" for era, names in by_era.items()]
+    return "Chronological coverage represented in the retrieved set: " + "; ".join(parts) + "."
+
+
+def _comparison_methodologies(sources: list[ComparisonSource]) -> str:
+    counts: dict[str, int] = {}
+    for source in sources:
+        for methodology in source.methodologies:
+            counts[methodology] = counts.get(methodology, 0) + 1
+    labels = ", ".join(f"{method} ({count})" for method, count in sorted(counts.items()))
+    return f"Methodologies represented: {labels or 'not classified'}."
+
+
+def _comparison_balance_note(sources: list[ComparisonSource], unavailable: list[TafsirUnavailable]) -> str:
+    perspectives = sorted({source.perspective for source in sources})
+    note = f"Retrieved perspectives: {', '.join(perspectives)}."
+    if unavailable:
+        note += f" {len(unavailable)} requested work(s) were unavailable and were not treated as evidence."
+    return note
+
+
+def _fallback_comparison_synthesis(
+    sources: list[ComparisonSource],
+    unavailable: list[TafsirUnavailable],
+    consensus: list[ComparisonConsensus],
+    divergences: list[ComparisonDivergence],
+    insights: list[ComparisonInsight],
+) -> ComparisonSynthesis:
+    """Build a bounded synthesis when no model is configured or available."""
+    consensus_note = (
+        f"{len(consensus)} high-support interpretation grouping(s) were identified."
+        if consensus
+        else "No high-support grouping met the comparison threshold."
+    )
+    divergence_note = (
+        f"{len(divergences)} divergence grouping(s) remain visible as separate positions."
+        if divergences
+        else "The retrieved passages did not form multiple distinct groupings."
+    )
+    unique_note = (
+        f"{len(insights)} distinctive source observation(s) were retained separately."
+        if insights
+        else "No singleton interpretation grouping was identified."
+    )
+    return ComparisonSynthesis(
+        summary=f"Compared {len(sources)} retrieved tafsir works. {consensus_note} {divergence_note} {unique_note}",
+        evolution=_comparison_evolution(sources),
+        methodological_notes=_comparison_methodologies(sources),
+        balance_note=_comparison_balance_note(sources, unavailable),
+        cited_source_keys=[source.key for source in sources],
+    )
+
+
+def _comparison_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Return a Gemini-compatible schema for a simple Pydantic response."""
+    schema = model.model_json_schema()
+    definitions = schema.pop("$defs", {})
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            if "$ref" in value:
+                key = value["$ref"].split("/")[-1]
+                return normalize(copy.deepcopy(definitions[key]))
+            return {key: normalize(item) for key, item in value.items() if key != "title"}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return value
+
+    return normalize(schema)
+
+
+class ComparisonGenerator:
+    """Synthesis seam; tests can inject a recorded generator."""
+
+    def generate(self, prompt: str, schema: dict[str, Any]) -> str:
+        raise NotImplementedError
+
+
+class GeminiComparisonGenerator(ComparisonGenerator):
+    """Generate only the prose synthesis; evidence remains deterministic."""
+
+    def __init__(self, model_name: str = "gemini-2.5-flash") -> None:
+        self.model_name = model_name
+
+    def generate(self, prompt: str, schema: dict[str, Any]) -> str:
+        import google.generativeai as genai
+
+        model = genai.GenerativeModel(self.model_name)
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "response_mime_type": "application/json",
+                "response_schema": schema,
+            },
+        )
+        return response.text
+
+
+class FakeComparisonGenerator(ComparisonGenerator):
+    """Offline generator for tests and local demos."""
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.call_count = 0
+
+    def generate(self, prompt: str, schema: dict[str, Any]) -> str:
+        self.call_count += 1
+        return self.response
+
+
+def _comparison_prompt(
+    ayah: AyahTafsir,
+    sources: list[ComparisonSource],
+    consensus: list[ComparisonConsensus],
+    divergences: list[ComparisonDivergence],
+    insights: list[ComparisonInsight],
+) -> str:
+    evidence = "\n\n".join(
+        f"[{source.key}] {source.name} — {source.author}; era={source.era}; "
+        f"methodologies={','.join(source.methodologies)}; perspective={source.perspective}\n{source.text[:1600]}"
+        for source in sources
+    )
+    return f"""You are a careful comparative tafsir editor.
+Analyze only the retrieved evidence below. Do not introduce an interpretation
+from memory, claim that a view is universal, or erase a disagreement. Use the
+deterministic similarity results as supporting evidence, while also comparing
+cross-language meanings that token matching may miss. Every consensus claim,
+position, and unique insight must cite only source keys present in the evidence.
+Consensus requires support from at least two retrieved works. A divergence must
+contain at least two distinct attributed positions. Do not infer a sectarian
+perspective beyond the supplied metadata.
+Return only JSON matching the supplied schema.
+
+Ayah: {ayah.ayah} ({ayah.surah_name})
+Translation: {ayah.translation or "unavailable"}
+
+Retrieved evidence:
+{evidence}
+
+Consensus evidence:
+{json.dumps([item.model_dump() for item in consensus], ensure_ascii=False)}
+
+Divergence evidence:
+{json.dumps([item.model_dump() for item in divergences], ensure_ascii=False)}
+
+Unique observations:
+{json.dumps([item.model_dump() for item in insights], ensure_ascii=False)}
+"""
+
+
+def _validate_generated_analysis(
+    analysis: GeneratedComparisonAnalysis,
+    source_keys: set[str],
+) -> GeneratedComparisonAnalysis:
+    """Reject generated claims whose attribution is absent from retrieval."""
+
+    def validate_keys(keys: list[str], minimum: int) -> list[str]:
+        unique = list(dict.fromkeys(keys))
+        if len(unique) < minimum or not set(unique) <= source_keys:
+            raise ValueError("analysis cited an unknown or insufficient source set")
+        return unique
+
+    consensus = [
+        item.model_copy(
+            update={
+                "source_keys": validate_keys(item.source_keys, 2),
+                "support_ratio": round(len(set(item.source_keys)) / len(source_keys), 4),
+            }
+        )
+        for item in analysis.consensus
+    ]
+    divergences: list[ComparisonDivergence] = []
+    for item in analysis.divergences:
+        positions = [
+            position.model_copy(update={"source_keys": validate_keys(position.source_keys, 1)})
+            for position in item.positions
+        ]
+        if len({tuple(position.source_keys) for position in positions}) < 2:
+            raise ValueError("divergence positions must cite distinct source sets")
+        divergences.append(item.model_copy(update={"positions": positions}))
+    unique_insights = [
+        item.model_copy(update={"source_keys": validate_keys(item.source_keys, 1)}) for item in analysis.unique_insights
+    ]
+    cited = validate_keys(analysis.synthesis.cited_source_keys, 1)
+    synthesis = analysis.synthesis.model_copy(update={"cited_source_keys": cited})
+    return GeneratedComparisonAnalysis(
+        consensus=consensus,
+        divergences=divergences,
+        unique_insights=unique_insights,
+        synthesis=synthesis,
+    )
+
+
+async def _generate_comparison_analysis(
+    generator: ComparisonGenerator | None,
+    prompt: str,
+    fallback: GeneratedComparisonAnalysis,
+    source_keys: set[str],
+) -> GeneratedComparisonAnalysis:
+    """Use a model when available, but keep comparison evidence independently validated."""
+    if generator is None or not source_keys:
+        return fallback
+    try:
+        raw = await asyncio.to_thread(generator.generate, prompt, _comparison_schema(GeneratedComparisonAnalysis))
+        parsed = GeneratedComparisonAnalysis.model_validate_json(raw)
+        return _validate_generated_analysis(parsed, source_keys)
+    except Exception as exc:  # noqa: BLE001 - deterministic synthesis remains available
+        logger.warning("Tafsir comparison analysis failed; using deterministic evidence: %s", exc)
+        return fallback
+
+
+def _get_comparison_generator() -> ComparisonGenerator | None:
+    """Return the configured synthesis model, or None for offline operation."""
+    if not os.getenv("GEMINI_API_KEY"):
+        return None
+    return GeminiComparisonGenerator(os.getenv("MODEL_NAME", "gemini-2.5-flash"))
+
+
+async def build_tafsir_comparison(
+    request: TafsirComparisonRequest,
+    source: TafsirSource | None = None,
+    generator: ComparisonGenerator | None = None,
+) -> TafsirComparisonResponse:
+    """Retrieve, cluster, attribute, and synthesize interpretations for one ayah."""
+    refs = parse_reference(request.reference)
+    if len(refs) != 1:
+        raise InvalidReference("Tafsir comparison accepts exactly one ayah reference, not a range.")
+    keys = resolve_comparison_tafsirs(request.tafsirs)
+    language = (request.language or DEFAULT_TRANSLATION_LANGUAGE).strip().casefold()
+    ayah = await assemble_ayah(
+        refs[0],
+        keys,
+        language,
+        allow_language_fallback=request.allow_language_fallback,
+        source=source,
+    )
+    sources = sorted(
+        [
+            ComparisonSource(
+                key=tafsir.key,
+                name=tafsir.name,
+                author=tafsir.author,
+                language=tafsir.language,
+                era=TAFSIR_REGISTRY[tafsir.key].era,
+                death_year_ah=TAFSIR_REGISTRY[tafsir.key].death_year_ah,
+                methodologies=list(TAFSIR_REGISTRY[tafsir.key].methodologies),
+                perspective=TAFSIR_REGISTRY[tafsir.key].perspective,
+                text=tafsir.text,
+                verse_range=tafsir.verse_range,
+            )
+            for tafsir in ayah.tafsirs
+        ],
+        key=lambda item: (item.death_year_ah is None, item.death_year_ah or 0, item.key),
+    )
+    sources_by_key = {item.key: item for item in sources}
+    clusters = _cluster_comparison_sources(sources, request.similarity_threshold)
+    consensus = _build_comparison_consensus(clusters, sources_by_key)
+    divergences = _build_comparison_divergences(clusters)
+    insights = _build_comparison_insights(clusters)
+    fallback = GeneratedComparisonAnalysis(
+        consensus=consensus,
+        divergences=divergences,
+        unique_insights=insights,
+        synthesis=_fallback_comparison_synthesis(sources, ayah.unavailable, consensus, divergences, insights),
+    )
+    analysis = await _generate_comparison_analysis(
+        generator,
+        _comparison_prompt(ayah, sources, consensus, divergences, insights),
+        fallback,
+        set(sources_by_key),
+    )
+    return TafsirComparisonResponse(
+        reference=request.reference,
+        language=language,
+        ayah=ayah,
+        sources=sources,
+        unavailable=ayah.unavailable,
+        clusters=clusters,
+        consensus=analysis.consensus,
+        divergences=analysis.divergences,
+        unique_insights=analysis.unique_insights,
+        synthesis=analysis.synthesis,
     )
 
 
@@ -1043,18 +1794,18 @@ NO_TAFSIR_NOTE = (
 class TafsirContext(BaseModel):
     """Retrieved tafsir for a chat turn, plus the prompt block built from it."""
 
-    references: List[str]
+    references: list[str]
     prompt_block: str
-    ayat: List[AyahTafsir]
+    ayat: list[AyahTafsir]
 
     @property
     def has_tafsir(self) -> bool:
         return any(ayah.tafsirs for ayah in self.ayat)
 
 
-def build_tafsir_prompt_block(ayat: List[AyahTafsir], excerpt_chars: int = CHAT_EXCERPT_CHARS) -> str:
+def build_tafsir_prompt_block(ayat: list[AyahTafsir], excerpt_chars: int = CHAT_EXCERPT_CHARS) -> str:
     """Render retrieved tafsir as an attributed block for the model prompt."""
-    sections: List[str] = []
+    sections: list[str] = []
     for ayah in ayat:
         lines = [f"--- Ayah {ayah.ayah} (Surah {ayah.surah_name}) ---"]
         if ayah.arabic:
@@ -1066,9 +1817,7 @@ def build_tafsir_prompt_block(ayat: List[AyahTafsir], excerpt_chars: int = CHAT_
             if len(excerpt) > excerpt_chars:
                 excerpt = excerpt[:excerpt_chars].rstrip() + " […excerpt truncated]"
             covers = f" (passage covers {tafsir.verse_range})" if tafsir.verse_range else ""
-            lines.append(
-                f"\n[{tafsir.name} — {tafsir.author}, in {tafsir.language}]{covers}\n{excerpt}"
-            )
+            lines.append(f"\n[{tafsir.name} — {tafsir.author}, in {tafsir.language}]{covers}\n{excerpt}")
         for missing in ayah.unavailable:
             lines.append(f"\n[UNAVAILABLE — {missing.name}]: {missing.reason}")
         sections.append("\n".join(lines))
@@ -1078,9 +1827,9 @@ def build_tafsir_prompt_block(ayat: List[AyahTafsir], excerpt_chars: int = CHAT_
 async def build_chat_tafsir_context(
     prompt: str,
     language: str = DEFAULT_TRANSLATION_LANGUAGE,
-    source: Optional[TafsirSource] = None,
-    timeout: Optional[float] = CHAT_RETRIEVAL_TIMEOUT,
-) -> Optional[TafsirContext]:
+    source: TafsirSource | None = None,
+    timeout: float | None = CHAT_RETRIEVAL_TIMEOUT,
+) -> TafsirContext | None:
     """Retrieve tafsir for a chat prompt, or None if it isn't a tafsir question.
 
     Returns None if retrieval exceeds *timeout*, so a slow upstream costs the
@@ -1090,34 +1839,27 @@ async def build_chat_tafsir_context(
     if timeout is None:
         return await _build_chat_tafsir_context(prompt, language, source)
     try:
-        return await asyncio.wait_for(
-            _build_chat_tafsir_context(prompt, language, source), timeout
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "Tafsir retrieval exceeded %ss; answering without it", timeout
-        )
+        return await asyncio.wait_for(_build_chat_tafsir_context(prompt, language, source), timeout)
+    except (TimeoutError, asyncio.TimeoutError):  # noqa: UP041 - Python 3.10 compatibility
+        logger.warning("Tafsir retrieval exceeded %ss; answering without it", timeout)
         return None
 
 
 async def _build_chat_tafsir_context(
     prompt: str,
     language: str = DEFAULT_TRANSLATION_LANGUAGE,
-    source: Optional[TafsirSource] = None,
-) -> Optional[TafsirContext]:
+    source: TafsirSource | None = None,
+) -> TafsirContext | None:
     refs = detect_ayah_references(prompt)
     if not refs:
         return None
 
     keys = list(DEFAULT_TAFSIR_KEYS)
-    ayat = list(await asyncio.gather(
-        *(
-            assemble_ayah(
-                ref, keys, language, allow_language_fallback=True, source=source
-            )
-            for ref in refs
+    ayat = list(
+        await asyncio.gather(
+            *(assemble_ayah(ref, keys, language, allow_language_fallback=True, source=source) for ref in refs)
         )
-    ))
+    )
 
     context = TafsirContext(
         references=[ayah.ayah for ayah in ayat],
@@ -1130,16 +1872,16 @@ async def _build_chat_tafsir_context(
 class TafsirInfo(BaseModel):
     """Which tafsir text actually backed a verse-explanation chat answer."""
 
-    references: List[str]
-    works_cited: List[str]
-    unavailable: List[str] = []
+    references: list[str]
+    works_cited: list[str]
+    unavailable: list[str] = []
     grounded: bool
 
 
 def summarize_tafsir_context(context: TafsirContext) -> TafsirInfo:
     """Report the works whose text was retrieved, not the ones that were asked for."""
-    works_cited: List[str] = []
-    unavailable: List[str] = []
+    works_cited: list[str] = []
+    unavailable: list[str] = []
     for ayah in context.ayat:
         for tafsir in ayah.tafsirs:
             label = f"{tafsir.name} — {tafsir.author}"
@@ -1167,7 +1909,7 @@ def tafsir_system_context(context: TafsirContext) -> str:
 
 # Type alias for the chat handler's retrieval hook, so main.py can inject a
 # stub in tests without importing httpx machinery.
-TafsirRetriever = Callable[[str], Awaitable[Optional[TafsirContext]]]
+TafsirRetriever = Callable[[str], Awaitable[TafsirContext | None]]
 
 
 # ---------------------------------------------------------------------------
@@ -1175,8 +1917,8 @@ TafsirRetriever = Callable[[str], Awaitable[Optional[TafsirContext]]]
 # ---------------------------------------------------------------------------
 
 
-@router.get("/tafsir/sources", response_model=List[TafsirSourceInfo])
-async def list_tafsir_sources() -> List[TafsirSourceInfo]:
+@router.get("/tafsir/sources", response_model=list[TafsirSourceInfo])
+async def list_tafsir_sources() -> list[TafsirSourceInfo]:
     """Tafsir works this service can retrieve, and their languages."""
     return [
         TafsirSourceInfo(
@@ -1184,6 +1926,10 @@ async def list_tafsir_sources() -> List[TafsirSourceInfo]:
             name=work.name,
             author=work.author,
             languages=work.languages,
+            era=work.era,
+            death_year_ah=work.death_year_ah,
+            methodologies=list(work.methodologies),
+            perspective=work.perspective,
         )
         for work in TAFSIR_REGISTRY.values()
     ]
@@ -1195,12 +1941,73 @@ async def get_tafsir(request: TafsirRequest) -> TafsirResponse:
     try:
         response = await build_tafsir_response(request)
     except InvalidReference as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint=(
+                "Use format 'surah:ayah' (e.g., '2:255'), 'surah:start-end' (e.g., '103:1-3'), "
+                "or named surah format (e.g., 'Al-Asr 1-3'). Surah numbers run from 1 to 114."
+            ),
+        ) from exc
 
     logger.info(
         "Tafsir lookup %s (%s) -> %d ayat",
         request.reference,
         request.language,
         len(response.ayat),
+    )
+    return response
+
+
+@router.post("/tafsir/compare", response_model=TafsirComparisonResponse)
+async def compare_tafsir(request: TafsirComparisonRequest) -> TafsirComparisonResponse:
+    """Compare at least ten attributed tafsir works for one ayah."""
+    try:
+        response = await build_tafsir_comparison(request, generator=_get_comparison_generator())
+    except InvalidReference as exc:
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint=(
+                "Use format 'surah:ayah' (e.g., '2:255') or named surah format (e.g., 'Al-Fatihah 1'). "
+                "Comparison accepts exactly one ayah at a time."
+            ),
+        ) from exc
+
+    logger.info(
+        "Tafsir comparison %s (%s) -> %d available works, %d unavailable",
+        request.reference,
+        request.language,
+        len(response.sources),
+        len(response.unavailable),
+    )
+    return response
+
+
+@router.post("/tafsir/batch", response_model=TafsirBatchResponse)
+async def get_tafsir_batch(request: TafsirBatchRequest) -> TafsirBatchResponse:
+    """Explain multiple ayah references concurrently with partial failure handling."""
+    try:
+        response = await build_tafsir_batch_response(request)
+    except InvalidBatchRequest as exc:
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint=(
+                f"Submit at most {MAX_REFERENCES_PER_BATCH} references and "
+                f"{MAX_TOTAL_AYAT_PER_BATCH} total ayat per batch."
+            ),
+        ) from exc
+    except InvalidReference as exc:
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint="Use valid tafsir keys from GET /tafsir/sources.",
+        ) from exc
+
+    logger.info(
+        "Batch tafsir lookup: %d results, %d errors",
+        len(response.results),
+        len(response.errors),
     )
     return response

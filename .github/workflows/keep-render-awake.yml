@@ -11,4 +11,4 @@ jobs:
 
     steps:
       - name: Curl your Render backend
-        run: curl https://dnb-ai.onrender.com
+        run: curl https://dnb-ai.onrender.com/ping

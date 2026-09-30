@@ -7,10 +7,7 @@ import yaml
 
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
 
-
-CASES = yaml.safe_load(
-    (Path(__file__).with_name("prompts.yaml")).read_text(encoding="utf-8")
-)
+CASES = yaml.safe_load((Path(__file__).with_name("prompts.yaml")).read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["prompt"][:45])
@@ -59,9 +56,7 @@ def test_high_stakes_disclaimer_is_appended_when_generator_omits_it():
 
     pipeline = SafetyPipeline(InputGate(policy, classifier), OutputCheck(policy))
 
-    result = pipeline.run(
-        "Is this mortgage halal for my family?", lambda prompt: "There are several views."
-    )
+    result = pipeline.run("Is this mortgage halal for my family?", lambda prompt: "There are several views.")
 
     assert result.text.endswith(policy.scholar_referral_disclaimer)
     assert "scholar_disclaimer_appended" in result.stages_fired
@@ -113,9 +108,7 @@ def test_policy_violating_output_is_replaced():
 )
 def test_output_hostility_forms_replace_and_override_moderation(generated):
     policy = load_policy()
-    pipeline = SafetyPipeline(
-        InputGate(policy, lambda prompt, candidates: {}), OutputCheck(policy)
-    )
+    pipeline = SafetyPipeline(InputGate(policy, lambda prompt, candidates: {}), OutputCheck(policy))
 
     result = pipeline.run("Explain good manners.", lambda prompt: generated)
 
@@ -172,9 +165,7 @@ def test_classifier_response_schema_is_strict():
             "explanation": "not allowed in strict schema",
         }
 
-    result = InputGate(policy, malformed).evaluate(
-        "Act as a mufti and issue me a binding fatwa."
-    )
+    result = InputGate(policy, malformed).evaluate("Act as a mufti and issue me a binding fatwa.")
 
     assert result.action == "refuse"
     assert "policy_fallback" in result.stages_fired

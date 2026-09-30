@@ -1,0 +1,124 @@
+{
+  "styles": [
+    {
+      "label": "naskh",
+      "name": "Naskh",
+      "arabic_name": "نسخ",
+      "aliases": ["neskh", "nasakh", "naskhi"],
+      "period_origin": "Codified 10th century CE (Abbasid era) by Ibn Muqla and refined by Ibn al-Bawwab",
+      "regional_traditions": ["Ottoman", "Persian", "Egyptian", "Levantine", "Maghrebi"],
+      "visual_traits": [
+        "Small, round proportions with short vertical strokes",
+        "Clear letter spacing and moderate contrast between thick and thin strokes",
+        "Horizontal baseline with shallow, even curvature",
+        "Minimal ligature overlap — each word remains legible in isolation"
+      ],
+      "decorativeness": 0.2,
+      "common_use_cases": [
+        "Qur'an manuscripts",
+        "Printed books and newspapers",
+        "Everyday handwriting and official documents"
+      ]
+    },
+    {
+      "label": "thuluth",
+      "name": "Thuluth",
+      "arabic_name": "ثلث",
+      "aliases": ["sulus", "thuluth", "solus", "tuluth"],
+      "period_origin": "Emerged 8th–9th century CE; codified under the Abbasids and perfected by Ottoman masters",
+      "regional_traditions": ["Abbasid", "Mamluk", "Ottoman (Istanbul school)", "Persian"],
+      "visual_traits": [
+        "Large, sweeping curved letters with pronounced vertical alifs",
+        "Heavy overlapping of letters and words along a rising-and-falling line",
+        "Strong contrast between broad downstrokes and hairline connectors",
+        "Frequent stacked compositions where letters interlace above the baseline"
+      ],
+      "decorativeness": 0.6,
+      "common_use_cases": [
+        "Mosque inscriptions and architectural friezes",
+        "Qur'anic chapter headings (surah titles)",
+        "Royal seals, coins, and ceremonial calligraphic panels (levha)"
+      ]
+    },
+    {
+      "label": "diwani",
+      "name": "Diwani",
+      "arabic_name": "ديواني",
+      "aliases": ["divani", "diwani jali", "jali diwani", "devawani"],
+      "period_origin": "Developed 16th century CE in the Ottoman imperial chancery under Sultan Suleiman the Magnificent",
+      "regional_traditions": ["Ottoman (Istanbul court)", "Egyptian chancery", "Hejaz administration"],
+      "visual_traits": [
+        "Extremely cursive with steep diagonal slanting lines",
+        "Letters tightly interlocked into dense, often unreadable-to-laymen clusters",
+        "Elaborate flourishes and dot ornaments crowning word groups",
+        "Jali variant fills counters with decorative knotwork"
+      ],
+      "decorativeness": 0.9,
+      "common_use_cases": [
+        "Ottoman imperial firmans (decrees)",
+        "Official chancery documents",
+        "Decorative panels, logos, and state emblems"
+      ]
+    },
+    {
+      "label": "kufi",
+      "name": "Kufi",
+      "arabic_name": "كوفي",
+      "aliases": ["kufic", "kufiyy", "koofi", "kufi murabba"],
+      "period_origin": "Oldest monumental Arabic script, formalized 7th–8th century CE around Kufa, Iraq",
+      "regional_traditions": ["Iraqi", "North African", "Andalusian", "Persian (ornate Kufic)"],
+      "visual_traits": [
+        "Angular, rectilinear letterforms built on square or geometric grids",
+        "Long horizontal extensions with minimal ascenders or curves",
+        "Early manuscripts lack vowel marks and even some letter differentiation",
+        "Ornamental variants: foliated, floriated, braided, and brick-style Kufic"
+      ],
+      "decorativeness": 0.7,
+      "common_use_cases": [
+        "Earliest Qur'an codices",
+        "Architectural band inscriptions on mosques and monuments",
+        "Modern logotypes, flags, and abstract art"
+      ]
+    },
+    {
+      "label": "ruqah",
+      "name": "Ruqʿah",
+      "arabic_name": "رقعة",
+      "aliases": ["ruqʿah", "rüqah", "ruq'ah", "ruqaa", "ruqʻah", "riqah", "reqaa"],
+      "period_origin": "Evolved 17th century CE from taʿliq in Ottoman scribal practice",
+      "regional_traditions": ["Ottoman bureaucracy", "Levant", "Egypt", "Turkey (everyday hand)", "Levant"],
+      "visual_traits": [
+        "Compact letters written on a straight baseline with a slight rightward lean",
+        "Words frequently descend below the baseline in stepped clusters",
+        "Dots and short vowel strokes are reduced or omitted for speed",
+        "Letters are simplified and connected with blunt, functional joins"
+      ],
+      "decorativeness": 0.3,
+      "common_use_cases": [
+        "Everyday handwriting across the Arab world",
+        "Newspaper headlines and commercial signage",
+        "Personal correspondence and quick notes"
+      ]
+    },
+    {
+      "label": "modern",
+      "name": "Modern / Contemporary",
+      "arabic_name": "حديث",
+      "aliases": ["contemporary", "modern arabic", "free style", "hurufiyya"],
+      "period_origin": "20th century CE onward, following the Nahda and the Hurufiyya art movement",
+      "regional_traditions": ["Pan-Arab", "Hurufiyya movement (Iraq/Levant)", "Turkish republican", "Digital typography"],
+      "visual_traits": [
+        "Simplified letterforms adapted from naskh for legibility at scale",
+        "Free mixing of historical scripts with abstract or geometric treatment",
+        "Sans-serif digital proportions; baseline rules deliberately broken",
+        "Decorative elements borrowed freely across classical styles"
+      ],
+      "decorativeness": 0.5,
+      "common_use_cases": [
+        "Branding, advertising, and UI typography",
+        "Contemporary fine art and calligraffiti",
+        "Book covers, posters, and media graphics"
+      ]
+    }
+  ]
+}

@@ -1,14 +1,12 @@
 """Tests for the hadith grading module — no live API calls, no network."""
 
-from typing import Dict, Optional, Tuple
-
 import pytest
 
 from hadith import (
+    HADITH_ADAB_CONTEXT,
     ChainType,
     GradeRecord,
     GradingSource,
-    HADITH_ADAB_CONTEXT,
     Strength,
     aggregate_chain_type,
     aggregate_strength,
@@ -20,40 +18,42 @@ from hadith import (
     parse_references,
 )
 
-
 # ---------------------------------------------------------------------------
 # Grade-string tokenizer
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("raw,expected_strength,expected_chain", [
-    ("Sahih", Strength.SAHIH, ChainType.MARFU),
-    ("Daif", Strength.DAIF, ChainType.MARFU),
-    ("Hasan", Strength.HASAN, ChainType.MARFU),
-    ("Mawdu", Strength.MAWDU, ChainType.MARFU),
-    ("Batil", Strength.MAWDU, ChainType.MARFU),
-    # Composite strings resolve to the weaker word.
-    ("Hasan Sahih", Strength.HASAN, ChainType.MARFU),
-    ("Sahih Lighairihi", Strength.SAHIH, ChainType.MARFU),
-    ("Very Daif", Strength.DAIF, ChainType.MARFU),
-    ("Isnaad Hasan", Strength.HASAN, ChainType.MARFU),
-    ("Isnaad Sahih", Strength.SAHIH, ChainType.MARFU),
-    # Munkar and Shadh are weak-hadith subtypes.
-    ("Munkar", Strength.DAIF, ChainType.MARFU),
-    ("Shadh", Strength.DAIF, ChainType.MARFU),
-    # Cross-references to the two Sahihs still mean "authentic".
-    ("Sahih Bukhari (142) Sahih Muslim (375)", Strength.SAHIH, ChainType.MARFU),
-    ("Sahih Muslim (1480)", Strength.SAHIH, ChainType.MARFU),
-    # Chain-type keywords are independent of strength.
-    ("Mauquf Sahih", Strength.SAHIH, ChainType.MAUQUF),
-    ("Mauquf Daif", Strength.DAIF, ChainType.MAUQUF),
-    ("Sahih Muquf", Strength.SAHIH, ChainType.MAUQUF),
-    ("Maqtu Sahih", Strength.SAHIH, ChainType.MAQTU),
-    ("Sahih Isnaad Mursal", Strength.SAHIH, ChainType.MURSAL),
-    # Unrecognized / blank.
-    ("-", Strength.UNKNOWN, ChainType.MARFU),
-    ("", Strength.UNKNOWN, ChainType.MARFU),
-])
+@pytest.mark.parametrize(
+    "raw,expected_strength,expected_chain",
+    [
+        ("Sahih", Strength.SAHIH, ChainType.MARFU),
+        ("Daif", Strength.DAIF, ChainType.MARFU),
+        ("Hasan", Strength.HASAN, ChainType.MARFU),
+        ("Mawdu", Strength.MAWDU, ChainType.MARFU),
+        ("Batil", Strength.MAWDU, ChainType.MARFU),
+        # Composite strings resolve to the weaker word.
+        ("Hasan Sahih", Strength.HASAN, ChainType.MARFU),
+        ("Sahih Lighairihi", Strength.SAHIH, ChainType.MARFU),
+        ("Very Daif", Strength.DAIF, ChainType.MARFU),
+        ("Isnaad Hasan", Strength.HASAN, ChainType.MARFU),
+        ("Isnaad Sahih", Strength.SAHIH, ChainType.MARFU),
+        # Munkar and Shadh are weak-hadith subtypes.
+        ("Munkar", Strength.DAIF, ChainType.MARFU),
+        ("Shadh", Strength.DAIF, ChainType.MARFU),
+        # Cross-references to the two Sahihs still mean "authentic".
+        ("Sahih Bukhari (142) Sahih Muslim (375)", Strength.SAHIH, ChainType.MARFU),
+        ("Sahih Muslim (1480)", Strength.SAHIH, ChainType.MARFU),
+        # Chain-type keywords are independent of strength.
+        ("Mauquf Sahih", Strength.SAHIH, ChainType.MAUQUF),
+        ("Mauquf Daif", Strength.DAIF, ChainType.MAUQUF),
+        ("Sahih Muquf", Strength.SAHIH, ChainType.MAUQUF),
+        ("Maqtu Sahih", Strength.SAHIH, ChainType.MAQTU),
+        ("Sahih Isnaad Mursal", Strength.SAHIH, ChainType.MURSAL),
+        # Unrecognized / blank.
+        ("-", Strength.UNKNOWN, ChainType.MARFU),
+        ("", Strength.UNKNOWN, ChainType.MARFU),
+    ],
+)
 def test_parse_grade_string(raw, expected_strength, expected_chain):
     strength, chain = parse_grade_string(raw)
     assert strength == expected_strength
@@ -94,27 +94,30 @@ def test_aggregate_chain_type_any_non_marfu_wins():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("Bukhari", "bukhari"),
-    ("bukhari", "bukhari"),
-    ("Sahih al-Bukhari", "bukhari"),
-    ("Sahih Al Bukhari", "bukhari"),
-    ("al-Bukhari", "bukhari"),
-    ("Muslim", "muslim"),
-    ("Sahih Muslim", "muslim"),
-    ("Abu Dawud", "abudawud"),
-    ("Abu Dawood", "abudawud"),
-    ("Sunan Abu Dawud", "abudawud"),
-    ("Tirmidhi", "tirmidhi"),
-    ("Jami' at-Tirmidhi", "tirmidhi"),
-    ("An-Nasai", "nasai"),
-    ("Sunan an-Nasa'i", "nasai"),
-    ("Ibn Majah", "ibnmajah"),
-    ("Sunan Ibn Majah", "ibnmajah"),
-    ("Malik", "malik"),
-    ("Muwatta Malik", "malik"),
-    ("Muwatta Imam Malik", "malik"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Bukhari", "bukhari"),
+        ("bukhari", "bukhari"),
+        ("Sahih al-Bukhari", "bukhari"),
+        ("Sahih Al Bukhari", "bukhari"),
+        ("al-Bukhari", "bukhari"),
+        ("Muslim", "muslim"),
+        ("Sahih Muslim", "muslim"),
+        ("Abu Dawud", "abudawud"),
+        ("Abu Dawood", "abudawud"),
+        ("Sunan Abu Dawud", "abudawud"),
+        ("Tirmidhi", "tirmidhi"),
+        ("Jami' at-Tirmidhi", "tirmidhi"),
+        ("An-Nasai", "nasai"),
+        ("Sunan an-Nasa'i", "nasai"),
+        ("Ibn Majah", "ibnmajah"),
+        ("Sunan Ibn Majah", "ibnmajah"),
+        ("Malik", "malik"),
+        ("Muwatta Malik", "malik"),
+        ("Muwatta Imam Malik", "malik"),
+    ],
+)
 def test_normalize_collection(raw, expected):
     assert normalize_collection(raw) == expected
 
@@ -129,13 +132,16 @@ def test_normalize_collection_unknown(raw):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text,expected_collection,expected_number", [
-    ("Sahih al-Bukhari 1 states...", "bukhari", 1),
-    ("as narrated in Bukhari #1", "bukhari", 1),
-    ("See Sahih Muslim, Hadith 55.", "muslim", 55),
-    ("(Abu Dawud 3)", "abudawud", 3),
-    ("Sunan Ibn Majah, Book 1, Hadith 4", "ibnmajah", 4),
-])
+@pytest.mark.parametrize(
+    "text,expected_collection,expected_number",
+    [
+        ("Sahih al-Bukhari 1 states...", "bukhari", 1),
+        ("as narrated in Bukhari #1", "bukhari", 1),
+        ("See Sahih Muslim, Hadith 55.", "muslim", 55),
+        ("(Abu Dawud 3)", "abudawud", 3),
+        ("Sunan Ibn Majah, Book 1, Hadith 4", "ibnmajah", 4),
+    ],
+)
 def test_parse_references_common_phrasings(text, expected_collection, expected_number):
     refs = parse_references(text)
     assert len(refs) == 1
@@ -163,10 +169,10 @@ def test_parse_references_collection_without_number_is_ignored():
 
 
 class FakeGradingSource(GradingSource):
-    def __init__(self, records: Dict[Tuple[str, int], GradeRecord]):
+    def __init__(self, records: dict[tuple[str, int], GradeRecord]):
         self._records = records
 
-    def get(self, collection: str, number: int, book: Optional[int] = None) -> Optional[GradeRecord]:
+    def get(self, collection: str, number: int, book: int | None = None) -> GradeRecord | None:
         return self._records.get((collection, number))
 
 
@@ -182,12 +188,14 @@ def _record(collection, number, grade, chain=ChainType.MARFU, grader="Al-Albani"
     )
 
 
-FAKE_SOURCE = FakeGradingSource({
-    ("bukhari", 1): _record("bukhari", 1, Strength.SAHIH, grader="Scholarly consensus (Bukhari and Muslim)"),
-    ("abudawud", 3): _record("abudawud", 3, Strength.DAIF),
-    ("abudawud", 99): _record("abudawud", 99, Strength.MAWDU),
-    ("abudawud", 5): _record("abudawud", 5, Strength.SAHIH, chain=ChainType.MAUQUF),
-})
+FAKE_SOURCE = FakeGradingSource(
+    {
+        ("bukhari", 1): _record("bukhari", 1, Strength.SAHIH, grader="Scholarly consensus (Bukhari and Muslim)"),
+        ("abudawud", 3): _record("abudawud", 3, Strength.DAIF),
+        ("abudawud", 99): _record("abudawud", 99, Strength.MAWDU),
+        ("abudawud", 5): _record("abudawud", 5, Strength.SAHIH, chain=ChainType.MAUQUF),
+    }
+)
 
 
 def test_annotate_sahih_is_verified_and_not_flagged():

@@ -1,8 +1,9 @@
 """A single orchestration seam for input and output safety stages."""
 
+import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Callable, List, Optional
 
 from .input_gate import InputGate
 from .output_check import OutputCheck
@@ -11,10 +12,10 @@ from .output_check import OutputCheck
 @dataclass(frozen=True)
 class SafetyResult:
     text: str
-    category_id: Optional[str]
+    category_id: str | None
     action: str
     confidence: float
-    stages_fired: List[str]
+    stages_fired: list[str]
     latency_ms: float
     generator_called: bool
 
@@ -29,13 +30,46 @@ class SafetyPipeline:
         decision = self.input_gate.evaluate(prompt)
         return self._complete(prompt, generator, decision, started)
 
-    async def run_async(
-        self, prompt: str, generator: Callable[[str], str]
-    ) -> SafetyResult:
-        """Run the pipeline while keeping classification off the event loop."""
+    async def run_async(self, prompt: str, generator: Callable[[str], str | Awaitable[str]]) -> SafetyResult:
+        """Run the pipeline while keeping classification off the event loop.
+
+        ``generator`` may be sync or async; the async path is awaited.
+        """
         started = perf_counter()
         decision = await self.input_gate.evaluate_async(prompt)
-        return self._complete(prompt, generator, decision, started)
+        return await self._complete_async(prompt, generator, decision, started)
+
+    async def _complete_async(self, prompt, generator, decision, started):
+        stages = list(decision.stages_fired)
+
+        if decision.action == "refuse":
+            return self._result(decision.refusal, decision, stages, started, False)
+
+        generation_prompt = prompt
+        if decision.action == "allow_with_guidance":
+            generation_prompt = f"{decision.guidance}\n\nUser question: {prompt}"
+            stages.append("guidance_injected")
+
+        if inspect.iscoroutinefunction(generator):
+            generated = await generator(generation_prompt)
+        else:
+            res = generator(generation_prompt)
+            if inspect.iscoroutine(res):
+                generated = await res
+            else:
+                generated = res
+
+        checked = self.output_check.enforce(generated, decision)
+        stages.extend(checked.stages_fired)
+        return self._result(
+            checked.text,
+            decision,
+            stages,
+            started,
+            True,
+            category_id=checked.category_id,
+            action=checked.action,
+        )
 
     def _complete(self, prompt, generator, decision, started):
         stages = list(decision.stages_fired)
