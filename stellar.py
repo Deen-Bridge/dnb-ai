@@ -6,17 +6,17 @@ service read-only Stellar awareness: zakat on a wallet's on-chain USDC
 balance, and factual answers about the signed-in user's course/book
 purchases (settled as USDC payments verified by dnb-backend).
 
-Strictly read-only: only public keys and transaction *metadata* ever reach
-this service. Secret keys and other users' data are never accepted, stored,
-or logged.
+The integration is read-only: public keys and transaction metadata may be
+queried, while unit and percentage calculations are local arithmetic. Secret
+keys and other users' data are never accepted, stored, or logged.
 """
 
 import asyncio
 import logging
 import os
 import re
-from decimal import Decimal
-from typing import overload
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Literal, overload
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -58,6 +58,7 @@ ZAKAT_RATE = Decimal("0.025")
 # USDC has 7 decimal places on Stellar, so zakat is quantized to the smallest
 # unit the asset can actually represent.
 USDC_PRECISION = Decimal("0.0000001")
+STROOPS_PER_USDC = Decimal("10000000")
 
 DISCLAIMER = (
     "This is an automated estimate based on your on-chain USDC balance only. "
@@ -95,6 +96,22 @@ class ZakatResponse(BaseModel):
             "Where the nisab threshold came from — a live gold price, the configured default, or a caller override."
         ),
     )
+
+
+class UsdcConversionRequest(BaseModel):
+    amount: Decimal = Field(
+        ..., gt=0, max_digits=28,
+        description="Positive USDC amount or whole number of stroops",
+    )
+    direction: Literal["usdc_to_stroops", "stroops_to_usdc"]
+
+
+class UsdcConversionResponse(BaseModel):
+    network: str
+    direction: Literal["usdc_to_stroops", "stroops_to_usdc"]
+    input_amount: str
+    output_amount: str
+    explanation: str
 
 
 def compute_zakat(balance: Decimal, nisab: Decimal) -> Decimal:
@@ -216,8 +233,122 @@ async def stellar_info():
         "network": STELLAR_NETWORK,
         "horizon": horizon_url(),
         "usdc_issuer": usdc_issuer(),
-        "features": ["zakat", "chat-zakat", "live-nisab", "chat-purchases"],
+        "features": [
+            "zakat",
+            "chat-zakat",
+            "live-nisab",
+            "chat-purchases",
+            "usdc-stroop-calculator",
+            "chat-stellar-calculator",
+        ],
     }
+
+
+@router.post("/stellar/usdc/convert", response_model=UsdcConversionResponse)
+async def convert_usdc_units(body: UsdcConversionRequest) -> UsdcConversionResponse:
+    """Convert between USDC and Stellar's seven-decimal stroop unit."""
+    amount = body.amount
+    if body.direction == "usdc_to_stroops":
+        if amount.as_tuple().exponent < -7:
+            raise APIException(status_code=400, detail="USDC amounts on Stellar support at most 7 decimal places.")
+        output = amount * STROOPS_PER_USDC
+        if output != output.to_integral_value():
+            raise APIException(status_code=400, detail="This USDC amount cannot be represented exactly in stroops.")
+        output_amount = str(int(output))
+        explanation = f"{format_usdc(amount)} USDC equals {output_amount} stroops (1 USDC = 10,000,000 stroops)."
+    else:
+        if amount != amount.to_integral_value():
+            raise APIException(status_code=400, detail="Stroops must be a whole number.")
+        output = amount / STROOPS_PER_USDC
+        output_amount = format_usdc(output)
+        explanation = f"{int(amount)} stroops equals {output_amount} USDC (1 USDC = 10,000,000 stroops)."
+    return UsdcConversionResponse(
+        network=STELLAR_NETWORK,
+        direction=body.direction,
+        input_amount=str(amount),
+        output_amount=output_amount,
+        explanation=explanation,
+    )
+
+
+def format_usdc(amount: Decimal) -> str:
+    """Format an exact USDC amount with Stellar's seven decimal places."""
+    return f"{amount.quantize(USDC_PRECISION):.7f}"
+
+
+_STROOP_CALC_PATTERNS = (
+    re.compile(r"(?P<amount>\d{1,21}(?:\.\d{1,7})?)\s*(?:usdc\s*)?(?:to|in|as)\s*stroops?\b", re.I),
+    re.compile(
+        r"(?:how\s+many\s+)?stroops?\s+(?:are\s+)?(?:in|for)\s+"
+        r"(?P<amount>\d{1,21}(?:\.\d{1,7})?)\s*(?:usdc)?\b",
+        re.I,
+    ),
+)
+_STROOP_REVERSE_PATTERN = re.compile(r"(?P<amount>\d{1,28})\s*stroops?\s+(?:to|in)\s*usdc\b", re.I)
+_USDC_PERCENT_PATTERN = re.compile(
+    r"(?P<rate>\d{1,3}(?:\.\d{1,8})?)\s*%\s*(?:of|on)\s*"
+    r"(?P<amount>\d{1,21}(?:\.\d{1,7})?)\s*usdc\b",
+    re.I,
+)
+_USDC_NET_FEE_PATTERN = re.compile(
+    r"(?P<amount>\d{1,21}(?:\.\d{1,7})?)\s*usdc\s*(?:after|minus)\s*"
+    r"(?P<rate>\d{1,3}(?:\.\d{1,8})?)\s*%\s*(?:fee|charge)",
+    re.I,
+)
+
+
+def build_chat_stellar_calculation_context(prompt: str) -> str | None:
+    """Return exact, offline USDC arithmetic for supported Stellar questions."""
+    text = prompt or ""
+    match = _STROOP_REVERSE_PATTERN.search(text)
+    if match:
+        stroops = int(match.group("amount"))
+        usdc = Decimal(stroops) / STROOPS_PER_USDC
+        return (
+            "STELLAR USDC CALCULATION (deterministic; no transaction was made):\n"
+            f"{stroops} stroops = {format_usdc(usdc)} USDC. "
+            "Stellar USDC uses 7 decimal places: 1 USDC = 10,000,000 stroops. "
+            "Give this exact result and do not describe it as a network fee or payment."
+        )
+
+    for pattern in _STROOP_CALC_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            amount = Decimal(match.group("amount"))
+            stroops = int(amount * STROOPS_PER_USDC)
+            return (
+                "STELLAR USDC CALCULATION (deterministic; no transaction was made):\n"
+                f"{format_usdc(amount)} USDC = {stroops} stroops. "
+                "Stellar USDC uses 7 decimal places: 1 USDC = 10,000,000 stroops. "
+                "Give this exact result and do not describe it as a network fee or payment."
+            )
+
+    match = _USDC_NET_FEE_PATTERN.search(text)
+    if match:
+        amount = Decimal(match.group("amount"))
+        rate = Decimal(match.group("rate"))
+        if rate <= 100:
+            fee = (amount * rate / Decimal(100)).quantize(USDC_PRECISION, rounding=ROUND_HALF_UP)
+            net = amount - fee
+            return (
+                "USER-SPECIFIED USDC PERCENTAGE CALCULATION (hypothetical only; no transaction was made):\n"
+                f"For {format_usdc(amount)} USDC at the user's stated {rate}% fee, "
+                f"the fee is {format_usdc(fee)} USDC and the remainder is {format_usdc(net)} USDC. "
+                "This is arithmetic only; do not imply this is Deen Bridge's actual fee."
+            )
+
+    match = _USDC_PERCENT_PATTERN.search(text)
+    if match:
+        amount = Decimal(match.group("amount"))
+        rate = Decimal(match.group("rate"))
+        if rate <= 100:
+            result = (amount * rate / Decimal(100)).quantize(USDC_PRECISION, rounding=ROUND_HALF_UP)
+            return (
+                "USER-SPECIFIED USDC PERCENTAGE CALCULATION (no transaction was made):\n"
+                f"{rate}% of {format_usdc(amount)} USDC is {format_usdc(result)} USDC "
+                f"({int(result * STROOPS_PER_USDC)} stroops). Give this exact result."
+            )
+    return None
 
 
 # ---------------------------------------------------------------------------
