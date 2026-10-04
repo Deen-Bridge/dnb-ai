@@ -4,6 +4,7 @@ import json
 import os
 from typing import Any
 
+
 class TerminologyLexicon:
     def __init__(self) -> None:
         self.terms: list[dict[str, Any]] = []
@@ -13,7 +14,7 @@ class TerminologyLexicon:
         path = os.path.join("data", "malay_indonesian_islamic_terms.json")
         if os.path.exists(path):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                     self.terms = data.get("terms", [])
             except Exception:
@@ -26,7 +27,7 @@ class TerminologyLexicon:
                     "malay_term": "Solat",
                     "indonesian_term": "Shalat",
                     "jawi_term": "صلاة",
-                    "variants": ["solat", "shalat", "sembahyang", "salat"]
+                    "variants": ["solat", "shalat", "sembahyang", "salat"],
                 }
             ]
 

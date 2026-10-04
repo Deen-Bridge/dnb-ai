@@ -1,7 +1,7 @@
 """Offline tests for Urdu normalization, terminology, and mixed-script processing."""
 
-from fastapi.testclient import TestClient
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from urdu_processor import (
     analyze_script,

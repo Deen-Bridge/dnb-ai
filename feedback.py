@@ -232,80 +232,77 @@ class FeedbackStore:
 
 
 QUALITY_DIMENSIONS = (
-    'accuracy',
-    'completeness',
-    'clarity',
-    'scholarly_rigor',
-    'appropriateness',
-    'balance',
-    'citation_quality',
-    'reasoning',
+    "accuracy",
+    "completeness",
+    "clarity",
+    "scholarly_rigor",
+    "appropriateness",
+    "balance",
+    "citation_quality",
+    "reasoning",
 )
 
 DEFAULT_QUALITY_THRESHOLD = 0.7
 
 
 class QualityJudgeAgent:
-    '''Heuristic multi-dimensional answer quality judge.
+    """Heuristic multi-dimensional answer quality judge.
 
     Scores an answer across QUALITY_DIMENSIONS using lightweight text
     heuristics, produces per-dimension feedback, gap lists, improvement
     recommendations, and a final re-generation decision based on a
     configurable threshold.
-    '''
+    """
 
     def __init__(self, threshold: float = DEFAULT_QUALITY_THRESHOLD) -> None:
         self.threshold = threshold
 
     def evaluate(self, answer: str, prompt: str | None = None) -> dict[str, Any]:
-        '''Return a full quality report for *answer*.'''
-        scores = {
-            dimension: self._score_dimension(dimension, answer, prompt)
-            for dimension in QUALITY_DIMENSIONS
-        }
+        """Return a full quality report for *answer*."""
+        scores = {dimension: self._score_dimension(dimension, answer, prompt) for dimension in QUALITY_DIMENSIONS}
         overall = sum(scores.values()) / len(scores)
         gaps = self._find_gaps(scores)
         recommendations = self._recommend_improvements(scores, gaps)
         needs_regeneration = self.should_regenerate(overall, gaps)
         return {
-            'overall_score': round(overall, 3),
-            'dimension_scores': {k: round(v, 3) for k, v in scores.items()},
-            'gaps': gaps,
-            'recommendations': recommendations,
-            'needs_regeneration': needs_regeneration,
-            'threshold': self.threshold,
+            "overall_score": round(overall, 3),
+            "dimension_scores": {k: round(v, 3) for k, v in scores.items()},
+            "gaps": gaps,
+            "recommendations": recommendations,
+            "needs_regeneration": needs_regeneration,
+            "threshold": self.threshold,
         }
 
     def should_regenerate(self, overall: float, gaps: list[str]) -> bool:
-        '''Regenerate when the overall score falls below threshold or critical gaps exist.'''
+        """Regenerate when the overall score falls below threshold or critical gaps exist."""
         if overall < self.threshold:
             return True
-        critical = {'accuracy', 'completeness'}
+        critical = {"accuracy", "completeness"}
         return any(g in critical for g in gaps)
 
     def _score_dimension(self, dimension: str, answer: str, prompt: str | None) -> float:
-        '''Heuristic per-dimension scoring. Each returns a float in [0, 1].'''
-        if dimension == 'accuracy':
+        """Heuristic per-dimension scoring. Each returns a float in [0, 1]."""
+        if dimension == "accuracy":
             return self._score_accuracy(answer)
-        if dimension == 'completeness':
+        if dimension == "completeness":
             return self._score_completeness(answer, prompt)
-        if dimension == 'clarity':
+        if dimension == "clarity":
             return self._score_clarity(answer)
-        if dimension == 'scholarly_rigor':
+        if dimension == "scholarly_rigor":
             return self._score_scholarly_rigor(answer)
-        if dimension == 'appropriateness':
+        if dimension == "appropriateness":
             return self._score_appropriateness(answer, prompt)
-        if dimension == 'balance':
+        if dimension == "balance":
             return self._score_balance(answer)
-        if dimension == 'citation_quality':
+        if dimension == "citation_quality":
             return self._score_citation_quality(answer)
-        if dimension == 'reasoning':
+        if dimension == "reasoning":
             return self._score_reasoning(answer)
         return 0.0
 
     def _score_accuracy(self, answer: str) -> float:
         # Very light heuristic: penalize hedging, reward definite statements.
-        hedge_words = {'maybe', 'might', 'perhaps', 'could be', 'possibly'}
+        hedge_words = {"maybe", "might", "perhaps", "could be", "possibly"}
         lowered = answer.lower()
         if not answer.strip():
             return 0.0
@@ -327,7 +324,7 @@ class QualityJudgeAgent:
 
     def _score_clarity(self, answer: str) -> float:
         # Reward short sentences, penalize extremely long ones.
-        sentences = [s for s in answer.replace(chr(10), ' ').split('. ') if s]
+        sentences = [s for s in answer.replace(chr(10), " ").split(". ") if s]
         if not sentences:
             return 0.0
         avg_len = sum(len(s.split()) for s in sentences) / len(sentences)
@@ -340,7 +337,7 @@ class QualityJudgeAgent:
     def _score_scholarly_rigor(self, answer: str) -> float:
         # Reward presence of technical terms, citations, structured markers.
         lowered = answer.lower()
-        indicators = ['according to', 'evidence', 'study', 'research', 'hadith', 'quran', 'surah', 'ayah']
+        indicators = ["according to", "evidence", "study", "research", "hadith", "quran", "surah", "ayah"]
         hits = sum(ind in lowered for ind in indicators)
         return min(1.0, 0.3 + hits * 0.15)
 
@@ -358,21 +355,21 @@ class QualityJudgeAgent:
     def _score_balance(self, answer: str) -> float:
         # Look for multiple viewpoints or contrasting phrases.
         lowered = answer.lower()
-        balance_markers = ['some scholars', 'others', 'contrast', 'however', 'on the other hand', 'alternative view']
+        balance_markers = ["some scholars", "others", "contrast", "however", "on the other hand", "alternative view"]
         hits = sum(m in lowered for m in balance_markers)
         return min(1.0, hits * 0.25)
 
     def _score_citation_quality(self, answer: str) -> float:
         # Reward explicit references to sources.
         lowered = answer.lower()
-        indicators = ['hadith', 'quran', 'surah', 'source', 'citation']
+        indicators = ["hadith", "quran", "surah", "source", "citation"]
         hits = sum(ind in lowered for ind in indicators)
         return min(1.0, 0.2 + hits * 0.2)
 
     def _score_reasoning(self, answer: str) -> float:
         # Reward logical connectives.
         lowered = answer.lower()
-        reasons = ['therefore', 'because', 'thus', 'hence', 'consequently', 'as a result']
+        reasons = ["therefore", "because", "thus", "hence", "consequently", "as a result"]
         hits = sum(r in lowered for r in reasons)
         return min(1.0, hits * 0.2)
 
@@ -382,22 +379,22 @@ class QualityJudgeAgent:
     def _recommend_improvements(self, scores: dict[str, float], gaps: list[str]) -> list[str]:
         recommendations = []
         for dim in gaps:
-            if dim == 'accuracy':
-                recommendations.append('Verify factual claims and add reliable sources.')
-            elif dim == 'completeness':
-                recommendations.append('Expand coverage to address all parts of the question.')
-            elif dim == 'clarity':
-                recommendations.append('Break long sentences into shorter, clearer ones.')
-            elif dim == 'scholarly_rigor':
-                recommendations.append('Add scholarly references and technical terminology.')
-            elif dim == 'appropriateness':
-                recommendations.append('Adjust depth and detail to match the scope of the question.')
-            elif dim == 'balance':
-                recommendations.append('Present multiple scholarly views fairly.')
-            elif dim == 'citation_quality':
-                recommendations.append('Include precise citations with source details.')
-            elif dim == 'reasoning':
-                recommendations.append('Make the logical step-by-step reasoning explicit.')
+            if dim == "accuracy":
+                recommendations.append("Verify factual claims and add reliable sources.")
+            elif dim == "completeness":
+                recommendations.append("Expand coverage to address all parts of the question.")
+            elif dim == "clarity":
+                recommendations.append("Break long sentences into shorter, clearer ones.")
+            elif dim == "scholarly_rigor":
+                recommendations.append("Add scholarly references and technical terminology.")
+            elif dim == "appropriateness":
+                recommendations.append("Adjust depth and detail to match the scope of the question.")
+            elif dim == "balance":
+                recommendations.append("Present multiple scholarly views fairly.")
+            elif dim == "citation_quality":
+                recommendations.append("Include precise citations with source details.")
+            elif dim == "reasoning":
+                recommendations.append("Make the logical step-by-step reasoning explicit.")
         return recommendations
 
 

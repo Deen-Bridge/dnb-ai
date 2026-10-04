@@ -102,7 +102,9 @@ class ZakatResponse(BaseModel):
 
 class UsdcConversionRequest(BaseModel):
     amount: Decimal = Field(
-        ..., gt=0, max_digits=28,
+        ...,
+        gt=0,
+        max_digits=28,
         description="Positive USDC amount or whole number of stroops",
     )
     direction: Literal["usdc_to_stroops", "stroops_to_usdc"]
@@ -251,7 +253,8 @@ async def convert_usdc_units(body: UsdcConversionRequest) -> UsdcConversionRespo
     """Convert between USDC and Stellar's seven-decimal stroop unit."""
     amount = body.amount
     if body.direction == "usdc_to_stroops":
-        if amount.as_tuple().exponent < -7:
+        exponent = amount.as_tuple().exponent
+        if not isinstance(exponent, int) or exponent < -7:
             raise APIException(status_code=400, detail="USDC amounts on Stellar support at most 7 decimal places.")
         output = amount * STROOPS_PER_USDC
         if output != output.to_integral_value():

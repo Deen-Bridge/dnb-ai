@@ -12,7 +12,9 @@ DEFAULT_BASELINE = EVAL_DIR / "baseline_results.json"
 
 
 class RegressionRunner:
-    def __init__(self, dataset_path: Path | str = DEFAULT_DATASET, baseline_path: Path | str = DEFAULT_BASELINE) -> None:
+    def __init__(
+        self, dataset_path: Path | str = DEFAULT_DATASET, baseline_path: Path | str = DEFAULT_BASELINE
+    ) -> None:
         self.dataset_path = Path(dataset_path)
         self.baseline_path = Path(baseline_path)
 
@@ -39,6 +41,7 @@ class RegressionRunner:
 
     def evaluate_model_output(self, record: dict[str, Any], answer: str) -> dict[str, Any]:
         from scripts.eval_islamic_qa import evaluate_single_response
+
         return evaluate_single_response(record, answer)
 
     def run_suite(self, model_callable: Any, max_items: int | None = None) -> dict[str, Any]:
@@ -69,20 +72,19 @@ class RegressionRunner:
             domain = r.get("domain", "general")
             domain_scores.setdefault(domain, []).append(score)
 
-            results_detail.append({
-                "id": r["id"],
-                "domain": domain,
-                "score": score,
-                "passed": passed,
-            })
+            results_detail.append(
+                {
+                    "id": r["id"],
+                    "domain": domain,
+                    "score": score,
+                    "passed": passed,
+                }
+            )
 
         mean_score = statistics.mean(scores) if scores else 0.0
         pass_rate = (passed_count / len(records)) if records else 0.0
 
-        domain_summary = {
-            d: statistics.mean(vals) if vals else 0.0
-            for d, vals in domain_scores.items()
-        }
+        domain_summary = {d: statistics.mean(vals) if vals else 0.0 for d, vals in domain_scores.items()}
 
         summary = {
             "total_evaluated": len(records),

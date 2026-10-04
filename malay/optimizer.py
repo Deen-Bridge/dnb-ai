@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class QueryOptimizer:
     @staticmethod
     def optimize_query(query: str) -> str:

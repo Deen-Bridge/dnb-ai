@@ -110,12 +110,8 @@ def test_dependencies_share_results_and_broker_messages() -> None:
 
     async def run() -> None:
         registry = AgentRegistry()
-        registry.register(
-            AgentSpec("researcher", frozenset({"research"}), producer)
-        )
-        registry.register(
-            AgentSpec("writer", frozenset({"writing"}), consumer)
-        )
+        registry.register(AgentSpec("researcher", frozenset({"research"}), producer))
+        registry.register(AgentSpec("writer", frozenset({"writing"}), consumer))
         plan = ExecutionPlan(
             (
                 AgentTask("source", "researcher", "research", "query"),

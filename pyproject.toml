@@ -85,6 +85,8 @@ module = [
     "redis.*",
     "yaml.*",
     "firebase_admin.*",
+    "openai.*",
+    "anthropic.*",
 ]
 ignore_missing_imports = true
 

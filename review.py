@@ -57,9 +57,7 @@ REVIEW_EXPORT_PATH = os.getenv("REVIEW_EXPORT_PATH", "data/review/reviewed.jsonl
 
 LLM_JUDGE_ENABLED = os.getenv("LLM_JUDGE_ENABLED", "true").lower() == "true"
 LLM_JUDGE_MODELS = [
-    m.strip()
-    for m in os.getenv("LLM_JUDGE_MODELS", "gpt-4o,claude-3-5-sonnet,command-r-plus").split(",")
-    if m.strip()
+    m.strip() for m in os.getenv("LLM_JUDGE_MODELS", "gpt-4o,claude-3-5-sonnet,command-r-plus").split(",") if m.strip()
 ]
 LLM_JUDGE_TEMPERATURE = float(os.getenv("LLM_JUDGE_TEMPERATURE", "0"))
 LLM_JUDGE_MAX_CONSENSUS_DELTA = float(os.getenv("LLM_JUDGE_MAX_CONSENSUS_DELTA", "0.5"))
@@ -82,10 +80,12 @@ JUDGE_RUBRIC: dict[str, str] = {
     "theological_correctness": "alignment with mainstream Aqidah and fiqh methodology",
 }
 
+
 class LLMJudgeScore(BaseModel):
     dimension: str
     score: float = Field(..., ge=0, le=5)
     rationale: str = ""
+
 
 class LLMJudgeEvaluation(BaseModel):
     item_id: str | None = None
@@ -99,6 +99,7 @@ class LLMJudgeEvaluation(BaseModel):
     reasoning: str
     duration_ms: int = 0
 
+
 class LLMJudgeRequest(BaseModel):
     question: str = Field(..., min_length=1)
     answer: str = Field(..., min_length=1)
@@ -106,9 +107,11 @@ class LLMJudgeRequest(BaseModel):
     item_id: str | None = None
     models: list[str] | None = None
 
+
 class LLMJudgeResponse(BaseModel):
     evaluations: list[LLMJudgeEvaluation]
     aggregate: dict[str, Any]
+
 
 def build_judge_prompt(question: str, answer: str, reference_answer: str | None = None) -> str:
     rubric_lines = "\n".join(f"- {dim}: {desc}" for dim, desc in JUDGE_RUBRIC.items())
@@ -141,6 +144,7 @@ Scores are 0-5. Prefer 'approve' for a strong, complete, correct answer;
 'correct' when important points are missing or a citation is weak; 'reject'
 for materially wrong or misleading content."""
 
+
 def _extract_json_object(raw: str) -> dict[str, Any]:
     text = raw.strip()
     if text.startswith("```"):
@@ -164,6 +168,7 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
             pass
     raise ValueError("LLM judge response did not contain a JSON object")
 
+
 async def call_judge_model(model: str, prompt: str) -> str:
     api_url = os.getenv("LLM_JUDGE_API_URL")
     if api_url:
@@ -173,6 +178,7 @@ async def call_judge_model(model: str, prompt: str) -> str:
     if model.startswith("claude"):
         return await _call_anthropic(model, prompt)
     raise RuntimeError(f"No LLM judge provider configured for model {model!r}")
+
 
 def _post_json_sync(url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
     import urllib.request
@@ -186,6 +192,7 @@ def _post_json_sync(url: str, headers: dict[str, str], payload: dict[str, Any]) 
     with urllib.request.urlopen(request, timeout=120) as response:
         return json.loads(response.read().decode("utf-8"))
 
+
 async def _call_openai_compatible(model: str, prompt: str, api_url: str) -> str:
     payload = {
         "model": model,
@@ -198,6 +205,7 @@ async def _call_openai_compatible(model: str, prompt: str, api_url: str) -> str:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise ValueError(f"Unexpected judge response shape: {data}") from exc
+
 
 async def _call_openai(model: str, prompt: str) -> str:
     import openai
@@ -213,6 +221,7 @@ async def _call_openai(model: str, prompt: str) -> str:
     )
     return response.choices[0].message.content or ""
 
+
 async def _call_anthropic(model: str, prompt: str) -> str:
     import anthropic
 
@@ -224,6 +233,7 @@ async def _call_anthropic(model: str, prompt: str) -> str:
         messages=[{"role": "user", "content": prompt}],
     )
     return "".join(block.text for block in response.content if block.type == "text")
+
 
 async def run_single_judge(
     question: str,
@@ -256,6 +266,7 @@ async def run_single_judge(
         duration_ms=duration_ms,
     )
 
+
 async def run_judge_ensemble(request: LLMJudgeRequest) -> LLMJudgeResponse:
     models = request.models or LLM_JUDGE_MODELS
     evaluations = await asyncio.gather(
@@ -270,16 +281,12 @@ async def run_judge_ensemble(request: LLMJudgeRequest) -> LLMJudgeResponse:
             for model in models
         )
     )
-    dimension_scores = {dim: [] for dim in JUDGE_DIMENSIONS}
+    dimension_scores: dict[str, list[float]] = {dim: [] for dim in JUDGE_DIMENSIONS}
     for evaluation in evaluations:
         for dim in JUDGE_DIMENSIONS:
             dimension_scores[dim].append(evaluation.scores.get(dim, 0.0))
     overall_scores = [evaluation.overall for evaluation in evaluations]
-    disagreement = {
-        dim: (max(values) - min(values))
-        for dim, values in dimension_scores.items()
-        if values
-    }
+    disagreement = {dim: (max(values) - min(values)) for dim, values in dimension_scores.items() if values}
     aggregate: dict[str, Any] = {
         "mean_scores": {dim: sum(values) / len(values) for dim, values in dimension_scores.items() if values},
         "mean_overall": sum(overall_scores) / len(overall_scores) if overall_scores else 0.0,
@@ -291,6 +298,7 @@ async def run_judge_ensemble(request: LLMJudgeRequest) -> LLMJudgeResponse:
     }
     return LLMJudgeResponse(evaluations=evaluations, aggregate=aggregate)
 
+
 @router.get("/review/judge/models")
 async def judge_models(x_review_token: str | None = Header(None)) -> dict[str, Any]:
     require_reviewer(x_review_token)
@@ -299,6 +307,7 @@ async def judge_models(x_review_token: str | None = Header(None)) -> dict[str, A
         "models": LLM_JUDGE_MODELS,
         "max_consensus_delta": LLM_JUDGE_MAX_CONSENSUS_DELTA,
     }
+
 
 @router.post("/review/judge", response_model=LLMJudgeResponse)
 async def judge_response(
@@ -314,7 +323,6 @@ async def judge_response(
             hint="Set LLM_JUDGE_ENABLED=true to enable automatic evaluation.",
         )
     return await run_judge_ensemble(request)
-
 
 
 def require_reviewer(token: str | None) -> None:

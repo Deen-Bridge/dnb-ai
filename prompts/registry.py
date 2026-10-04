@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # The variable contract published for #14/#39/#41 and any other consumers.
 # Each key maps to a human-readable description of what the variable holds.
-VARIABLE_CONTRACT: Dict[str, str] = {
+VARIABLE_CONTRACT: dict[str, str] = {
     "madhhab": "The user's school of jurisprudence (hanafi, maliki, shafii, hanbali) or None.",
     "language": "The user's preferred language code (e.g. 'en', 'ar') or None.",
     "knowledge_level": "The user's knowledge level (beginner, intermediate, advanced) or None.",
@@ -62,14 +62,10 @@ class PromptTemplate:
         """
         unknown = set(kwargs) - set(self.variables)
         if unknown:
-            raise ValueError(
-                f"Unknown variable(s) for template '{self.name}': {sorted(unknown)}"
-            )
+            raise ValueError(f"Unknown variable(s) for template '{self.name}': {sorted(unknown)}")
         missing = set(self.variables) - set(kwargs)
         if missing:
-            raise ValueError(
-                f"Missing variable(s) for template '{self.name}': {sorted(missing)}"
-            )
+            raise ValueError(f"Missing variable(s) for template '{self.name}': {sorted(missing)}")
         return self.template.format(**kwargs)
 
 
@@ -113,8 +109,8 @@ DEFAULT_SYSTEM_PROMPT = PromptTemplate(
 class PromptRegistry:
     """A registry of named, versioned prompt templates."""
 
-    def __init__(self, templates: Optional[List[PromptTemplate]] = None) -> None:
-        self._templates: Dict[str, PromptTemplate] = {}
+    def __init__(self, templates: list[PromptTemplate] | None = None) -> None:
+        self._templates: dict[str, PromptTemplate] = {}
         for template in templates or []:
             self.register(template)
 
@@ -127,7 +123,7 @@ class PromptRegistry:
         """Return the template with the given name, or raise KeyError."""
         return self._templates[name]
 
-    def list_names(self) -> List[str]:
+    def list_names(self) -> list[str]:
         """Return the names of all registered templates."""
         return sorted(self._templates)
 
@@ -153,7 +149,7 @@ class ExperimentConfig:
 
     experiment_id: str
     control_template: str
-    variant_templates: Dict[str, str]
+    variant_templates: dict[str, str]
     traffic_percent: float = 50.0  # 0-100, percent of requests assigned to a variant
     enabled: bool = True
 
@@ -231,7 +227,7 @@ def get_active_template(settings: Any) -> PromptTemplate:
     return registry.get(name)
 
 
-def get_experiment_harness(settings: Any) -> Optional[ExperimentHarness]:
+def get_experiment_harness(settings: Any) -> ExperimentHarness | None:
     """Return an ExperimentHarness if an experiment is configured, else None."""
     experiment_config = getattr(settings, "experiment", None)
     if experiment_config is None:
