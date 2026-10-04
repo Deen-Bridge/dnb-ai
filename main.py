@@ -156,18 +156,14 @@ _calibration_events: list[dict[str, Any]] = []
 def _calibrate_assessment(
     assessment: ConfidenceAssessment,
     *,
-    citation_verification: float,
+    citation_verification: float | None,
     evidence_quality: float,
 ) -> ConfidenceAssessment:
     """Temperature-scale the raw confidence and adjust for evidence strength."""
     if assessment is None:
         return assessment
     score = assessment.score
-    calibrated = (
-        score ** CONFIDENCE_TEMPERATURE
-        if score >= 0.5
-        else 1 - (1 - score) ** CONFIDENCE_TEMPERATURE
-    )
+    calibrated = score**CONFIDENCE_TEMPERATURE if score >= 0.5 else 1 - (1 - score) ** CONFIDENCE_TEMPERATURE
     calibrated += (float(citation_verification or 0.0) - 0.5) * 0.15
     calibrated += (float(evidence_quality or 0.0) - 0.5) * 0.05
     assessment.score = round(min(0.99, max(0.01, calibrated)), 4)
@@ -176,7 +172,10 @@ def _calibrate_assessment(
         best = None
         for band in ConfidenceBand:
             try:
-                limit = float(thresholds.get(band.value))
+                raw_limit = thresholds.get(band.value)
+                if raw_limit is None:
+                    continue
+                limit = float(raw_limit)
             except (TypeError, ValueError):
                 continue
             if assessment.score >= limit and (best is None or limit > best[0]):
@@ -202,6 +201,7 @@ def _track_calibration(assessment: ConfidenceAssessment) -> None:
     )
     if len(_calibration_events) > CONFIDENCE_CALIBRATION_MAX_EVENTS:
         del _calibration_events[: len(_calibration_events) - CONFIDENCE_CALIBRATION_MAX_EVENTS]
+
 
 GEMINI_API_KEY = settings.gemini_api_key
 

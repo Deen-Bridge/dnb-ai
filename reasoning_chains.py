@@ -212,6 +212,7 @@ class EvidenceRef(BaseModel):
     reference: str = Field(..., description="Category-level pointer, e.g. 'fiqh:worship' or 'Hadith (sunnah.com)'")
     note: str | None = Field(None, description="Optional clarifying note")
 
+
 class EvidenceStrength(str, Enum):
     """Strength classification for evidence supporting a claim."""
 
@@ -300,7 +301,9 @@ class ReasoningChain(BaseModel):
     branches: list[ReasoningBranch] = Field(default_factory=list)
     conclusion: str
     validation: ValidationReport
-    evidence_verification: EvidenceVerificationReport | None = Field(None, description="Optional evidence verification report")
+    evidence_verification: EvidenceVerificationReport | None = Field(
+        None, description="Optional evidence verification report"
+    )
 
 
 class ReasoningTemplate(BaseModel):
@@ -693,7 +696,16 @@ def assess_evidence_strength(scores: list[float]) -> EvidenceStrength:
 def _attribution_issues(claim: Claim) -> list[str]:
     """Heuristic check that named scholarly attributions carry a fiqh/tafsir reference."""
     lowered = claim.text.lower()
-    named_scholars = ("imam", "ibn", "sheikh", "shaykh", "abu hanifa", "ahmad ibn hanbal", "ibn taymiyyah", "ibn qayyim")
+    named_scholars = (
+        "imam",
+        "ibn",
+        "sheikh",
+        "shaykh",
+        "abu hanifa",
+        "ahmad ibn hanbal",
+        "ibn taymiyyah",
+        "ibn qayyim",
+    )
     if any(name in lowered for name in named_scholars) and not any(
         ref.source_type in (SourceType.FIQH, SourceType.TAFSIR) for ref in claim.evidence
     ):

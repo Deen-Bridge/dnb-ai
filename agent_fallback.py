@@ -239,7 +239,7 @@ class AgentRegistry:
                 last_exception = e
                 logger.warning(f"Agent '{agent_name}' attempt {attempt} failed: {e}")
                 if attempt < retry_cfg.max_retries:
-                    delay = retry_cfg.initial_delay * (retry_cfg.backoff_factor ** attempt)
+                    delay = retry_cfg.initial_delay * (retry_cfg.backoff_factor**attempt)
                     delay = min(delay, retry_cfg.max_delay)
                     if retry_cfg.jitter:
                         delay *= 0.5 + random.random()

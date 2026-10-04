@@ -1,9 +1,11 @@
 import re
- from collections import Counter, defaultdict
- from typing import List, Dict, Any, Optional, Tuple
+from collections import defaultdict
+from typing import Any
+
 
 class SynthesisError(Exception):
     pass
+
 
 class TermNormalizer:
     Synonym_Map = {
@@ -13,25 +15,80 @@ class TermNormalizer:
         "implementation": "implement",
         "application": "app",
     }
-    STOPWORDS = set({
-        "a", "an", "the", "is", "are", "was", "were",
-        "and", "or", "but", "not", "for", "with",
-        "on", "at", "from", "by", "to", "of",
-        "in", "it", "its", "that", "this", "those",
-        "who", "whom", "which", "have", "has",
-        "be", "been", "being", "will", "would",
-        "can", "cannot", "could", "couldn't", "etc",
-    })
+    STOPWORDS = set(
+        {
+            "a",
+            "an",
+            "the",
+            "is",
+            "are",
+            "was",
+            "were",
+            "and",
+            "or",
+            "but",
+            "not",
+            "for",
+            "with",
+            "on",
+            "at",
+            "from",
+            "by",
+            "to",
+            "of",
+            "in",
+            "it",
+            "its",
+            "that",
+            "this",
+            "those",
+            "who",
+            "whom",
+            "which",
+            "have",
+            "has",
+            "be",
+            "been",
+            "being",
+            "will",
+            "would",
+            "can",
+            "cannot",
+            "could",
+            "couldn't",
+            "etc",
+        }
+    )
 
     @staticmethod
     def normalize(text: str) -> str:
-        text = re.sub(r'[^\w\s]', ' ', text.lower())
+        text = re.sub(r"[^\w\s]", " ", text.lower())
         tokens = [t for t in text.split() if t not in TermNormalizer.STOPWORDS]
         tokens = [TermNormalizer.Synonym_Map.get(t, t) for t in tokens]
         return " ".join(tokens)
 
+
 class ContradictionDetector:
-    NEGATION_WORDS = {"not", "no", "never", "cannot", "can't", "don't", "doesn't", "didn't", "won't", "wouldn't", "shouldn't", "isn't", "aren't", "wasn't", "weren't", "without", "lack", "absence"}
+    NEGATION_WORDS = {
+        "not",
+        "no",
+        "never",
+        "cannot",
+        "can't",
+        "don't",
+        "doesn't",
+        "didn't",
+        "won't",
+        "wouldn't",
+        "shouldn't",
+        "isn't",
+        "aren't",
+        "wasn't",
+        "weren't",
+        "without",
+        "lack",
+        "absence",
+    }
     ANTONYM_PAIRS = [
         ("increase", "decrease"),
         ("high", "low"),
@@ -45,69 +102,79 @@ class ContradictionDetector:
     ]
 
     @classmethod
-    def detect_contradictions(statements: List[str]) -> List[Dict[Any], Any]]:
+    def detect_contradictions(cls, statements: list[str]) -> list[dict[str, Any]]:
         contradictions = []
         for i in range(len(statements)):
-            for j in range(i+1, len(statements)):
+            for j in range(i + 1, len(statements)):
                 norm_i = TermNormalizer.normalize(statements[i])
                 norm_j = TermNormalizer.normalize(statements[j])
                 tokens_i = set(norm_i.split())
                 tokens_j = set(norm_j.split())
                 common = tokens_i & tokens_j
-                if len(common) >= 2: 
+                if len(common) >= 2:
                     neg_i = any(t in cls.NEGATION_WORDS for t in tokens_i)
                     neg_j = any(t in cls.NEGATION_WORDS for t in tokens_j)
                     if neg_i != neg_j:
-                        contradictions.append({
-                            "statement1": statements[i],
-                            "statement2": statements[j],
-                            "reason": "Negation mismatch",
-                            "confidence": 0.8,
-                        })
+                        contradictions.append(
+                            {
+                                "statement1": statements[i],
+                                "statement2": statements[j],
+                                "reason": "Negation mismatch",
+                                "confidence": 0.8,
+                            }
+                        )
                 for w1, w2 in cls.ANTONYM_PAIRS:
                     if w1 in tokens_i and w2 in tokens_j:
-                        contradictions.append({
-                            "statement1": statements[i],
-                            "statement2": statements[j],
-                            "reason": "Antonym pair",
-                            "confidence": 0.7,
-                        })
+                        contradictions.append(
+                            {
+                                "statement1": statements[i],
+                                "statement2": statements[j],
+                                "reason": "Antonym pair",
+                                "confidence": 0.7,
+                            }
+                        )
                     elif w2 in tokens_i and w1 in tokens_j:
-                        contradictions.append({
-                            "statement1": statements[i],
-                            "statement2": statements[j],
-                            "reason": "Antonym pair",
-                            "confidence": 0.7,
-                        })
+                        contradictions.append(
+                            {
+                                "statement1": statements[i],
+                                "statement2": statements[j],
+                                "reason": "Antonym pair",
+                                "confidence": 0.7,
+                            }
+                        )
         return contradictions
+
 
 class AttributionTracker:
     def __init__(self):
-        self.attributions = []   # list of dicts with keys claim, agent, confidence
+        self.attributions = []  # list of dicts with keys claim, agent, confidence
 
-    def add_attribution(self, claim: str, agent: str, confidence: float=1.0):
+    def add_attribution(self, claim: str, agent: str, confidence: float = 1.0):
         self.attributions.append({"claim": claim, "agent": agent, "confidence": confidence})
 
-    def consolidate(self) -> List[Dict[Any], Any]]:
+    def consolidate(self) -> list[dict[str, Any]]:
         grouped = defaultdict(list)
         for att in self.attributions:
             key = TermNormalizer.normalize(att["claim"])
             if key:
                 grouped[key].append(att)
         result = []
-        for key, atts in grouped.items():
+        for atts in grouped.values():
             best = max(atts, key=lambda a: a["confidence"])
             agents = list(set(a["agent"] for a in atts))
-            result.append({
-                "claim": best["claim"],
-                "agents": agents,
-                "confidence": sum(a["confidence"] for a in atts) / len(atts),
-            })
+            result.append(
+                {
+                    "claim": best["claim"],
+                    "agents": agents,
+                    "confidence": sum(a["confidence"] for a in atts) / len(atts),
+                }
+            )
         return result
+
 
 class NarrativeGenerator:
     @staticmethod
-    def generate(segments: List[Dict[Any], Any]], sections: List[str]) -> str:
+    def generate(segments: list[dict[str, Any]], sections: list[str]) -> str:
         if not segments:
             return ""
         lines = []
@@ -120,15 +187,16 @@ class NarrativeGenerator:
                 lines.append(seg["text"])
         return "\n\n".join(lines)
 
+
 class SynthesisEngine:
-    def __init__(self, normalizer=Nione, detector=None, tracker=None, narrator=None):
+    def __init__(self, normalizer=None, detector=None, tracker=None, narrator=None):
         self.normalizer = normalizer or TermNormalizer()
         self.detector = detector or ContradictionDetector()
         self.tracker = tracker or AttributionTracker()
         self.narrator = narrator or NarrativeGenerator()
         self.sections = ["overview", "details", "conclusion"]
 
-    def synthesize(self, agent_outputs: List[Dict[Any], Any]]) -> Dict[Any, Any]:
+    def synthesize(self, agent_outputs: list[dict[str, Any]]) -> dict[str, Any]:
         if not agent_outputs:
             raise SynthesisError("No agent outputs provided")
 
@@ -137,10 +205,10 @@ class SynthesisEngine:
             agent = out.get("agent", "unknown")
             content = out.get("content", "")
             sentences = self._split_sentences(content)
-            for sent in sentences:
-                raw_sentences.append({"agent": agent, "text": sent})
+            for sentence in sentences:
+                raw_sentences.append({"agent": agent, "text": sentence})
 
-        statements = [s"text" for s in raw_sentences]
+        statements = [s["text"] for s in raw_sentences]
         contradictions = self.detector.detect_contradictions(statements)
 
         self.tracker = AttributionTracker()
@@ -172,7 +240,7 @@ class SynthesisEngine:
         if contradictions:
             final_text += "\n\n## Contradictions Detected\n"
             for c in contradictions:
-                final_text += f"- \"c{'statement1'}\" vs \"c{'statement2'}\": c{'reason'}\n"
+                final_text += f'- "{c["statement1"]}" vs "{c["statement2"]}": {c["reason"]}\n'
 
         original_length = sum(len(s["text"]) for s in raw_sentences)
         final_length = len(final_text)
@@ -186,11 +254,11 @@ class SynthesisEngine:
                 "attribution_accuracy": 1.0,
                 "redundancy_reduction": redundancy_reduction,
                 "coherence_score": self._coherence_score(final_text),
-            }
+            },
         }
 
-    def _split_sentences(self, text: str) -> List[str]:
-        return [s.strip() for s in re.split(r'(n?=[.!?])\s*', text) if s.strip()]
+    def _split_sentences(self, text: str) -> list[str]:
+        return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
 
     def _assign_section(self, text: str) -> str:
         low = text.lower()
@@ -204,6 +272,15 @@ class SynthesisEngine:
         sents = self._split_sentences(text)
         if not sents:
             return 0.0
-        connectives = ["however", "therefore", "furthermore", "moreover", "additionally", "consequently", "in addition", "as a result"]
+        connectives = [
+            "however",
+            "therefore",
+            "furthermore",
+            "moreover",
+            "additionally",
+            "consequently",
+            "in addition",
+            "as a result",
+        ]
         count = sum(1 for s in sents if any(c in s.lower() for c in connectives))
         return min(1.0, count / max(1, len(sents)))

@@ -19,11 +19,10 @@ import time
 import uuid
 from collections import Counter, defaultdict, deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from threading import Lock
 from typing import Any
-
 
 AgentHandler = Callable[["AgentTask", "AgentContext"], Awaitable[Any]]
 LifecycleHook = Callable[[], Awaitable[None]]
@@ -276,9 +275,7 @@ class ExecutionPlan:
                 except KeyError as exc:
                     raise PlanValidationError(str(exc)) from exc
                 if _normalize_term(task.capability) not in agent.capabilities:
-                    raise PlanValidationError(
-                        f"Agent {task.agent} does not provide capability {task.capability}"
-                    )
+                    raise PlanValidationError(f"Agent {task.agent} does not provide capability {task.capability}")
                 if task.fallback_agent is not None:
                     try:
                         registry.get(task.fallback_agent)
@@ -425,7 +422,7 @@ class Metrics:
 
     def __init__(self) -> None:
         self._counters: Counter[str] = Counter()
-        self._durations_ms: Counter[str] = Counter()
+        self._durations_ms: defaultdict[str, float] = defaultdict(float)
         self._lock = Lock()
 
     def increment(self, key: str, amount: int = 1) -> None:
@@ -468,9 +465,7 @@ class WorkflowResult:
     @property
     def partial_failure(self) -> bool:
         statuses = {result.status for result in self.task_results.values()}
-        return TaskStatus.SUCCEEDED in statuses and bool(
-            statuses.intersection({TaskStatus.FAILED, TaskStatus.SKIPPED})
-        )
+        return TaskStatus.SUCCEEDED in statuses and bool(statuses.intersection({TaskStatus.FAILED, TaskStatus.SKIPPED}))
 
 
 class ResultSynthesizer:
@@ -480,9 +475,7 @@ class ResultSynthesizer:
         self._handler = handler
 
     async def synthesize(self, query: str, results: Mapping[str, TaskResult]) -> str:
-        successful = {
-            task_id: result for task_id, result in results.items() if result.status is TaskStatus.SUCCEEDED
-        }
+        successful = {task_id: result for task_id, result in results.items() if result.status is TaskStatus.SUCCEEDED}
         if self._handler is not None:
             return await self._handler(query, successful)
         if not successful:
@@ -520,15 +513,10 @@ class MultiAgentOrchestrator:
         self.metrics = metrics or Metrics()
         self.default_task_timeout = default_task_timeout
         self.workflow_timeout = workflow_timeout
-        self._semaphores = {
-            agent.name: asyncio.Semaphore(agent.max_concurrency) for agent in registry.all()
-        }
-        self._limiters = {
-            agent.name: AsyncRateLimiter(agent.rate_limit_per_second) for agent in registry.all()
-        }
+        self._semaphores = {agent.name: asyncio.Semaphore(agent.max_concurrency) for agent in registry.all()}
+        self._limiters = {agent.name: AsyncRateLimiter(agent.rate_limit_per_second) for agent in registry.all()}
         self._breakers = {
-            agent.name: CircuitBreaker(circuit_failure_threshold, circuit_recovery_seconds)
-            for agent in registry.all()
+            agent.name: CircuitBreaker(circuit_failure_threshold, circuit_recovery_seconds) for agent in registry.all()
         }
         self._started = False
 
@@ -675,9 +663,7 @@ class MultiAgentOrchestrator:
             if not ready:
                 raise PlanValidationError("Execution plan cannot make progress")
 
-            executions = [
-                self._run_task(workflow_id, task, metadata, results, traces) for task in ready
-            ]
+            executions = [self._run_task(workflow_id, task, metadata, results, traces) for task in ready]
             completed = await asyncio.gather(*executions)
             for result in completed:
                 results[result.task_id] = result
@@ -691,9 +677,7 @@ class MultiAgentOrchestrator:
         existing_results: Mapping[str, TaskResult],
         traces: list[TraceSpan],
     ) -> TaskResult:
-        dependency_outputs = {
-            dependency: existing_results[dependency].output for dependency in task.dependencies
-        }
+        dependency_outputs = {dependency: existing_results[dependency].output for dependency in task.dependencies}
         context = AgentContext(
             workflow_id=workflow_id,
             task_id=task.id,
@@ -719,9 +703,7 @@ class MultiAgentOrchestrator:
                 combined = AgentUnavailableError(
                     f"Primary agent failed ({primary_error}); fallback failed ({fallback_error})"
                 )
-                return self._failed_result(
-                    task, fallback_name, combined, started_at, traces, workflow_id
-                )
+                return self._failed_result(task, fallback_name, combined, started_at, traces, workflow_id)
 
         ended_at = time.monotonic()
         duration_ms = (ended_at - started_at) * 1000.0

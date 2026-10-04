@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class MalayRouter:
     @staticmethod
     def route_request(text: str) -> str:

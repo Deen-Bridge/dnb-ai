@@ -675,6 +675,7 @@ class CrossReferenceStore:
         ),
     ]
 
+
 class ThematicRetriever:
     """Main API for thematic Quran retrieval."""
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class MalayContentGenerator:
     @staticmethod
     def generate_islamic_content(topic: str, dialect: str) -> str:

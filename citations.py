@@ -827,9 +827,7 @@ class CitationSynthesisEngine:
 
     def _add_citation(self, citation: Citation, source_id: str) -> None:
         if len(self._citations) >= self._max_citations:
-            self._rejected.append(
-                f"citation limit {self._max_citations} reached; dropping {_citation_ref(citation)}"
-            )
+            self._rejected.append(f"citation limit {self._max_citations} reached; dropping {_citation_ref(citation)}")
             return
         existing = self._find_related(citation)
         if existing is None:
@@ -882,8 +880,7 @@ class CitationSynthesisEngine:
                     current.author = incoming.author
                 elif current.author and incoming.author and current.author != incoming.author:
                     self._conflicts.append(
-                        f"conflicting authors for {current.work!r}: "
-                        f"{current.author!r} vs {incoming.author!r}"
+                        f"conflicting authors for {current.work!r}: {current.author!r} vs {incoming.author!r}"
                     )
             return
 

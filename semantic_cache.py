@@ -197,7 +197,17 @@ def _local_embedding(text: str) -> np.ndarray:
 
 
 class CacheEntry:
-    __slots__ = ("embedding", "response", "chat_id", "history", "expires_at", "scope", "token_count", "version", "metadata")
+    __slots__ = (
+        "embedding",
+        "response",
+        "chat_id",
+        "history",
+        "expires_at",
+        "scope",
+        "token_count",
+        "version",
+        "metadata",
+    )
 
     def __init__(
         self,
@@ -412,7 +422,7 @@ class SemanticCache:
         scored.sort(key=lambda x: x[0], reverse=True)
         # Update access times for retrieved entries
         retrieved = scored[:top_k]
-        for score, entry in retrieved:
+        for _score, entry in retrieved:
             # Find its index and update access time (simplified: just mark access)
             try:
                 idx = self._entries.index(entry)

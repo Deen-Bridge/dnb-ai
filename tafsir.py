@@ -454,7 +454,7 @@ def _validate_ayah_key(ayah_key: str) -> tuple[int, int]:
     try:
         surah_num, ayah_num = map(int, ayah_key.split(":"))
     except ValueError:
-        raise APIException(400, "Ayah key must be in the form 'surah:ayah'.")
+        raise APIException(400, "Ayah key must be in the form 'surah:ayah'.") from None
     surah = surah_by_number(surah_num)
     if surah is None:
         raise APIException(400, f"Unknown surah number: {surah_num}")
@@ -481,7 +481,7 @@ def get_cross_references(
         try:
             ref_type = ReferenceType(reference_type)
         except ValueError:
-            raise APIException(400, f"Unknown reference_type: {reference_type}")
+            raise APIException(400, f"Unknown reference_type: {reference_type}") from None
     return find_cross_references(ayah_key, ref_type, target_surah)
 
 
@@ -510,7 +510,6 @@ def cross_reference_network(target_surah: int | None = None) -> dict[str, list]:
             }
         )
     return {"nodes": sorted(nodes), "edges": edges}
-
 
 
 # ---------------------------------------------------------------------------
