@@ -38,11 +38,13 @@ STELLAR_NETWORK = os.getenv("STELLAR_NETWORK", "testnet")
 
 HORIZON_URLS = {
     "testnet": "https://horizon-testnet.stellar.org",
+    "mainnet": "https://horizon.stellar.org",
     "public": "https://horizon.stellar.org",
 }
 
 USDC_ISSUERS = {
     # Circle's official USDC issuer on mainnet
+    "mainnet": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
     "public": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
     # Test USDC issuer used across the Deen Bridge platform on testnet
     "testnet": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
@@ -67,12 +69,12 @@ DISCLAIMER = (
 )
 
 
-def horizon_url() -> str:
-    return HORIZON_URLS.get(STELLAR_NETWORK, HORIZON_URLS["testnet"])
+def horizon_url(network: str | None = None) -> str:
+    return HORIZON_URLS.get(network or STELLAR_NETWORK, HORIZON_URLS["testnet"])
 
 
-def usdc_issuer() -> str:
-    return USDC_ISSUERS.get(STELLAR_NETWORK, USDC_ISSUERS["testnet"])
+def usdc_issuer(network: str | None = None) -> str:
+    return USDC_ISSUERS.get(network or STELLAR_NETWORK, USDC_ISSUERS["testnet"])
 
 
 class ZakatRequest(BaseModel):

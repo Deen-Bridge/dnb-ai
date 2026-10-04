@@ -10,6 +10,8 @@ from stellar import (
     UsdcConversionRequest,
     build_chat_stellar_calculation_context,
     convert_usdc_units,
+    horizon_url,
+    usdc_issuer,
 )
 
 
@@ -26,6 +28,12 @@ def test_convert_usdc_to_stroops_exactly():
 def test_convert_stroops_to_usdc_exactly():
     result = run(convert_usdc_units(UsdcConversionRequest(amount=Decimal("1234567"), direction="stroops_to_usdc")))
     assert result.output_amount == "0.1234567"
+
+
+def test_mainnet_alias_uses_mainnet_horizon_and_circle_usdc():
+    assert horizon_url("mainnet") == "https://horizon.stellar.org"
+    assert horizon_url("public") == "https://horizon.stellar.org"
+    assert usdc_issuer("mainnet") == "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
 
 
 def test_conversion_rejects_more_than_seven_decimal_places():
