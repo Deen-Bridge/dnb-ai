@@ -367,12 +367,15 @@ def thresholds() -> dict[str, float]:
         "no_signal_prior": NO_SIGNAL_PRIOR,
     }
 
+
 # ---------------------------------------------------------------------------
 # Agent response synthesis and consolidation
 # ---------------------------------------------------------------------------
 
+
 class AgentResponse(BaseModel):
     """One agent's answer to the same user question."""
+
     agent_id: str
     text: str
     citations: list[str] = Field(default_factory=list)
@@ -381,6 +384,7 @@ class AgentResponse(BaseModel):
 
 class SynthesizedSegment(BaseModel):
     """A deduplicated, contradiction-free claim with its provenance."""
+
     text: str
     agent_ids: list[str]
     citations: list[str]
@@ -389,6 +393,7 @@ class SynthesizedSegment(BaseModel):
 
 class SynthesisResult(BaseModel):
     """A consolidated answer and the quality signals that prove it safe."""
+
     text: str
     agent_ids: list[str]
     citations: list[str]
@@ -493,7 +498,7 @@ def _build_narrative(segments: list[SynthesizedSegment]) -> str:
     if not segments:
         return ""
     text = segments[0].text
-    for prev, cur in zip(segments, segments[1:]):
+    for prev, cur in zip(segments, segments[1:], strict=False):
         if _similarity(prev.text, cur.text) < 0.15:
             text += " Additionally, " + cur.text
         else:
@@ -505,10 +510,7 @@ def _coherence_score(text: str) -> float:
     sentences = _split_sentences(text)
     if len(sentences) < 2:
         return 1.0
-    overlaps = [
-        _similarity(prev, cur)
-        for prev, cur in zip(sentences, sentences[1:])
-    ]
+    overlaps = [_similarity(prev, cur) for prev, cur in zip(sentences, sentences[1:], strict=False)]
     return round(min(1.0, sum(overlaps) / len(overlaps) + 0.55), 4)
 
 

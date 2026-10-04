@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
@@ -42,7 +43,7 @@ HAJB_BASIS = "Juristic principle of hajb (blocking) — a nearer relative blocks
 # - blocked_by: list of heir keys that block this heir (hajb)
 # - radd_eligible: whether this heir can receive from radd (spouses are excluded)
 
-HEIRS: Dict[str, Dict[str, Any]] = {
+HEIRS: dict[str, dict[str, Any]] = {
     "son": {
         "name": "Son",
         "category": "asaba",
@@ -143,7 +144,7 @@ HEIRS: Dict[str, Dict[str, Any]] = {
 
 class FaraidRequest(BaseModel):
     estate: Decimal = Field(..., gt=0, description="Total estate value")
-    heirs: List[str] = Field(..., min_length=1, description="List of heir keys")
+    heirs: list[str] = Field(..., min_length=1, description="List of heir keys")
 
 
 class HeirShare(BaseModel):
@@ -153,14 +154,14 @@ class HeirShare(BaseModel):
     fraction: str
     amount: str
     basis: str
-    blocked_by: Optional[str] = None
+    blocked_by: str | None = None
 
 
 class FaraidResponse(BaseModel):
     estate: str
-    shares: List[HeirShare]
+    shares: list[HeirShare]
     disclaimer: str
-    adjustments: List[str]
+    adjustments: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -170,21 +171,21 @@ class FaraidResponse(BaseModel):
 
 @dataclass
 class FaraidResult:
-    shares: Dict[str, Fraction]
-    steps: List[str]
-    adjustments: List[str]
+    shares: dict[str, Fraction]
+    steps: list[str]
+    adjustments: list[str]
 
 
-def _get_heir(key: str) -> Dict[str, Any]:
+def _get_heir(key: str) -> dict[str, Any]:
     if key not in HEIRS:
         raise ValueError(f"Unknown heir: {key}")
     return HEIRS[key]
 
 
-def _apply_hajb(heirs: List[str]) -> Tuple[List[str], Dict[str, str]]:
+def _apply_hajb(heirs: list[str]) -> tuple[list[str], dict[str, str]]:
     """Return (active_heirs, blocked_by_map)."""
     active = list(heirs)
-    blocked_by: Dict[str, str] = {}
+    blocked_by: dict[str, str] = {}
     for heir in heirs:
         for blocker in _get_heir(heir)["blocked_by"]:
             if blocker in heirs:
@@ -194,9 +195,9 @@ def _apply_hajb(heirs: List[str]) -> Tuple[List[str], Dict[str, str]]:
     return active, blocked_by
 
 
-def _furud_shares(active: List[str]) -> Dict[str, Fraction]:
+def _furud_shares(active: list[str]) -> dict[str, Fraction | None]:
     """Assign fixed shares to fard heirs. Asaba heirs get None."""
-    shares: Dict[str, Optional[Fraction]] = {}
+    shares: dict[str, Fraction | None] = {}
     for heir in active:
         info = _get_heir(heir)
         if info["category"] == "fard":
@@ -206,21 +207,19 @@ def _furud_shares(active: List[str]) -> Dict[str, Fraction]:
     return shares
 
 
-def _asaba_share(active: List[str], shares: Dict[str, Optional[Fraction]]) -> Optional[Fraction]:
+def _asaba_share(active: list[str], shares: dict[str, Fraction | None]) -> Fraction | None:
     """Compute the total asaba share (residue) and per-asaba fractions."""
     asaba_heirs = [h for h in active if shares[h] is None]
     if not asaba_heirs:
         return None
-    fixed_sum = sum(shares[h] for h in active if shares[h] is not None)
+    fixed_sum = sum((s for h in active if (s := shares[h]) is not None), Fraction(0))
     residue = Fraction(1) - fixed_sum
     if residue <= 0:
         return None
     return residue
 
 
-def _distribute_asaba(
-    active: List[str], shares: Dict[str, Optional[Fraction]], residue: Fraction
-) -> Dict[str, Fraction]:
+def _distribute_asaba(active: list[str], shares: dict[str, Fraction | None], residue: Fraction) -> dict[str, Fraction]:
     """Distribute residue among asaba heirs, male gets twice female."""
     asaba_heirs = [h for h in active if shares[h] is None]
     if not asaba_heirs:
@@ -241,7 +240,7 @@ def _distribute_asaba(
     return result
 
 
-def _apply_awl(shares: Dict[str, Fraction]) -> Tuple[Dict[str, Fraction], bool]:
+def _apply_awl(shares: dict[str, Fraction]) -> tuple[dict[str, Fraction], bool]:
     """Scale down shares if they sum to more than 1."""
     total = sum(shares.values())
     if total <= 1:
@@ -250,9 +249,7 @@ def _apply_awl(shares: Dict[str, Fraction]) -> Tuple[Dict[str, Fraction], bool]:
     return {k: v * factor for k, v in shares.items()}, True
 
 
-def _apply_radd(
-    shares: Dict[str, Fraction], active: List[str]
-) -> Tuple[Dict[str, Fraction], bool]:
+def _apply_radd(shares: dict[str, Fraction], active: list[str]) -> tuple[dict[str, Fraction], bool]:
     """Return surplus to eligible sharers, excluding spouses."""
     total = sum(shares.values())
     if total >= 1:
@@ -269,15 +266,15 @@ def _apply_radd(
     return shares, True
 
 
-def distribute(estate: Decimal, heirs: List[str]) -> FaraidResult:
+def distribute(estate: Decimal, heirs: list[str]) -> FaraidResult:
     """Compute faraid shares for the given heirs and estate."""
     if estate <= 0:
         raise ValueError("Estate must be positive")
     if not heirs:
         raise ValueError("At least one heir required")
 
-    steps: List[str] = []
-    adjustments: List[str] = []
+    steps: list[str] = []
+    adjustments: list[str] = []
 
     # 1. Hajb
     active, blocked_by = _apply_hajb(heirs)
@@ -294,17 +291,18 @@ def distribute(estate: Decimal, heirs: List[str]) -> FaraidResult:
 
     # 3. Asaba
     residue = _asaba_share(active, shares)
-    asaba_shares: Dict[str, Fraction] = {}
+    asaba_shares: dict[str, Fraction] = {}
     if residue is not None:
         asaba_shares = _distribute_asaba(active, shares, residue)
         for heir, frac in asaba_shares.items():
             steps.append(f"{HEIRS[heir]['name']} gets residue {frac} as asaba")
 
     # Combine
-    final_shares: Dict[str, Fraction] = {}
+    final_shares: dict[str, Fraction] = {}
     for heir in active:
-        if shares[heir] is not None:
-            final_shares[heir] = shares[heir]
+        share = shares[heir]
+        if share is not None:
+            final_shares[heir] = share
         elif heir in asaba_shares:
             final_shares[heir] = asaba_shares[heir]
         else:
@@ -342,8 +340,6 @@ def _basis_for(heir: str) -> str:
 # Router and endpoint
 # ---------------------------------------------------------------------------
 
-from fastapi import APIRouter, HTTPException
-
 router = APIRouter(tags=["faraid"])
 
 
@@ -352,7 +348,7 @@ def faraid_endpoint(request: FaraidRequest) -> FaraidResponse:
     try:
         result = distribute(request.estate, request.heirs)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     estate_frac = Fraction(request.estate)
     shares = []

@@ -10,11 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tool-reliability", tags=["tool-reliability"])
@@ -24,8 +24,10 @@ router = APIRouter(prefix="/tool-reliability", tags=["tool-reliability"])
 # Models & Schemas
 # ---------------------------------------------------------------------------
 
+
 class ToolDescription(BaseModel):
     """Enhanced tool description schema with capability tags and parameter specs."""
+
     name: str = Field(..., description="Unique name of the tool")
     description: str = Field(..., description="Clear summary of what the tool does")
     capabilities: list[str] = Field(default_factory=list, description="Domain capability tags")
@@ -35,6 +37,7 @@ class ToolDescription(BaseModel):
 
 class ToolCallRequest(BaseModel):
     """A request to invoke a registered tool."""
+
     tool_name: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     session_id: str | None = None
@@ -42,6 +45,7 @@ class ToolCallRequest(BaseModel):
 
 class ToolCallResult(BaseModel):
     """Result of a tool invocation with tracing, validation status, and error context."""
+
     success: bool
     tool_name: str
     output: Any | None = None
@@ -58,6 +62,7 @@ class ToolCallResult(BaseModel):
 # Registry, Validation, and Execution Engine
 # ---------------------------------------------------------------------------
 
+
 class ToolReliabilityEngine:
     """Engine managing tool registration, validation, retry, caching, and tracing."""
 
@@ -70,9 +75,7 @@ class ToolReliabilityEngine:
         self._pattern_success: dict[str, int] = {}
         self._traces: list[dict[str, Any]] = []
 
-    def register_tool(
-        self, description: ToolDescription, handler: Callable[..., Any]
-    ) -> None:
+    def register_tool(self, description: ToolDescription, handler: Callable[..., Any]) -> None:
         self._registry[description.name] = description
         self._handlers[description.name] = handler
         self._usage_counts[description.name] = 0
@@ -262,18 +265,20 @@ class ToolReliabilityEngine:
         return res
 
     def _log_trace(self, result: ToolCallResult, session_id: str | None) -> None:
-        self._traces.append({
-            "trace_id": result.trace_id,
-            "tool_name": result.tool_name,
-            "success": result.success,
-            "error": result.error,
-            "error_category": result.error_category,
-            "latency_ms": result.latency_ms,
-            "retry_count": result.retry_count,
-            "cached": result.cached,
-            "session_id": session_id,
-            "timestamp": time.time(),
-        })
+        self._traces.append(
+            {
+                "trace_id": result.trace_id,
+                "tool_name": result.tool_name,
+                "success": result.success,
+                "error": result.error,
+                "error_category": result.error_category,
+                "latency_ms": result.latency_ms,
+                "retry_count": result.retry_count,
+                "cached": result.cached,
+                "session_id": session_id,
+                "timestamp": time.time(),
+            }
+        )
 
     def get_traces(self) -> list[dict[str, Any]]:
         return self._traces
@@ -286,6 +291,7 @@ tool_reliability_engine = ToolReliabilityEngine()
 # ---------------------------------------------------------------------------
 # FastAPI Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/tools", response_model=list[ToolDescription])
 async def list_tools() -> list[ToolDescription]:

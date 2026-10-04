@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/db-optimizer", tags=["db-optimizer"])
@@ -44,16 +44,37 @@ router = APIRouter(prefix="/db-optimizer", tags=["db-optimizer"])
 # Turkish language support
 # ---------------------------------------------------------------------------
 
+
 def turkish_lower(text: str) -> str:
     """Turkish-aware lowercasing that respects the dotted/dotless I distinction."""
     return text.replace("I", "ı").replace("İ", "i").lower()
 
 
 _TURKISH_SUFFIXES = (
-    "lar", "ler", "dan", "den", "tan", "ten",
-    "yla", "yle", "sin", "sın", "sun", "sün",
-    "dir", "dır", "dur", "dür", "tir", "tır", "tur", "tür",
-    "ken", "ince", "erek", "arak",
+    "lar",
+    "ler",
+    "dan",
+    "den",
+    "tan",
+    "ten",
+    "yla",
+    "yle",
+    "sin",
+    "sın",
+    "sun",
+    "sün",
+    "dir",
+    "dır",
+    "dur",
+    "dür",
+    "tir",
+    "tır",
+    "tur",
+    "tür",
+    "ken",
+    "ince",
+    "erek",
+    "arak",
 )
 
 TURKISH_ISLAMIC_TERMS: dict[str, tuple[str, ...]] = {
@@ -130,6 +151,7 @@ def detect_ottoman_turkish_influence(text: str) -> list[str]:
 
 # Cross-Surah Reference System
 
+
 class ReferenceType(str, Enum):
     REPEATED_STORY = "repeated_story"
     RELATED_RULING = "related_ruling"
@@ -166,7 +188,9 @@ class CrossReferenceDatabase:
         for attribute in record.attributes:
             self._by_attribute.setdefault(attribute, []).append(idx)
 
-    def query(self, surah: int | None = None, reference_type: ReferenceType | None = None, attributes: list[str] | None = None) -> list[CrossReferenceRecord]:
+    def query(
+        self, surah: int | None = None, reference_type: ReferenceType | None = None, attributes: list[str] | None = None
+    ) -> list[CrossReferenceRecord]:
         candidates = set(range(len(self._records)))
         if surah is not None:
             candidates &= set(self._by_surah.get(surah, []))
@@ -183,17 +207,49 @@ class CrossReferenceDatabase:
         found = []
         for idx in self._by_surah.get(surah, []):
             record = self._records[idx]
-            if (record.source_surah == surah and record.source_ayah == ayah) or (record.target_surah == surah and record.target_ayah == ayah):
+            if (record.source_surah == surah and record.source_ayah == ayah) or (
+                record.target_surah == surah and record.target_ayah == ayah
+            ):
                 found.append(record)
         return found
 
 
-_STOPWORDS = frozenset({"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "was", "were", "be", "been", "by", "that", "this", "these", "those", "it", "as", "at", "from", "which", "who"})
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "with",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "by",
+        "that",
+        "this",
+        "these",
+        "those",
+        "it",
+        "as",
+        "at",
+        "from",
+        "which",
+        "who",
+    }
+)
 
 
 def _tokenize(text: str) -> set[str]:
-    return {token for token in re.findall(r"[a-z0-9']+", text.lower()) if
-            token not in _STOPWORDS}
+    return {token for token in re.findall(r"[a-z0-9']+", text.lower()) if token not in _STOPWORDS}
 
 
 # Latency at or above this (milliseconds) counts a query as "slow". Mirrors the

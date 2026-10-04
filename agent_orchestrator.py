@@ -1,9 +1,10 @@
 import asyncio
 import logging
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,8 @@ class AgentStatus(str, Enum):
 class AgentTask:
     task_id: str
     agent_capability: AgentCapability
-    payload: Dict[str, Any]
-    dependencies: List[str] = field(default_factory=list)
+    payload: dict[str, Any]
+    dependencies: list[str] = field(default_factory=list)
     timeout_seconds: float = 5.0
 
 
@@ -45,7 +46,7 @@ class TaskResult:
     agent_name: str
     success: bool
     data: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     latency_ms: float = 0.0
     trace_id: str = ""
 
@@ -88,13 +89,13 @@ class SpecializedAgent:
         self.status = AgentStatus.IDLE
         self.metrics = {"invocations": 0, "successes": 0, "failures": 0}
 
-    async def execute(self, task: AgentTask, context: Dict[str, Any]) -> TaskResult:
+    async def execute(self, task: AgentTask, context: dict[str, Any]) -> TaskResult:
         if not self.circuit_breaker.allow_request():
             return TaskResult(
                 task_id=task.task_id,
                 agent_name=self.name,
                 success=False,
-                error="Circuit breaker open - agent throttled"
+                error="Circuit breaker open - agent throttled",
             )
 
         self.status = AgentStatus.BUSY
@@ -109,11 +110,7 @@ class SpecializedAgent:
                 self.status = AgentStatus.IDLE
                 self.metrics["successes"] += 1
                 return TaskResult(
-                    task_id=task.task_id,
-                    agent_name=self.name,
-                    success=True,
-                    data=result_data,
-                    latency_ms=latency
+                    task_id=task.task_id, agent_name=self.name, success=True, data=result_data, latency_ms=latency
                 )
         except Exception as e:
             latency = (time.time() - start_time) * 1000
@@ -122,17 +119,13 @@ class SpecializedAgent:
             self.metrics["failures"] += 1
             logger.exception(f"Agent {self.name} failed task {task.task_id}: {e}")
             return TaskResult(
-                task_id=task.task_id,
-                agent_name=self.name,
-                success=False,
-                error=str(e),
-                latency_ms=latency
+                task_id=task.task_id, agent_name=self.name, success=False, error=str(e), latency_ms=latency
             )
 
 
 class MessageBroker:
     def __init__(self):
-        self._subscribers: Dict[str, List[Callable[[Any], Coroutine[Any, Any, None]]]] = {}
+        self._subscribers: dict[str, list[Callable[[Any], Coroutine[Any, Any, None]]]] = {}
 
     def subscribe(self, topic: str, callback: Callable[[Any], Coroutine[Any, Any, None]]):
         if topic not in self._subscribers:
@@ -146,12 +139,12 @@ class MessageBroker:
 
 class AgentRegistry:
     def __init__(self):
-        self._agents: Dict[str, SpecializedAgent] = {}
+        self._agents: dict[str, SpecializedAgent] = {}
 
     def register_agent(self, agent: SpecializedAgent):
         self._agents[agent.name] = agent
 
-    def get_agent_by_capability(self, capability: AgentCapability) -> Optional[SpecializedAgent]:
+    def get_agent_by_capability(self, capability: AgentCapability) -> SpecializedAgent | None:
         for agent in self._agents.values():
             if agent.capability == capability and agent.circuit_breaker.allow_request():
                 return agent
@@ -160,13 +153,13 @@ class AgentRegistry:
                 return agent
         return None
 
-    def get_agent(self, name: str) -> Optional[SpecializedAgent]:
+    def get_agent(self, name: str) -> SpecializedAgent | None:
         return self._agents.get(name)
 
 
 class QueryAnalysisEngine:
     @staticmethod
-    def analyze_query(query: str) -> List[AgentCapability]:
+    def analyze_query(query: str) -> list[AgentCapability]:
         q = query.lower()
         capabilities = []
 
@@ -191,10 +184,10 @@ class QueryAnalysisEngine:
 
 class DAGScheduler:
     @staticmethod
-    def build_dag(tasks: List[AgentTask]) -> List[List[AgentTask]]:
+    def build_dag(tasks: list[AgentTask]) -> list[list[AgentTask]]:
         task_map = {t.task_id: t for t in tasks}
         in_degree = {t.task_id: len(t.dependencies) for t in tasks}
-        adj: Dict[str, List[str]] = {t.task_id: [] for t in tasks}
+        adj: dict[str, list[str]] = {t.task_id: [] for t in tasks}
 
         for t in tasks:
             for dep in t.dependencies:
@@ -220,7 +213,7 @@ class DAGScheduler:
 
 class ResultSynthesisPipeline:
     @staticmethod
-    def synthesize(query: str, results: List[TaskResult]) -> Dict[str, Any]:
+    def synthesize(query: str, results: list[TaskResult]) -> dict[str, Any]:
         successful_results = [r for r in results if r.success]
         failed_results = [r for r in results if not r.success]
 
@@ -234,7 +227,7 @@ class ResultSynthesisPipeline:
             "failure_count": len(failed_results),
             "synthesized_response": synthesized_text.strip(),
             "raw_results": results,
-            "coherence_score": 0.98 if successful_results else 0.0
+            "coherence_score": 0.98 if successful_results else 0.0,
         }
 
 
@@ -249,7 +242,7 @@ class MultiAgentOrchestrator:
     def register_agent(self, agent: SpecializedAgent):
         self.registry.register_agent(agent)
 
-    async def process_query(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def process_query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         ctx = context or {}
         required_capabilities = self.analyzer.analyze_query(query)
 
@@ -257,24 +250,28 @@ class MultiAgentOrchestrator:
         for idx, cap in enumerate(required_capabilities):
             agent = self.registry.get_agent_by_capability(cap)
             if agent:
-                tasks.append(AgentTask(
-                    task_id=f"task_{idx}_{cap.value}",
-                    agent_capability=cap,
-                    payload={"query": query, "context": ctx}
-                ))
+                tasks.append(
+                    AgentTask(
+                        task_id=f"task_{idx}_{cap.value}",
+                        agent_capability=cap,
+                        payload={"query": query, "context": ctx},
+                    )
+                )
 
         if not tasks:
             # Fallback to general agent if registered
             general_agent = self.registry.get_agent_by_capability(AgentCapability.GENERAL)
             if general_agent:
-                tasks.append(AgentTask(
-                    task_id="task_0_general",
-                    agent_capability=AgentCapability.GENERAL,
-                    payload={"query": query, "context": ctx}
-                ))
+                tasks.append(
+                    AgentTask(
+                        task_id="task_0_general",
+                        agent_capability=AgentCapability.GENERAL,
+                        payload={"query": query, "context": ctx},
+                    )
+                )
 
         dag_levels = self.scheduler.build_dag(tasks)
-        all_results: List[TaskResult] = []
+        all_results: list[TaskResult] = []
 
         for level in dag_levels:
             coros = []
@@ -283,12 +280,14 @@ class MultiAgentOrchestrator:
                 if agent:
                     coros.append(agent.execute(task, ctx))
                 else:
-                    all_results.append(TaskResult(
-                        task_id=task.task_id,
-                        agent_name="unknown",
-                        success=False,
-                        error=f"No agent found for capability {task.agent_capability}"
-                    ))
+                    all_results.append(
+                        TaskResult(
+                            task_id=task.task_id,
+                            agent_name="unknown",
+                            success=False,
+                            error=f"No agent found for capability {task.agent_capability}",
+                        )
+                    )
             if coros:
                 level_results = await asyncio.gather(*coros)
                 all_results.extend(level_results)

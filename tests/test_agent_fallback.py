@@ -1,6 +1,5 @@
 """Tests for Agent Fallback and Recovery Mechanisms (#225)."""
 
-import asyncio
 import pytest
 
 from agent_fallback import (

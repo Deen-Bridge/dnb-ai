@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
 from collections import defaultdict
-from typing import Any, Optional, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from .corpus import QuranCorpus, corpus as default_corpus
+from corpus import QuranCorpus, corpus as default_corpus
 
 
 class ReferenceType:
     """Constants for cross-reference types."""
+
     REPEATED_STORY = "repeated_story"
     RELATED_RULING = "related_ruling"
     SIMILAR_TEACHING = "similar_teaching"
@@ -34,6 +35,7 @@ class ReferenceType:
 @dataclass
 class CrossReference:
     """Represents a single cross-surah reference."""
+
     source: str  # "surah:aky"
     target: str  # "surah:aky"
     ref_type: str
@@ -46,12 +48,12 @@ class CrossReference:
 class CrossReferenceDatabase:
     """Manages the cross-reference database and provides query methods."""
 
-    def __init__(self, corpus: QuranCorpus = None):
+    def __init__(self, corpus: QuranCorpus | None = None):
         self.corpus = corpus or default_corpus
         self.references: list[CrossReference] = []
         self.index: dict[str, list[int]] = defaultdict(list)
         self._built: bool = False
-        self._scholarly_file: Optional[Path] = None
+        self._scholarly_file: Path | None = None
 
     def build(self, use_nlp: bool = True, include_traditional: bool = True) -> None:
         """Builds the reference database."""
@@ -85,9 +87,33 @@ class CrossReferenceDatabase:
         else:
             # Sample well-known references (fallback)
             samples = [
-                CrossReference("2:255", "2:256", ReferenceType.CROSS_REFERENCE, context="Al-Baqarah 2:255 and 2:256", commentary="Throne verse associated with Better and throne.", strength=0.9, sources=["Tafs"]),
-                CrossReference("11:75", "54:53", ReferenceType.REPEATED_STORY, context="Story of Saleh in Hud and Safhyat", commentary="Same prophetic narrative in multiple surahs.", strength=1.0, sources=["Tafs"]),
-                CrossReference("1:1-7", "98:1-5", ReferenceType.PARALLEL_ACCOUNT, context="Surah Al-Fatihah and Bayinah", commentary="Parallel openings in both surahs.", strength=0.8, sources=["Tafs"]),
+                CrossReference(
+                    "2:255",
+                    "2:256",
+                    ReferenceType.CROSS_REFERENCE,
+                    context="Al-Baqarah 2:255 and 2:256",
+                    commentary="Throne verse associated with Better and throne.",
+                    strength=0.9,
+                    sources=["Tafs"],
+                ),
+                CrossReference(
+                    "11:75",
+                    "54:53",
+                    ReferenceType.REPEATED_STORY,
+                    context="Story of Saleh in Hud and Safhyat",
+                    commentary="Same prophetic narrative in multiple surahs.",
+                    strength=1.0,
+                    sources=["Tafs"],
+                ),
+                CrossReference(
+                    "1:1-7",
+                    "98:1-5",
+                    ReferenceType.PARALLEL_ACCOUNT,
+                    context="Surah Al-Fatihah and Bayinah",
+                    commentary="Parallel openings in both surahs.",
+                    strength=0.8,
+                    sources=["Tafs"],
+                ),
             ]
             self.references.extend(samples)
 
@@ -111,7 +137,7 @@ class CrossReferenceDatabase:
         for src, words in tokenized.items():
             src_surah = int(src.split(":")[0])
             candidates = set()
-            word_counts = defaultdict(int)
+            word_counts: defaultdict[str, int] = defaultdict(int)
             for w in set(words) & set(inv_index.keys()):
                 for other in inv_index[w]:
                     if other != src:
@@ -135,7 +161,7 @@ class CrossReferenceDatabase:
                     context=self._get_context(src, tgt),
                     commentary="Automatically detected based on shared vocabulary.",
                     strength=min(1.0, strength),
-                    sources=["NLP detection"]
+                    sources=["NLP detection"],
                 )
                 self.references.append(ref)
 
@@ -148,9 +174,16 @@ class CrossReferenceDatabase:
     def _classify_reference_type(self, src, tgt, src_words, tgt_words) -> str:
         """Heuristic classification of reference type."""
         common = set(src_words) & set(tgt_words)
-        if any(w in ["q\]u0643\u062a", "\u0648\u0625\u0631\u0629", "\u0642\u0625\u0644\u0629"] for w in common) or any(w in ["q\u0643\u062a", "\u0648\u0625\u0631\u0629", "\u0642\u0625\u0644\u0629"] for w in src_words) or any(w in ["q\u0643\u062a", "\u0648\u0625\u0631\u0629", "\u0642\u0625\u0644\u0629"] for w in tgt_words):
+        if (
+            any(w in ["q\\]u0643\u062a", "\u0648\u0625\u0631\u0629", "\u0642\u0625\u0644\u0629"] for w in common)
+            or any(w in ["q\u0643\u062a", "\u0648\u0625\u0631\u0629", "\u0642\u0625\u0644\u0629"] for w in src_words)
+            or any(w in ["q\u0643\u062a", "\u0648\u0625\u0631\u0629", "\u0642\u0625\u0644\u0629"] for w in tgt_words)
+        ):
             return ReferenceType.REPEATED_STORY
-        if any(w in ["\u0627\u0642\u0645", "\u0627\u0645\u0627", "\u0644\u0628\u0649", "\u0645\u0644\u0627"] for w in common):
+        if any(
+            w in ["\u0627\u0642\u0645", "\u0627\u0645\u0627", "\u0644\u0628\u0649", "\u0645\u0644\u0627"]
+            for w in common
+        ):
             return ReferenceType.RELATED_RULING
         if any(w in ["\u0641\u062f\u0644", "\u0633\u0625\u0645\u0627", "\u0644\u0637\u0644\u062a"] for w in common):
             return ReferenceType.SIMILAR_TEACHING
@@ -168,11 +201,11 @@ class CrossReferenceDatabase:
         tgt_ayah = self.corpus.get_ayah(*(int(part) for part in tgt.split(":")))
         src_text = src_ayah.get("text", "") if src_ayah else ""
         tgt_text = tgt_ayah.get("text", "") if tgt_ayah else ""
-        return f'({src}: {src_text} | {tgt}: {tgt_text})'
+        return f"({src}: {src_text} | {tgt}: {tgt_text})"
 
     # Query methods
 
-    def get_references(self, surah: int, ayah: int, ref_type: Optional[str] = None) -> list[CrossReference]:
+    def get_references(self, surah: int, ayah: int, ref_type: str | None = None) -> list[CrossReference]:
         """Returns all outbound references from the given ayah."""
         if not self._built:
             self.build()
@@ -182,14 +215,16 @@ class CrossReferenceDatabase:
             results = [r for r in results if r.ref_type == ref_type]
         return results
 
-    def get_bidirectional(self, surah: int, ayah: int, ref_type: Optional[str] = None) -> list[CrossReference]:
+    def get_bidirectional(self, surah: int, ayah: int, ref_type: str | None = None) -> list[CrossReference]:
         """Returns both outbound and inbound references for a given ayah."""
         outbound = self.get_references(surah, ayah, ref_type)
         key = f"{surah}:{ayah}"
         inbound = [r for r in self.references if r.target == key and (ref_type is None or r.ref_type == ref_type)]
         return outbound + inbound
 
-    def filter_by_surah_attributes(self, refs: list[CrossReference], surah_type: Optional[str] = None, meccan: Optional[bool] = None) -> list[CrossReference]:
+    def filter_by_surah_attributes(
+        self, refs: list[CrossReference], surah_type: str | None = None, meccan: bool | None = None
+    ) -> list[CrossReference]:
         """Filters references based on surah attributes of either endpoint."""
         filtered = []
         for ref in refs:
@@ -211,7 +246,7 @@ class CrossReferenceDatabase:
                 filtered.append(ref)
         return filtered
 
-    def get_visualization_data(self, surahs: Optional[list[int]] = None) -> dict[str, Any]:
+    def get_visualization_data(self, surahs: list[int] | None = None) -> dict[str, Any]:
         """Generates data for cross-reference network visualization."""
         if not self._built:
             self.build()
@@ -241,6 +276,7 @@ class CrossReferenceDatabase:
 
     def set_scholarly_data_file(self, path: Path) -> None:
         self._scholarly_file = path
+
 
 def get_reference_types() -> list[str]:
     """Returns all supported reference types."""

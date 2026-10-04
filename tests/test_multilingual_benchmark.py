@@ -46,9 +46,7 @@ def make_items(count: int = 2) -> list[BenchmarkItem]:
     return [
         BenchmarkItem(
             item_id=f"item-{index}",
-            translations={
-                language: Translation(questions[language], answers[language]) for language in LANGUAGES
-            },
+            translations={language: Translation(questions[language], answers[language]) for language in LANGUAGES},
             terms=terms,
         )
         for index in range(count)

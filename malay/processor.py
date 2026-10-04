@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
-from malay.models import MalayQueryRequest, MalayQueryResponse
-from malay.dialects import DialectHandler
-from malay.terminology import TerminologyLexicon
-from malay.loanwords import LoanwordRecognizer
-from malay.cultural_context import CulturalContextManager
 from malay.code_switching import CodeSwitchingHandler
+from malay.cultural_context import CulturalContextManager
+from malay.dialects import DialectHandler
 from malay.generator import MalayContentGenerator
+from malay.models import MalayQueryRequest, MalayQueryResponse
 from malay.optimizer import QueryOptimizer
-from malay.router import MalayRouter
+from malay.terminology import TerminologyLexicon
+
 
 class MalayProcessor:
     def __init__(self) -> None:
@@ -24,13 +22,7 @@ class MalayProcessor:
 
     def transliterate_to_jawi(self, text: str) -> str:
         # Basic demonstration transliteration mapping
-        mapping = {
-            "solat": "صلاة",
-            "shalat": "صلاة",
-            "puasa": "ڤواس",
-            "allah": "الله",
-            "muhammad": "محمد"
-        }
+        mapping = {"solat": "صلاة", "shalat": "صلاة", "puasa": "ڤواس", "allah": "الله", "muhammad": "محمد"}
         words = text.split()
         res = []
         for w in words:
@@ -41,17 +33,16 @@ class MalayProcessor:
     def process(self, request: MalayQueryRequest) -> MalayQueryResponse:
         script = self.detect_script(request.text)
         dialect = request.dialect or DialectHandler.detect_dialect(request.text)
-        
+
         normalized = QueryOptimizer.optimize_query(request.text)
         normalized = DialectHandler.normalize_dialect(normalized, dialect)
         normalized = CodeSwitchingHandler.process_code_switching(normalized)
-        
+
         terms = self.lexicon.identify_terms(normalized)
-        loanwords = LoanwordRecognizer.recognize_loanwords(normalized)
-        
+
         base_content = MalayContentGenerator.generate_islamic_content(normalized, dialect)
         enriched = CulturalContextManager.enrich_response(base_content, dialect)
-        
+
         transliterated = None
         if request.target_script == "jawi" or script == "jawi":
             transliterated = self.transliterate_to_jawi(enriched)
@@ -64,5 +55,5 @@ class MalayProcessor:
             transliterated_text=transliterated,
             islamic_terms_identified=terms,
             optimized_response=enriched,
-            confidence=0.98
+            confidence=0.98,
         )

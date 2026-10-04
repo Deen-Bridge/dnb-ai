@@ -1,9 +1,8 @@
 import difflib
 import math
 import re
-import itertools
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from corpus import corpus
 
@@ -73,7 +72,7 @@ class ConfidenceCalibrator:
     def __init__(self, temperature: float = DEFAULT_TEMPERATURE):
         self.temperature = temperature
 
-    def calibrate(self, similarity: Optional[float]) -> float:
+    def calibrate(self, similarity: float | None) -> float:
         "Convert raw similarity (0-1) to calibrated confidence."
         if similarity is None:
             return 0.0
@@ -84,7 +83,7 @@ class ConfidenceCalibrator:
         conf = 1 / (1 + math.exp(-scaled_logit))
         return round(conf, 3)
 
-    def fit(self, similarities: List[float], accuracies: List[int]):
+    def fit(self, similarities: list[float], accuracies: list[int]):
         "Find best temperature by minimizing ECE over a linear search."
         # Note: This is a placeholder for training on ground truth data.
         best_temp = 1.0
@@ -100,7 +99,7 @@ class ConfidenceCalibrator:
         return self.temperature
 
 
-def compute_ece(confidences: List[float], accuracies: List[int], num_bins: int = 10) -> float:
+def compute_ece(confidences: list[float], accuracies: list[int], num_bins: int = 10) -> float:
     "Expected Calibration Error (ECE)."
     if len(confidences) != len(accuracies) or len(confidences) == 0:
         return 1.0
@@ -109,7 +108,7 @@ def compute_ece(confidences: List[float], accuracies: List[int], num_bins: int =
     ece = 0.0
     for i in range(num_bins):
         lo, hi = bin_edges[i], bin_edges[i + 1]
-        in_bin = [(m, acc) for m, acc in zip(confidences, accuracies) if lo <= m < hi]
+        in_bin = [(m, acc) for m, acc in zip(confidences, accuracies, strict=False) if lo <= m < hi]
         if not in_bin:
             continue
         bin_conf = sum(conf for conf, acc in in_bin) / len(in_bin)
@@ -118,7 +117,7 @@ def compute_ece(confidences: List[float], accuracies: List[int], num_bins: int =
     return ece
 
 
-def compute_mce(confidences: List[float], accuracies: List[int], num_bins: int = 10) -> float:
+def compute_mce(confidences: list[float], accuracies: list[int], num_bins: int = 10) -> float:
     "Maximum Calibration Error (MCE)."
     if len(confidences) != len(accuracies) or len(confidences) == 0:
         return 1.0
@@ -126,7 +125,7 @@ def compute_mce(confidences: List[float], accuracies: List[int], num_bins: int =
     mce = 0.0
     for i in range(num_bins):
         lo, hi = bin_edges[i], bin_edges[i + 1]
-        in_bin = [(m, acc) for m, acc in zip(confidences, accuracies) if lo <= m < hi]
+        in_bin = [(m, acc) for m, acc in zip(confidences, accuracies, strict=False) if lo <= m < hi]
         if not in_bin:
             continue
         bin_conf = sum(conf for conf, acc in in_bin) / len(in_bin)
@@ -173,26 +172,26 @@ def get_confidence_label(confidence: float) -> str:
     return "low"
 
 
-def create_confidence_fields(result: Dict[str, Any]) -> Dict[str, Any]:
+def create_confidence_fields(result: dict[str, Any]) -> dict[str, Any]:
     "Add confidence and related fields to a result dict."
-    if 'similarity' in result:
-        sim = result['similarity']
+    if "similarity" in result:
+        sim = result["similarity"]
         conf = _calibrator.calibrate(sim)
         # If status is MISMATCH, low similarity means high confidence in negative prediction;
         # But we report confidence of the claim being correct, so use the raw calibrated value.
-        result['confidence'] = conf
-    elif result.get('status') == VerificationStatus.NOT_QUOTED:
+        result["confidence"] = conf
+    elif result.get("status") == VerificationStatus.NOT_QUOTED:
         conf = 0.5
-        result['confidence'] = conf
+        result["confidence"] = conf
     else:  # UNVERIFIED or other
         conf = 0.0
-        result['confidence'] = conf
-    result['confidence_label'] = get_confidence_label(conf)
-    result['defer_recommended'] = conf < DEFERAL_THRESHOLD
+        result["confidence"] = conf
+    result["confidence_label"] = get_confidence_label(conf)
+    result["defer_recommended"] = conf < DEFERAL_THRESHOLD
     return result
 
 
-def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) -> Dict[str, Any]:
+def verify_quran_citation(surah: int, ayah: int, quote: str | None = None) -> dict[str, Any]:
     "Verify a single Quran reference against the corpus."
     max_ayahs = corpus.get_ayah_count(surah)
 
@@ -246,7 +245,7 @@ def verify_quran_citation(surah: int, ayah: int, quote: Optional[str] = None) ->
     return create_confidence_fields(result)
 
 
-def verify_hadith_citation(collection: str, number: Optional[str] = None, quote: Optional[str] = None) -> Dict[str, Any]:
+def verify_hadith_citation(collection: str, number: str | None = None, quote: str | None = None) -> dict[str, Any]:
     "Verification for Hadith citations (defaults to honest unverified label when corpus is unavailable)."
     if not corpus.has_hadith_corpus():
         result = {
@@ -260,65 +259,77 @@ def verify_hadith_citation(collection: str, number: Optional[str] = None, quote:
     # Attempt to retrieve hadith text from corpus
     get_hadith = getattr(corpus, "get_hadith", None)
     if not callable(get_hadith):
-        return create_confidence_fields({
-            "source": "hadith",
-            "collection": collection,
-            "number": number,
-            "status": VerificationStatus.UNVERIFIED,
-            "reason": "Hadith corpus getter not available.",
-        })
+        return create_confidence_fields(
+            {
+                "source": "hadith",
+                "collection": collection,
+                "number": number,
+                "status": VerificationStatus.UNVERIFIED,
+                "reason": "Hadith corpus getter not available.",
+            }
+        )
 
     hadith_data = get_hadith(collection, number)
     if hadith_data is None:
-        return create_confidence_fields({
-            "source": "hadith",
-            "collection": collection,
-            "number": number,
-            "status": VerificationStatus.MISMATCH,
-            "reason": f"Hadith {collection} #{number} not found in corpus.",
-        })
+        return create_confidence_fields(
+            {
+                "source": "hadith",
+                "collection": collection,
+                "number": number,
+                "status": VerificationStatus.MISMATCH,
+                "reason": f"Hadith {collection} #{number} not found in corpus.",
+            }
+        )
 
     if not quote or not quote.strip():
-        return create_confidence_fields({
-            "source": "hadith",
-            "collection": collection,
-            "number": number,
-            "status": VerificationStatus.NOT_QUOTED,
-            "reason": "Reference exists; no quote provided for verification.",
-        })
+        return create_confidence_fields(
+            {
+                "source": "hadith",
+                "collection": collection,
+                "number": number,
+                "status": VerificationStatus.NOT_QUOTED,
+                "reason": "Reference exists; no quote provided for verification.",
+            }
+        )
 
     corpus_text = hadith_data.get("english", "") or hadith_data.get("text", "")
     if not corpus_text:
-        return create_confidence_fields({
-            "source": "hadith",
-            "collection": collection,
-            "number": number,
-            "status": VerificationStatus.UNVERIFIED,
-            "reason": "Hadith text not available in corpus.",
-        })
+        return create_confidence_fields(
+            {
+                "source": "hadith",
+                "collection": collection,
+                "number": number,
+                "status": VerificationStatus.UNVERIFIED,
+                "reason": "Hadith text not available in corpus.",
+            }
+        )
 
     similarity = calculate_similarity(quote, corpus_text)
     if similarity >= 0.70:
-        return create_confidence_fields({
-            "source": "hadith",
-            "collection": collection,
-            "number": number,
-            "status": VerificationStatus.VERIFIED,
-            "similarity": round(similarity, 2),
-        })
+        return create_confidence_fields(
+            {
+                "source": "hadith",
+                "collection": collection,
+                "number": number,
+                "status": VerificationStatus.VERIFIED,
+                "similarity": round(similarity, 2),
+            }
+        )
     else:
-        return create_confidence_fields({
-            "source": "hadith",
-            "collection": collection,
-            "number": number,
-            "status": VerificationStatus.MISMATCH,
-            "similarity": round(similarity, 2),
-            "correct_text": corpus_text,
-            "reason": f"Quote does not match {collection} #{number} text in corpus.",
-        })
+        return create_confidence_fields(
+            {
+                "source": "hadith",
+                "collection": collection,
+                "number": number,
+                "status": VerificationStatus.MISMATCH,
+                "similarity": round(similarity, 2),
+                "correct_text": corpus_text,
+                "reason": f"Quote does not match {collection} #{number} text in corpus.",
+            }
+        )
 
 
-def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
+def extract_and_verify_all(text: str) -> list[dict[str, Any]]:
     "Extract all citations from text and return their verification statuses, with confidence scores."
     results = []
 
@@ -341,7 +352,7 @@ def extract_and_verify_all(text: str) -> List[Dict[str, Any]]:
     return results
 
 
-def verify_claim(claim: str, evidence: str) -> Dict[str, Any]:
+def verify_claim(claim: str, evidence: str) -> dict[str, Any]:
     """Verify a scholarly claim against provided evidence text.
 
     Args:
@@ -362,13 +373,15 @@ def verify_claim(claim: str, evidence: str) -> Dict[str, Any]:
             "reason": "No primary source citations found in evidence.",
             "evidence": [],
             "support_score": 0.0,
-            "audit_trail": ["No citations extracted from evidence."]
+            "audit_trail": ["No citations extracted from evidence."],
         }
 
     # Determine overall status based on citation verification results
     verified = [r for r in citation_results if r["status"] == VerificationStatus.VERIFIED]
     mismatched = [r for r in citation_results if r["status"] == VerificationStatus.MISMATCH]
-    unverified = [r for r in citation_results if r["status"] in (VerificationStatus.UNVERIFIED, VerificationStatus.NOT_QUOTED)]
+    unverified = [
+        r for r in citation_results if r["status"] in (VerificationStatus.UNVERIFIED, VerificationStatus.NOT_QUOTED)
+    ]
 
     if verified and not mismatched and not unverified:
         overall_status = VerificationStatus.VERIFIED
@@ -396,7 +409,7 @@ def verify_claim(claim: str, evidence: str) -> Dict[str, Any]:
         "reason": reason,
         "evidence": citation_results,
         "support_score": round(support_score, 2),
-        "audit_trail": audit_trail
+        "audit_trail": audit_trail,
     }
 
 
@@ -410,7 +423,7 @@ class SynthesisEngine:
     def __init__(self, similarity_threshold: float = 0.8):
         self.similarity_threshold = similarity_threshold
 
-    def synthesize(self, responses: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def synthesize(self, responses: list[dict[str, Any]]) -> dict[str, Any]:
         """Merge responses with attribution markers.
 
         In a full implementation, this would do information extraction,
@@ -419,21 +432,17 @@ class SynthesisEngine:
         segments = []
         attributions = {}
         for resp in responses:
-            agent_id = resp.get('agent_id', 'unknown')
-            text = resp.get('text', '').strip()
+            agent_id = resp.get("agent_id", "unknown")
+            text = resp.get("text", "").strip()
             if not text:
                 continue
             segments.append(f"[{agent_id}] {text}")
             attributions[agent_id] = text
         synthesized = " ".join(segments)
-        return {
-            "synthesized_text": synthesized,
-            "attributions": attributions,
-            "conflicts": []
-        }
+        return {"synthesized_text": synthesized, "attributions": attributions, "conflicts": []}
 
 
-def synthesize_responses(responses: List[Dict[str, Any]]) -> Dict[str, Any]:
+def synthesize_responses(responses: list[dict[str, Any]]) -> dict[str, Any]:
     "Convenience function to synthesize agent responses."
     engine = SynthesisEngine()
     return engine.synthesize(responses)
