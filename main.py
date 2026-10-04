@@ -8,7 +8,7 @@ import time
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
@@ -194,7 +194,7 @@ def _track_calibration(assessment: ConfidenceAssessment) -> None:
         return
     _calibration_events.append(
         {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "score": assessment.score,
             "band": assessment.band.value,
             "queued": assessment.queued,
