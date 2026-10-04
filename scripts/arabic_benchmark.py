@@ -67,16 +67,44 @@ _TERMS = (
 )
 
 _MSA_ITEMS = (
-    ("ما الفكرة الرئيسة في العبارة: العلم النافع يبني المجتمعات؟", "العلم النافع يسهم في بناء المجتمعات", ("العلم", "بناء", "المجتمعات")),
-    ("لماذا تعد القراءة اليومية عادة مفيدة؟", "لأنها توسع المعرفة وتنمي التفكير واللغة", ("المعرفة", "التفكير", "اللغة")),
+    (
+        "ما الفكرة الرئيسة في العبارة: العلم النافع يبني المجتمعات؟",
+        "العلم النافع يسهم في بناء المجتمعات",
+        ("العلم", "بناء", "المجتمعات"),
+    ),
+    (
+        "لماذا تعد القراءة اليومية عادة مفيدة؟",
+        "لأنها توسع المعرفة وتنمي التفكير واللغة",
+        ("المعرفة", "التفكير", "اللغة"),
+    ),
     ("اشرح بإيجاز أهمية حفظ الماء.", "حفظ الماء يمنع الهدر ويحمي موردا ضروريا للحياة", ("الماء", "الهدر", "الحياة")),
     ("ما أثر الصدق في العلاقات الاجتماعية؟", "يبني الصدق الثقة ويقوي العلاقات بين الناس", ("الثقة", "العلاقات")),
-    ("لخص معنى التعاون في جملة واحدة.", "التعاون اشتراك الناس في العمل لتحقيق منفعة مشتركة", ("العمل", "منفعة", "مشتركة")),
+    (
+        "لخص معنى التعاون في جملة واحدة.",
+        "التعاون اشتراك الناس في العمل لتحقيق منفعة مشتركة",
+        ("العمل", "منفعة", "مشتركة"),
+    ),
     ("كيف يساعد تنظيم الوقت الطالب؟", "يساعده على إنجاز واجباته وتحقيق أهدافه بكفاءة", ("إنجاز", "أهداف", "كفاءة")),
-    ("ما المقصود بالتفكير النقدي؟", "تحليل المعلومات والأدلة قبل قبول النتائج أو رفضها", ("تحليل", "المعلومات", "الأدلة")),
-    ("بيّن فائدة الحوار الهادئ عند الاختلاف.", "يساعد الحوار الهادئ على الفهم وحل الخلاف باحترام", ("الفهم", "الخلاف", "احترام")),
-    ("ما العلاقة بين التعليم والتنمية؟", "يرفع التعليم مهارات الناس ويدعم التنمية المستدامة", ("التعليم", "مهارات", "التنمية")),
-    ("لماذا ينبغي التحقق من الأخبار قبل نشرها؟", "لتجنب نشر المعلومات الكاذبة والإضرار بالناس", ("التحقق", "الكاذبة", "الناس")),
+    (
+        "ما المقصود بالتفكير النقدي؟",
+        "تحليل المعلومات والأدلة قبل قبول النتائج أو رفضها",
+        ("تحليل", "المعلومات", "الأدلة"),
+    ),
+    (
+        "بيّن فائدة الحوار الهادئ عند الاختلاف.",
+        "يساعد الحوار الهادئ على الفهم وحل الخلاف باحترام",
+        ("الفهم", "الخلاف", "احترام"),
+    ),
+    (
+        "ما العلاقة بين التعليم والتنمية؟",
+        "يرفع التعليم مهارات الناس ويدعم التنمية المستدامة",
+        ("التعليم", "مهارات", "التنمية"),
+    ),
+    (
+        "لماذا ينبغي التحقق من الأخبار قبل نشرها؟",
+        "لتجنب نشر المعلومات الكاذبة والإضرار بالناس",
+        ("التحقق", "الكاذبة", "الناس"),
+    ),
 )
 
 _DIALECT_PROMPTS = {
@@ -160,7 +188,7 @@ def normalize_arabic(text: str, *, keep_diacritics: bool = False) -> str:
     normalized = unicodedata.normalize("NFC", text).strip()
     if not keep_diacritics:
         normalized = strip_diacritics(normalized)
-    normalized = normalized.translate(str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي"}))
+    normalized = normalized.translate(str.maketrans("أإآٱى", "ااااي"))
     return " ".join(normalized.split())
 
 
@@ -176,12 +204,20 @@ def corpus_bleu(reference: str, candidate: str, max_order: int = 4) -> float:
         return 0.0
     precisions: list[float] = []
     for order in range(1, max_order + 1):
-        candidate_ngrams = Counter(tuple(candidate_tokens[i : i + order]) for i in range(len(candidate_tokens) - order + 1))
-        reference_ngrams = Counter(tuple(reference_tokens[i : i + order]) for i in range(len(reference_tokens) - order + 1))
+        candidate_ngrams = Counter(
+            tuple(candidate_tokens[i : i + order]) for i in range(len(candidate_tokens) - order + 1)
+        )
+        reference_ngrams = Counter(
+            tuple(reference_tokens[i : i + order]) for i in range(len(reference_tokens) - order + 1)
+        )
         overlap = sum((candidate_ngrams & reference_ngrams).values())
         total = sum(candidate_ngrams.values())
         precisions.append((overlap + 1.0) / (total + 1.0))
-    brevity_penalty = 1.0 if len(candidate_tokens) > len(reference_tokens) else math.exp(1 - len(reference_tokens) / len(candidate_tokens))
+    brevity_penalty = (
+        1.0
+        if len(candidate_tokens) > len(reference_tokens)
+        else math.exp(1 - len(reference_tokens) / len(candidate_tokens))
+    )
     return brevity_penalty * math.exp(sum(math.log(value) for value in precisions) / max_order)
 
 
@@ -435,6 +471,8 @@ class ArabicBenchmarkEvaluator:
             if not 0 < english_baseline_accuracy <= 1:
                 raise ValueError("English baseline accuracy must be in the range (0, 1]")
             overall_accuracy = overall["comprehension_accuracy"]
+            if overall_accuracy is None:
+                raise ValueError("Overall comprehension accuracy is unavailable")
             baseline_ratio = round(float(overall_accuracy) / english_baseline_accuracy, 6)
         criteria = {
             "comprehension_vs_english_baseline_over_90_percent": baseline_ratio is not None and baseline_ratio > 0.90,
@@ -458,7 +496,11 @@ class ArabicBenchmarkEvaluator:
             "arabic_to_english_comprehension_ratio": baseline_ratio,
             "human_evaluation": human,
             "by_variety": {
-                name: {"count": len(rows), "comprehension_accuracy": average("comprehension_accuracy", rows), "bleu": average("bleu", rows)}
+                name: {
+                    "count": len(rows),
+                    "comprehension_accuracy": average("comprehension_accuracy", rows),
+                    "bleu": average("bleu", rows),
+                }
                 for name, rows in sorted(by_variety.items())
             },
             "by_task": {
@@ -487,7 +529,13 @@ def compare_models(reports: Mapping[str, Mapping[str, Any]]) -> list[dict[str, A
         overall = report.get("overall", {})
         quality_values = [
             float(overall[key])
-            for key in ("comprehension_accuracy", "bleu", "diacritical_accuracy", "terminology_accuracy", "script_handling")
+            for key in (
+                "comprehension_accuracy",
+                "bleu",
+                "diacritical_accuracy",
+                "terminology_accuracy",
+                "script_handling",
+            )
             if overall.get(key) is not None
         ]
         grammar_rate = float(overall.get("grammar_error_rate", 1.0))
@@ -499,7 +547,9 @@ def compare_models(reports: Mapping[str, Mapping[str, Any]]) -> list[dict[str, A
 def load_responses(path: Path) -> dict[str, str]:
     with path.open(encoding="utf-8") as handle:
         raw = json.load(handle)
-    if not isinstance(raw, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in raw.items()):
+    if not isinstance(raw, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in raw.items()
+    ):
         raise ValueError("Responses file must be a JSON object mapping case ids to response strings")
     return raw
 

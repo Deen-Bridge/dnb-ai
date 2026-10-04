@@ -87,7 +87,7 @@ jobs:
         run: pytest -q tests/test_zakat.py
 
       - name: Run asbab al-nuzul tests
-        run: pytest -q tests/test_asbaba.py
+        run: pytest -q tests/test_asbab.py
 
       - name: Run purchase history chat tests
         run: pytest -q tests/test_purchases.py
@@ -116,11 +116,8 @@ jobs:
       - name: Run memory extraction tests
         run: pytest -q tests/test_memory_extraction.py
 
-      - name: Run agent memory tests
-        run: pytest -q tests/test_agent_memory.py
-
-      - name: Run context sharing tests
-        run: pytest -q tests/test_context_sharing.py
+      - name: Run memory integration tests
+        run: pytest -q tests/test_memory_integration.py
 
       - name: Run Islamic QA Benchmark dataset tests
         run: pytest -q tests/test_islamic_qa_benchmark.py

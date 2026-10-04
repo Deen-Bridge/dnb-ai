@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class CodeSwitchingHandler:
     @staticmethod
     def process_code_switching(text: str) -> str:

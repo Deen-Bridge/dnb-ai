@@ -3,6 +3,7 @@ from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -66,17 +67,11 @@ class Settings(BaseSettings):
     memory_context_window_size: int = Field(
         default=10, ge=1, description="Number of recent messages kept in short-term context"
     )
-    memory_semantic_top_k: int = Field(
-        default=5, ge=1, description="Number of semantic memory results to retrieve"
-    )
+    memory_semantic_top_k: int = Field(default=5, ge=1, description="Number of semantic memory results to retrieve")
     memory_sync_enabled: bool = Field(default=True, description="Enable inter-agent memory sync")
     memory_versioning: bool = Field(default=True, description="Enable memory versioning")
-    memory_pruning_threshold: int = Field(
-        default=10000, ge=1, description="Max memory entries before pruning"
-    )
-    memory_gc_interval_seconds: int = Field(
-        default=3600, ge=60, description="Garbage collection interval in seconds"
-    )
+    memory_pruning_threshold: int = Field(default=10000, ge=1, description="Max memory entries before pruning")
+    memory_gc_interval_seconds: int = Field(default=3600, ge=60, description="Garbage collection interval in seconds")
     memory_user_isolation: bool = Field(default=True, description="Isolate memory per user")
 
     turkish_support_enabled: bool = Field(default=True)
@@ -119,6 +114,7 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
 
 @lru_cache
 def get_settings() -> Settings:

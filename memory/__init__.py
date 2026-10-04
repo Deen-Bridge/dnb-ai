@@ -79,11 +79,12 @@ def render_user_context(
     return result
 
 
-def retrieve_context(
+async def retrieve_context(
     store: MemoryStore,
     user_id: str,
     query: str = "",
     *,
+    chat_id: str | None = None,
     max_chars: int | None = None,
 ) -> str:
     """Retrieve a user's memory context for an agent query.
@@ -92,15 +93,8 @@ def retrieve_context(
     facts by token overlap with *query*, and renders the result.  This lets
     agents share a single backing store while keeping context bounded.
     """
-    load_profile = getattr(store, "load_user_profile", None)
-    if load_profile is None:
-        load_profile = getattr(store, "get_user_profile")
-    profile = load_profile(user_id)
-
-    load_summary = getattr(store, "load_chat_summary", None)
-    if load_summary is None:
-        load_summary = getattr(store, "get_chat_summary")
-    summary = load_summary(user_id)
+    profile = await store.get_profile(user_id)
+    summary = await store.get_chat_summary(chat_id) if chat_id else None
 
     if query and profile is not None and profile.remembered_facts:
         q_tokens = set(query.lower().split())

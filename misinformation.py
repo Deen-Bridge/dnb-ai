@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 # Respectful disagreement enforcement (adab al-ikhtilaf)
 # ---------------------------------------------------------------------------
 
+
 class AdabAction(str, Enum):
     WARNING = "warning"
     BLOCK = "block"
+
 
 class AdabViolationType(str, Enum):
     DISMISSIVE = "dismissive"
@@ -39,12 +41,14 @@ class AdabViolationType(str, Enum):
     POLARIZING = "polarizing"
     NON_ACKNOWLEDGMENT = "non_acknowledgment"
 
+
 class AdabRule(BaseModel):
     id: str
     violation_type: AdabViolationType
     patterns: list[str]
     suggestion: str
     action: AdabAction = AdabAction.WARNING
+
 
 class AdabViolation(BaseModel):
     rule_id: str
@@ -53,12 +57,14 @@ class AdabViolation(BaseModel):
     suggestion: str
     action: AdabAction
 
+
 class DisagreementScanResult(BaseModel):
     violations: list[AdabViolation] = []
     has_violations: bool = False
     should_block: bool = False
     acknowledgment_missing: bool = False
     respectful_alternatives: list[str] = []
+
 
 DEBATED_MATTERS: dict[str, dict[str, Any]] = {
     "music": {"legitimate": True, "reference": "Ibn Hazm; Al-Ghazali"},
@@ -144,6 +150,7 @@ _DEBATED_MATTER_PATTERNS = [
     r"\b(raf[ ']?al[- ]?yadayn|qunoot)\b",
 ]
 
+
 def _detect_adab_violations(text: str) -> list[AdabViolation]:
     violations: list[AdabViolation] = []
     for rule in ADAB_RULES:
@@ -154,26 +161,32 @@ def _detect_adab_violations(text: str) -> list[AdabViolation]:
                 logger.warning("Invalid adab regex in rule %s: %s", rule.id, pattern)
                 continue
             if match:
-                violations.append(AdabViolation(
-                    rule_id=rule.id,
-                    violation_type=rule.violation_type,
-                    matched_pattern=match.group(0),
-                    suggestion=rule.suggestion,
-                    action=rule.action,
-                ))
+                violations.append(
+                    AdabViolation(
+                        rule_id=rule.id,
+                        violation_type=rule.violation_type,
+                        matched_pattern=match.group(0),
+                        suggestion=rule.suggestion,
+                        action=rule.action,
+                    )
+                )
                 break
     return violations
+
 
 def has_ikhtilaf_acknowledgment(text: str) -> bool:
     """Return True if the text acknowledges legitimate ikhtilaf."""
     return any(re.search(p, text, re.IGNORECASE) for p in _IKHTILAF_ACK_PATTERNS)
 
+
 def _involves_debated_matter(text: str) -> bool:
     return any(re.search(p, text, re.IGNORECASE) for p in _DEBATED_MATTER_PATTERNS)
+
 
 def suggest_respectful_alternatives(text: str) -> list[str]:
     """Suggest respectful rephrasings for detected adab violations."""
     return list({v.suggestion for v in _detect_adab_violations(text)})
+
 
 def enforce_respectful_disagreement(
     text: str,
@@ -185,16 +198,18 @@ def enforce_respectful_disagreement(
     if require_acknowledgment or _involves_debated_matter(text):
         if not has_ikhtilaf_acknowledgment(text):
             acknowledgment_missing = True
-            violations.append(AdabViolation(
-                rule_id="missing-ikhtilaf-ack",
-                violation_type=AdabViolationType.NON_ACKNOWLEDGMENT,
-                matched_pattern="",
-                suggestion=(
-                    "Acknowledge the legitimate scholarly differences (ikhtilaf) "
-                    "on this debated topic before presenting one position."
-                ),
-                action=AdabAction.WARNING,
-            ))
+            violations.append(
+                AdabViolation(
+                    rule_id="missing-ikhtilaf-ack",
+                    violation_type=AdabViolationType.NON_ACKNOWLEDGMENT,
+                    matched_pattern="",
+                    suggestion=(
+                        "Acknowledge the legitimate scholarly differences (ikhtilaf) "
+                        "on this debated topic before presenting one position."
+                    ),
+                    action=AdabAction.WARNING,
+                )
+            )
     return DisagreementScanResult(
         violations=violations,
         has_violations=len(violations) > 0,
@@ -203,15 +218,16 @@ def enforce_respectful_disagreement(
         respectful_alternatives=suggest_respectful_alternatives(text),
     )
 
+
 def is_disrespectful(text: str) -> bool:
     """Quick check: should this text be blocked for adab violations?"""
     return enforce_respectful_disagreement(text).should_block
+
 
 def register_adab_rule(rule: AdabRule) -> None:
     """Register a new adab pattern for continuous learning."""
     ADAB_RULE_DB[rule.id] = rule
     ADAB_RULES.append(rule)
-
 
 
 # ---------------------------------------------------------------------------

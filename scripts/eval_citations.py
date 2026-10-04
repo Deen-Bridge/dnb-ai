@@ -96,6 +96,7 @@ def fetch_live_answer(url, question):
 def fetch_judge_scores(judge_url, question, answer):
     """Get LLM judge scores for a single Q&A pair."""
     import httpx
+
     response = httpx.post(
         judge_url,
         json={
@@ -129,7 +130,7 @@ def evaluate_with_judge(records, judge_url, verbose=False):
         rows.append(row)
 
     print("LLM-as-Judge Evaluation")
-    print(f"mode              judge")
+    print("mode              judge")
     print(f"cases             {len(records)}")
     for dim in JUDGE_DIMENSIONS:
         vals = scores[dim]

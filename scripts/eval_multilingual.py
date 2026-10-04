@@ -100,12 +100,7 @@ class HumanEvaluation:
 
     @property
     def overall(self) -> float:
-        return (
-            self.cultural_appropriateness
-            + self.terminology
-            + self.tone
-            + self.source_appropriateness
-        ) / 4
+        return (self.cultural_appropriateness + self.terminology + self.tone + self.source_appropriateness) / 4
 
 
 def _required_string(value: Any, field: str) -> str:
@@ -232,9 +227,7 @@ def validate_parallel_dataset(
     samples.
     """
     if len(items) < minimum_questions:
-        raise BenchmarkValidationError(
-            f"benchmark requires at least {minimum_questions} questions; found {len(items)}"
-        )
+        raise BenchmarkValidationError(f"benchmark requires at least {minimum_questions} questions; found {len(items)}")
     identifiers = [item.item_id for item in items]
     duplicates = sorted(item_id for item_id, count in Counter(identifiers).items() if count > 1)
     if duplicates:
@@ -271,12 +264,10 @@ def bleu_score(reference: str, candidate: str, maximum_order: int = 4) -> float:
     precisions: list[float] = []
     for order in range(1, maximum_order + 1):
         candidate_ngrams = Counter(
-            tuple(candidate_tokens[index : index + order])
-            for index in range(max(0, len(candidate_tokens) - order + 1))
+            tuple(candidate_tokens[index : index + order]) for index in range(max(0, len(candidate_tokens) - order + 1))
         )
         reference_ngrams = Counter(
-            tuple(reference_tokens[index : index + order])
-            for index in range(max(0, len(reference_tokens) - order + 1))
+            tuple(reference_tokens[index : index + order]) for index in range(max(0, len(reference_tokens) - order + 1))
         )
         overlap = sum(min(count, reference_ngrams[ngram]) for ngram, count in candidate_ngrams.items())
         total = sum(candidate_ngrams.values())
@@ -361,9 +352,7 @@ def evaluate(
         if prediction.language not in languages:
             raise BenchmarkValidationError(f"prediction uses unsupported dataset language {prediction.language}")
         if key in prediction_map:
-            raise BenchmarkValidationError(
-                f"duplicate prediction for {prediction.item_id}/{prediction.language}"
-            )
+            raise BenchmarkValidationError(f"duplicate prediction for {prediction.item_id}/{prediction.language}")
         prediction_map[key] = prediction
 
     missing = [
@@ -489,9 +478,7 @@ def evaluate(
     term_accuracy = _mean(all_term_scores)
     cultural_score = _mean(all_human_scores)
     script_correctness = script_passes / script_checks
-    non_english_gaps = [
-        gap for language, gap in performance_gaps.items() if language != "en" and gap is not None
-    ]
+    non_english_gaps = [gap for language, gap in performance_gaps.items() if language != "en" and gap is not None]
 
     criteria = {
         "semantic_equivalence_above_88_percent": cross_lingual is not None and cross_lingual > 0.88,
@@ -536,9 +523,7 @@ def main() -> None:
 
     items = load_dataset(args.dataset)
     predictions = load_predictions(args.predictions)
-    human_evaluations = (
-        load_human_evaluations(args.human_evaluations) if args.human_evaluations else []
-    )
+    human_evaluations = load_human_evaluations(args.human_evaluations) if args.human_evaluations else []
     report = evaluate(items, predictions, human_evaluations)
     serialized = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.output:
