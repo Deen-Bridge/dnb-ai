@@ -121,6 +121,7 @@ from stellar import (
     ZakatContext,
     ZakatInfo,
     build_chat_purchase_context,
+    build_chat_stellar_calculation_context,
     build_chat_zakat_context,
     redact_secret_keys,
     router as stellar_router,
@@ -322,8 +323,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-# Stellar integration: read-only zakat/balance features on the network
-# the rest of the Deen Bridge platform settles on
+# Stellar integration: read-only wallet and payment lookups plus deterministic
+# USDC arithmetic on the network the rest of Deen Bridge settles on.
 app.include_router(stellar_router)
 app.include_router(reasoning_router)
 app.include_router(study_router)
@@ -1028,6 +1029,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             # inline summary or a best-effort JWT fetch — never other users'.
             purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
+            stellar_calculation_context = build_chat_stellar_calculation_context(prompt)
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
@@ -1049,6 +1051,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             and tafsir_context is None
             and zakat_context is None
             and purchase_context is None
+            and stellar_calculation_context is None
             and SEMANTIC_CACHE_ENABLED
         )
 
@@ -1162,6 +1165,8 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
+            if stellar_calculation_context is not None:
+                system_context += "\n\n" + stellar_calculation_context
             if is_swahili and swahili_analysis:
                 sw_enhancement = swahili_response_enhancer.build_prompt_enhancement(safety_prompt)
                 if sw_enhancement.cultural_notes:
@@ -1572,6 +1577,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
             zakat_context = await zakat_retriever(body.prompt, body.context)
             zakat_info = zakat_context.info if zakat_context else None
+            stellar_calculation_context = build_chat_stellar_calculation_context(prompt)
 
         combined_text: str = ""  # accumulated full response for post-processing
         chat_session = None
@@ -1649,6 +1655,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     system_context += zakat_context.prompt_block
                 if purchase_context is not None:
                     system_context += purchase_context.prompt_block
+                if stellar_calculation_context is not None:
+                    system_context += "\n\n" + stellar_calculation_context
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"

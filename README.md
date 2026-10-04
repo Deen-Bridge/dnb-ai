@@ -19,9 +19,10 @@
 
 This service powers the AI assistant inside **Deen Bridge**, a platform for authentic Islamic education built on the **Stellar network** — courses and books are purchased with USDC, and creators are paid directly to their own Stellar wallets. The assistant wraps Google's Gemini model with an Islamic-knowledge system prompt, content safety filters, and per-session conversation history, exposing a simple chat API consumed by the web app.
 
-On the roadmap: further Stellar-aware assistance beyond zakat and purchase Q&A
-(see open issues). Zakat on a wallet's on-chain USDC balance and factual answers
-about the signed-in user's Stellar course/book purchases are already supported.
+Stellar-aware chat supports wallet USDC zakat estimates, factual answers about
+the signed-in user's Stellar purchases, and exact USDC/stroop and
+user-specified percentage calculations. Calculations are informational; the AI
+service never signs or submits a Stellar transaction.
 
 The platform is composed of three services:
 
@@ -58,6 +59,8 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
+| `GET` | `/stellar/info` | Stellar network, USDC issuer, and supported AI features |
+| `POST` | `/stellar/usdc/convert` | Convert USDC to stroops or stroops to USDC |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
@@ -767,6 +770,29 @@ validation like any other malformed input, so one can never reach Horizon. If a
 message looks like it contains a secret key, the assistant refuses to use it and
 warns the user to treat it as compromised — without repeating it back.
 
+### Stellar USDC calculations
+
+In chat, users can ask questions such as “How many stroops are in 12.5 USDC?”
+or “What is 3% of 80 USDC?” The first uses Stellar's seven-decimal USDC unit;
+percentage calculations use the rate and amount supplied by the user. A prompt
+such as “80 USDC after 3% fee” returns both the hypothetical fee and remainder.
+These calculations use decimal arithmetic, do not look up an exchange rate, and
+do not initiate a payment or claim to represent Deen Bridge's actual fee.
+
+The conversion is also available directly:
+
+```bash
+curl -sX POST http://localhost:8000/stellar/usdc/convert \
+  -H 'Content-Type: application/json' \
+  -d '{"amount": "12.5", "direction": "usdc_to_stroops"}'
+```
+
+Use `"direction": "stroops_to_usdc"` to convert whole stroops back to USDC.
+Amounts with more than seven decimal places and fractional stroop values are
+rejected rather than silently rounded. The AI service only provides the
+calculation; Stellar network fees are dynamic and are not estimated by this
+endpoint.
+
 **Purchase history in chat.** A signed-in frontend can pass a short
 `transactions` summary (hash, amount, status, item title, date, optional memo)
 on `POST /chat`, or an `auth_token` so this service fetches
@@ -842,15 +868,13 @@ available with `SAFETY_LIVE_TESTS=1 GEMINI_API_KEY=... pytest -q tests/redteam/t
 
 Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI runs lint and syntax checks on every PR (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-## 🌊 Contributing & Drips Wave
-
-This repository is hoping to  participates in the  **[Stellar Drips Wave](https://www.drips.network/wave/stellar)** bounty program — contributors earn Points (and real rewards) for resolving this repo's issues during a Wave, with complexity tiers set in the Drips Wave app.
+## Contributing
 
 - All pull requests target the **`dev`** branch (`main` is releases only)
 - CI must pass before review
 - One contributor per issue — comment to claim it first
 
-Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full workflow, coding standards, and Wave rules.
+Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full workflow and coding standards.
 
 ## 📜 License
 
