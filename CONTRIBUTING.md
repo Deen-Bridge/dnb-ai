@@ -134,6 +134,7 @@ We follow Conventional Commits:
 3. **Description**: Explain what and why
 4. **Link Issue**: Reference the issue number (`Closes #123`)
 5. **Testing**: Describe how you tested the changes
+6. **Auto-merge gates**: eligible, non-draft PRs targeting `dev` are squash-merged when CI and all reported statuses pass, the branch has no conflicts, review requests and threads are resolved, and no `hold`, `do-not-merge`, or `manual-review` label is present.
 
 ## Code of Conduct
 

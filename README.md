@@ -870,7 +870,7 @@ Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI ru
 
 ## Contributing
 
-- All pull requests target the **`dev`** branch (`main` is releases only)
+- Pull requests target **`dev`**; eligible changes are squash-merged automatically after CI and review gates pass.
 - CI must pass before review
 - One contributor per issue — comment to claim it first
 
