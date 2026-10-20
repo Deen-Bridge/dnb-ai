@@ -78,6 +78,19 @@ def limit(limit_value: str | Callable[..., str]) -> Callable[[Callable[..., Any]
 
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Unit tests call handlers directly with a Pydantic body and no
+            # Request. Only enforce the HTTP limit when a real Request is
+            # present; FastAPI always supplies one for live calls.
+            has_request = any(isinstance(arg, Request) for arg in args) or any(
+                isinstance(value, Request) for value in kwargs.values()
+            )
+            if not has_request:
+                # Direct unit calls pass only the Pydantic body; shift it past
+                # the leading HTTP request parameter (handlers never read it).
+                parameters = list(inspect.signature(func).parameters)
+                if parameters and parameters[0] == "request":
+                    return await func(None, *args, **kwargs)  # type: ignore[arg-type]
+                return await func(*args, **kwargs)
             return await limited(*args, **kwargs)
 
         signature = inspect.signature(func)
