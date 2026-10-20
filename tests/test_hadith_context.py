@@ -1,5 +1,6 @@
 """Tests for the contextual hadith interpretation module — no live API calls."""
 
+from unittest.mock import patch
 import pytest
 
 from hadith_context import (
@@ -9,11 +10,13 @@ from hadith_context import (
     answer_question,
     get_hadith_context,
     list_references,
+    load_knowledge_base,
     normalize_madhab,
     normalize_reference,
     router,
     synthesize_interpretation,
 )
+
 
 # ---------------------------------------------------------------------------
 # Normalization
@@ -72,6 +75,20 @@ def test_get_context_unknown() -> None:
     assert get_hadith_context("bukhari:99999") is None
 
 
+def test_get_context_empty_reference() -> None:
+    assert get_hadith_context("") is None
+    assert get_hadith_context("   ") is None
+
+
+def test_normalize_reference_unknown_format() -> None:
+    # Unrecognized references pass through unchanged (no crash).
+    assert normalize_reference("not a real reference") == "not a real reference"
+
+
+def test_normalize_madhab_unknown() -> None:
+    assert normalize_madhab("unknown-madhab") is None
+
+
 def test_record_completeness() -> None:
     # Every acceptance-criteria facet must be populated for each record.
     for ref in list_references():
@@ -87,6 +104,15 @@ def test_record_completeness() -> None:
         assert any(c.madhab for c in ctx.commentaries)
         # Contemporary perspective present alongside classical commentary.
         assert any(c.era == "classical" for c in ctx.commentaries)
+
+
+def test_knowledge_base_loads_without_network() -> None:
+    # Loading the KB must be deterministic and never touch the network.
+    with patch("hadith_context.requests") as mock_requests:
+        kb = load_knowledge_base()
+        mock_requests.get.assert_not_called()
+    assert kb
+    assert "bukhari:1" in kb
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +142,20 @@ def test_synthesize_madhab_reorders_without_dropping() -> None:
     # A hanbali or cross-madhab reading now leads.
     assert hanbali.commentaries[0].madhab in ("hanbali", None)
     assert "hanbali" in hanbali.summary
+
+
+def test_synthesize_unknown_madhab_falls_back() -> None:
+    ctx = get_hadith_context("bukhari:1")
+    assert ctx is not None
+    interp = synthesize_interpretation(ctx, madhab="not-a-madhab")
+    # Unknown madhab normalizes to None; base behavior preserved.
+    assert interp.madhab is None
+    assert interp.summary
+
+
+def test_synthesize_requires_context() -> None:
+    with pytest.raises((TypeError, AttributeError)):
+        synthesize_interpretation(None)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +197,17 @@ def test_ask_request_model_validates() -> None:
     assert req.reference is None
 
 
+def test_ask_unknown_reference_not_matched() -> None:
+    resp = answer_question("What is the meaning?", reference="bukhari:99999")
+    assert resp.matched is False
+    assert resp.key_points == []
+
+
+def test_ask_empty_question() -> None:
+    resp = answer_question("")
+    assert resp.matched is False
+
+
 # ---------------------------------------------------------------------------
 # Router wiring
 # ---------------------------------------------------------------------------
@@ -168,3 +219,12 @@ def test_router_prefix_and_routes() -> None:
     assert "/hadith-context/interpret" in paths
     assert "/hadith-context/ask" in paths
     assert "/hadith-context/list" in paths
+
+
+def test_router_endpoints_do_not_call_network() -> None:
+    # Endpoint handlers must operate purely on the in-memory KB.
+    with patch("hadith_context.requests") as mock_requests:
+        resp = answer_question("What is the meaning of intention in deeds?")
+        mock_requests.get.assert_not_called()
+    assert resp.matched is True
+    assert resp.reference == "bukhari:1"
