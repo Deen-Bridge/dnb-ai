@@ -24,24 +24,43 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 router = APIRouter(prefix="/video-analysis", tags=["video-analysis"])
 
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
-ALLOWED_EXTENSIONS = {".mp4", ".mov", ".webm"}
+ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm"}
 TERMINAL_STATES = {"completed", "failed"}
 _jobs: dict[str, dict[str, Any]] = {}
 
 
 def extract_quran_references(text: str) -> list[str]:
     """Return Quran references in ``surah:ayah`` or ``surah ayah`` form."""
-    return sorted(set(re.findall(r"\b(?:surah\s+)?(\d{1,3}:\d{1,3})\b", text, re.I)))
+    return sorted(set(re.findall(r"\b(?:surah\s+)?(\d{1,3}[:\s]\d{1,3})\b", text, re.I)))
 
 
-def segment_topics(transcript: str) -> list[dict[str, Any]]:
-    """Create timestamp-free topic segments from transcript paragraphs."""
+def extract_hadith_references(text: str) -> list[str]:
+    """Return hadith citations such as ``Sahih Bukhari 123`` or ``Muslim 45``."""
+    pattern = r"\b(?:sahih\s+)?(?:bukhari|muslim|abu\s+dawud|tirmidhi|nasai|ibn\s+majah)\s+\d+\b"
+    return sorted(set(match.strip() for match in re.findall(pattern, text, re.I)))
+
+
+def detect_language(text: str) -> str:
+    """Best-effort language detection for Arabic, Urdu, and English."""
+    if re.search(r"[\u0600-\u06FF]", text):
+        if re.search(r"[\u0679\u0688\u0691\u06BA\u06C1\u06D2]", text):
+            return "ur"
+        return "ar"
+    return "en"
+
+
+def segment_topics(transcript: str, timestamps: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Create topic segments from transcript paragraphs with optional timestamps."""
     segments = []
-    for index, paragraph in enumerate(filter(None, re.split(r"\n{2,}|(?<=[.!?])\s+", transcript.strip()))):
+    paragraphs = list(filter(None, re.split(r"\n{2,}|(?<=[.!?])\s+", transcript.strip())))
+    for index, paragraph in enumerate(paragraphs):
         words = re.findall(r"[\w'-]+", paragraph)
         if not words:
             continue
-        segments.append({"index": index, "title": " ".join(words[:8]), "text": paragraph, "start_seconds": index * 30})
+        start = index * 30
+        if timestamps and index < len(timestamps):
+            start = int(timestamps[index].get("start", start))
+        segments.append({"index": index, "title": " ".join(words[:8]), "text": paragraph, "start_seconds": start})
     return segments
 
 
@@ -76,18 +95,26 @@ def extract_media(video_path: Path, workdir: Path) -> tuple[Path | None, list[di
     return audio, frames
 
 
-def transcribe_audio(audio: Path | None) -> str:
+def transcribe_audio(audio: Path | None) -> tuple[str, list[dict[str, Any]]]:
     """Use an installed Whisper adapter if available; otherwise return empty text."""
     if audio is None:
-        return ""
+        return "", []
     try:
         from faster_whisper import WhisperModel  # type: ignore
 
         model = WhisperModel("base", compute_type="int8")
-        segments, _ = model.transcribe(str(audio))
-        return " ".join(segment.text.strip() for segment in segments).strip()
+        segments, _ = model.transcribe(str(audio), vad_filter=True)
+        collected = []
+        for segment in segments:
+            collected.append({
+                "start": round(segment.start, 2),
+                "end": round(segment.end, 2),
+                "speaker": getattr(segment, "speaker", None) or "speaker_1",
+                "text": segment.text.strip(),
+            })
+        return " ".join(item["text"] for item in collected).strip(), collected
     except (ImportError, OSError, RuntimeError):
-        return ""
+        return "", []
 
 
 def ocr_frame(frame: Path) -> str:
@@ -103,16 +130,31 @@ def ocr_frame(frame: Path) -> str:
 def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="dnb-video-") as directory:
         audio, frames = extract_media(video_path, Path(directory))
-        transcript = transcript.strip() or transcribe_audio(audio)
+        if transcript.strip():
+            transcript, timestamps = transcript.strip(), []
+        else:
+            transcript, timestamps = transcribe_audio(audio)
         for frame in frames:
             frame["text"] = ocr_frame(Path(frame["path"]))
         visual_text = " ".join(frame["text"] for frame in frames if frame["text"])
         combined = " ".join(part for part in (transcript, visual_text) if part)
+        topics = segment_topics(combined, timestamps)
+        key_points = [
+            {"timestamp_seconds": item["start"], "text": item["text"]}
+            for item in timestamps
+            if item.get("text")
+        ][:20]
         return {
             "transcript": transcript,
-            "summary": " ".join(segment["text"] for segment in segment_topics(combined)[:5]),
-            "topics": segment_topics(combined),
+            "language": detect_language(combined),
+            "speakers": sorted({item["speaker"] for item in timestamps}),
+            "timestamps": timestamps,
+            "key_points": key_points,
+            "summary": " ".join(segment["text"] for segment in topics[:5]),
+            "key_takeaways": [segment["title"] for segment in topics[:5]],
+            "topics": topics,
             "quran_references": extract_quran_references(combined),
+            "hadith_references": extract_hadith_references(combined),
             "frames": [{k: v for k, v in frame.items() if k != "path"} for frame in frames],
             "search_index": build_search_index(combined, frames),
             "capabilities": {
@@ -138,12 +180,12 @@ async def _process(job_id: str, payload: bytes, suffix: str, transcript: str) ->
 @router.post("/analyze", status_code=202)
 async def submit_video_analysis(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="MP4, MOV, or WebM video up to 100MB"),
+    file: UploadFile = File(..., description="MP4, MOV, AVI, or WebM video up to 100MB"),
     transcript: str = Form(""),
 ) -> dict[str, Any]:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=415, detail="Only MP4, MOV, and WebM videos are supported.")
+        raise HTTPException(status_code=415, detail="Only MP4, MOV, AVI, and WebM videos are supported.")
     payload = await file.read(MAX_VIDEO_BYTES + 1)
     if len(payload) > MAX_VIDEO_BYTES:
         raise HTTPException(status_code=413, detail="Video must be 100MB or smaller.")
