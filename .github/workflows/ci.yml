@@ -121,6 +121,12 @@ jobs:
         timeout-minutes: 5
         run: python -m scripts.bench_stream_cache --rounds 3 --chunk-delay 0.2
 
+      - name: Run answer depth customization tests
+        run: pytest -q tests/test_answer_depth.py
+
+      - name: Run adaptive teaching tests
+        run: pytest -q tests/test_adaptive_teaching.py
+
       - name: Run chat endpoint tests
         run: pytest -q tests/test_chat_api.py
 

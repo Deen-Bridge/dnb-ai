@@ -44,7 +44,21 @@ from slowapi.util import get_remote_address
 
 import metrics
 import telemetry
+from adaptive_teaching import (
+    get_profile_store as get_learning_profile_store,
+    get_teaching_engine,
+    router as adaptive_teaching_router,
+)
 from adhkar import corpus as adhkar_corpus
+from answer_depth import (
+    DepthLevel,
+    build_depth_indicator,
+    build_depth_prompt_block,
+    get_answer_config,
+    get_depth_session_store,
+    normalize_depth,
+    router as depth_router,
+)
 from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from async_runtime import (
@@ -360,6 +374,10 @@ app.include_router(calligraphy_router)
 app.include_router(review_router)
 # Question reformulation: deterministic quality assessment + rewrite suggestions
 app.include_router(reformulation_router)
+# Answer depth: five-level response controls with Explain Simpler / Go Deeper (#263)
+app.include_router(depth_router)
+# Adaptive teaching: comprehension monitoring and per-learner pacing (#251)
+app.include_router(adaptive_teaching_router)
 # Hadith search: topic and keyword search with authenticity grading
 app.include_router(hadith_search_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
@@ -448,6 +466,17 @@ class ChatRequest(BaseModel):
     # pass the user's JWT so this service can fetch history from dnb-backend.
     transactions: list[PurchaseTransaction] | None = None
     auth_token: str | None = None
+    # Response depth (#263): eli5, beginner, intermediate, advanced, scholarly.
+    # Omitted, the user's stored preference applies, then the system default.
+    depth: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Answer depth: eli5, beginner, intermediate, advanced, or scholarly.",
+        examples=["beginner"],
+    )
+    # Use the stored learning profile to pick depth, style, and pacing (#251).
+    # Ignored when ``depth`` is given explicitly.
+    adaptive: bool = False
 
     @field_validator("prompt", mode="before")
     @classmethod
@@ -483,6 +512,10 @@ class ChatResponse(BaseModel):
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
+    # Current answer depth and the controls available for it (#263). Includes
+    # the badge/icon/colour for the visual indicator and whether
+    # Explain Simpler / Go Deeper are available.
+    depth: dict[str, Any] | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -994,6 +1027,40 @@ def session_history_messages(chat_session: Any) -> list[Message]:
     return history
 
 
+def resolve_answer_depth(
+    user_id: str | None,
+    requested_depth: str | None,
+    adaptive: bool = False,
+) -> tuple[DepthLevel, dict[str, Any], str]:
+    """Resolve a turn's answer depth and render its prompt block.
+
+    An explicit ``depth`` wins. Otherwise, when ``adaptive`` is set and the
+    caller is identified, the stored learning profile recommends a level,
+    style, and pace (#251). Finally the user's saved preference and the system
+    default (intermediate) apply. The returned indicator is what the client
+    renders as the depth badge and control state (#263).
+    """
+    try:
+        requested = normalize_depth(requested_depth)
+    except ValueError as exc:
+        raise APIException(status_code=400, detail="Invalid answer depth.", hint=str(exc)) from exc
+
+    adaptive_applied = requested is None and adaptive and bool(user_id)
+    if adaptive_applied and user_id is not None:
+        profile = get_learning_profile_store().get(user_id)
+        recommendation = get_teaching_engine().recommend(profile)
+        config = get_answer_config(user_id=user_id, requested_level=recommendation.level)
+        prompt_block = "\n\n" + recommendation.prompt_block
+    else:
+        config = get_answer_config(user_id=user_id, requested_level=requested)
+        prompt_block = build_depth_prompt_block(config)
+
+    indicator = build_depth_indicator(config.level).to_dict()
+    indicator["explicit"] = requested is not None
+    indicator["adaptive"] = adaptive_applied
+    return config.level, indicator, prompt_block
+
+
 def cache_eligible(
     *,
     is_new_chat: bool,
@@ -1133,6 +1200,11 @@ async def _chat(
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
+        # --- Answer depth (#263) / adaptive teaching (#251) ---
+        depth_level, depth_payload, depth_prompt_block = resolve_answer_depth(
+            body.user_id, body.depth, adaptive=body.adaptive
+        )
+
         # --- Independent retrieval fan-out (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
             tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
@@ -1152,8 +1224,12 @@ async def _chat(
                 memory_store.get_chat_summary(f"{body.user_id}:{chat_id}"),
             )
 
-        # Determine cache scope: public for anonymous, user:{user_id} for authenticated
+        # Determine cache scope: public for anonymous, user:{user_id} for authenticated.
+        # Depth changes the answer, so non-default depths get their own scope and
+        # can never replay an answer written at another depth.
         cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
+        if depth_level is not DepthLevel.INTERMEDIATE:
+            cache_scope = f"{cache_scope}:depth={depth_level.value}"
 
         # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
         # through the semantic response cache: the first is built from retrieved
@@ -1199,6 +1275,9 @@ async def _chat(
                 active_chats[chat_id] = chat_session
                 logger.info("Exact cache HIT for prompt: %s", prompt[:80])
                 cached_message_id = _record_answer(chat_id, prompt, exact_cached["response"])
+                get_depth_session_store().record_original(
+                    chat_id, cached_message_id, exact_cached["response"], depth_level
+                )
                 _finalize()
                 _succeeded = True
                 return ChatResponse(
@@ -1216,6 +1295,7 @@ async def _chat(
                         ConfidenceAssessment(**exact_cached["confidence"]) if exact_cached.get("confidence") else None
                     ),
                     language=effective_language,
+                    depth=depth_payload,
                 )
 
             # Semantic cache lookup (tier 2)
@@ -1238,6 +1318,7 @@ async def _chat(
                 active_chats[chat_id] = chat_session
                 logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
+                get_depth_session_store().record_original(chat_id, cached_message_id, cached.response, depth_level)
                 _finalize()
                 _succeeded = True
                 return ChatResponse(
@@ -1249,6 +1330,7 @@ async def _chat(
                     hadith_references=annotate_hadith(cached.response),
                     confidence=(ConfidenceAssessment(**cached.confidence) if cached.confidence else None),
                     language=effective_language,
+                    depth=depth_payload,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -1298,6 +1380,7 @@ async def _chat(
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
+            system_context += depth_prompt_block
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
             logger.info("Sending message to chat...")
@@ -1469,6 +1552,7 @@ async def _chat(
         # later /feedback call can reference exactly this turn and store what
         # the user actually saw (post safety/hadith/abstention shaping).
         message_id = _record_answer(chat_id, prompt, response_text)
+        get_depth_session_store().record_original(chat_id, message_id, response_text, depth_level)
         _tag_history_with_message_ids(chat_id, history)
 
         trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
@@ -1495,6 +1579,7 @@ async def _chat(
             purchases=purchase_info,
             language=effective_language,
             citations=citation_extraction.citations,
+            depth=depth_payload,
         )
         _finalize()
         _succeeded = True
@@ -1699,6 +1784,11 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
+        # --- Answer depth (#263) / adaptive teaching (#251) ---
+        depth_level, depth_payload, depth_prompt_block = resolve_answer_depth(
+            body.user_id, body.depth, adaptive=body.adaptive
+        )
+
         # --- Independent retrieval fan-out ---
         with trace.span("retrieval"):
             tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
@@ -1726,7 +1816,11 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             persisted_history = await session_store.load_history(chat_id)
             is_new_chat = not persisted_history
         is_bypass = request.headers.get("X-Cache-Bypass") == "1"
+        # Depth changes the answer, so non-default depths get their own cache
+        # scope rather than replaying an answer written at another depth.
         cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
+        if depth_level is not DepthLevel.INTERMEDIATE:
+            cache_scope = f"{cache_scope}:depth={depth_level.value}"
 
         # --- Safety input gate ---
         # Evaluated here rather than inside the generator so its verdict can
@@ -1826,6 +1920,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         # earlier asker's, and the transcript must show the
                         # question this user actually asked.
                         history = session_history_messages(session)
+                        get_depth_session_store().record_original(chat_id, None, answer, depth_level)
 
                         done = json.dumps(
                             {
@@ -1834,6 +1929,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                                 "history": [m.model_dump() for m in history],
                                 "text": answer,
                                 "cached": True,
+                                "depth": depth_payload,
                                 # Replayed from the write, not recomputed, so
                                 # the done event has the same shape whichever
                                 # branch served the turn. An entry written
@@ -1953,6 +2049,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     system_context += purchase_context.prompt_block
                 if personal_context is not None:
                     system_context += personal_context.prompt_block
+                system_context += depth_prompt_block
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
@@ -2120,6 +2217,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 )
 
                 # --- Terminal done event ---
+                if combined_text:
+                    get_depth_session_store().record_original(chat_id, None, combined_text, depth_level)
                 done = json.dumps(
                     {
                         "type": "done",
@@ -2127,6 +2226,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "history": [m.model_dump() for m in history],
                         "text": combined_text,
                         "cached": False,
+                        "depth": depth_payload,
                         "confidence": assessment.model_dump() if assessment else None,
                         "hadith_references": ([r.model_dump() for r in hadith_refs] if hadith_refs else None),
                         "fiqh": fiqh_info.model_dump() if fiqh_info else None,
