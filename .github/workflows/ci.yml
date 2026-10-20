@@ -42,6 +42,9 @@ jobs:
       - name: Run study generator tests
         run: pytest -q tests/test_study.py
 
+      - name: Run spaced repetition tests
+        run: pytest -q tests/test_spaced_repetition.py
+
       - name: Run learning-path recommendation tests
         run: pytest -q tests/test_learning.py
 

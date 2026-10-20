@@ -66,3 +66,7 @@ data/retrieval_index.db-*
 
 # Committed virtual environments are machine-specific — never commit them
 venv_linux/
+
+# Durable flashcard schedules and SQLite journals
+data/repetition.db
+data/repetition.db-*

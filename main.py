@@ -161,6 +161,7 @@ from semantic_cache import (
     normalize_text,
 )
 from sentiment import router as sentiment_router
+from spaced_repetition import router as repetition_router
 from stellar import (
     PurchaseContext,
     PurchaseInfo,
@@ -348,6 +349,7 @@ app.include_router(orchestration_router)
 
 app.include_router(reasoning_router)
 app.include_router(study_router)
+app.include_router(repetition_router, dependencies=[Depends(verify_api_key)])
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works

@@ -898,3 +898,9 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 # Provider routing
 
 Gemini remains the default provider. To enable fallback routing, set `LLM_FALLBACKS=openai-compatible` together with `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`, and `OPENAI_COMPATIBLE_MODEL`. The router opens a provider circuit after three consecutive failures and probes it again after 60 seconds. `GET /providers/status` reports provider health without exposing credentials.
+
+### Spaced repetition
+
+Create and import Islamic flashcards, review due cards with SM-2 scheduling, and
+track measured recall retention through the authenticated `/study/repetition`
+API. See [API usage and persistence](docs/spaced-repetition.md).
