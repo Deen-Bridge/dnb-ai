@@ -23,6 +23,7 @@ Architecture:
 import asyncio
 import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -32,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+from collections import defaultdict, deque
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +44,13 @@ class JobStatus(str, Enum):
     PENDING = "pending"
     SCHEDULED = "scheduled"
     RUNNING = "running"
+    BLOCKED = "blocked"  # Waiting on dependencies
     COMPLETED = "completed"
     FAILED = "failed"
     RETRYING = "retrying"
     DEAD = "dead"  # In dead letter queue
     CANCELLED = "cancelled"
+
 
 
 class JobPriority(int, Enum):
@@ -58,6 +62,7 @@ class JobPriority(int, Enum):
     CRITICAL = 200
 
 
+
 @dataclass
 class JobResult:
     """Result of a job execution."""
@@ -66,6 +71,7 @@ class JobResult:
     data: Any | None = None
     error: str | None = None
     duration_ms: float = 0
+
 
 
 @dataclass
@@ -80,6 +86,7 @@ class JobProgress:
     estimated_remaining_ms: float | None = None
 
 
+
 @dataclass
 class ResourceConstraints:
     """Resource constraints for a job type."""
@@ -88,6 +95,7 @@ class ResourceConstraints:
     max_cpu_percent: float = 100
     max_concurrent: int = 10
     timeout_seconds: int = 300
+
 
 
 @dataclass
@@ -109,6 +117,7 @@ class RetryConfig:
 
             delay *= 0.5 + random.random()
         return delay
+
 
 
 @dataclass
@@ -133,6 +142,7 @@ class Job:
     parent_job_id: str | None = None
     depends_on: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    sub_tasks: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -154,6 +164,7 @@ class Job:
             "parent_job_id": self.parent_job_id,
             "depends_on": self.depends_on,
             "metadata": self.metadata,
+            "sub_tasks": self.sub_tasks,
         }
 
     @classmethod
@@ -177,6 +188,7 @@ class Job:
             parent_job_id=data.get("parent_job_id"),
             depends_on=data.get("depends_on", []),
             metadata=data.get("metadata", {}),
+            sub_tasks=data.get("sub_tasks", []),
         )
 
 
@@ -209,6 +221,7 @@ class JobHandler(ABC):
         pass
 
 
+
 class JobStore(ABC):
     """Abstract base class for job persistence."""
 
@@ -238,6 +251,7 @@ class JobStore(ABC):
         pass
 
 
+
 class InMemoryJobStore(JobStore):
     """In-memory job store for development/testing."""
 
@@ -260,6 +274,8 @@ class InMemoryJobStore(JobStore):
             # Retried jobs are re-queued: a failed job is left in RETRYING with
             # a future scheduled_at until its backoff elapses, then it must be
             # picked up again like a fresh PENDING job.
+            # BLOCKED jobs are also eligible once their dependencies complete;
+            # the dependency check below filters them out until then.
             if j.status in (JobStatus.PENDING, JobStatus.RETRYING)
             and (j.scheduled_at is None or j.scheduled_at <= now)
             and all(self._jobs.get(dep) and self._jobs[dep].status == JobStatus.COMPLETED for dep in j.depends_on)
@@ -277,6 +293,7 @@ class InMemoryJobStore(JobStore):
             del self._jobs[job_id]
             return True
         return False
+
 
 
 class RedisJobStore(JobStore):
@@ -351,6 +368,7 @@ class RedisJobStore(JobStore):
         return False
 
 
+
 class JobQueue:
     """Main job queue manager."""
 
@@ -370,6 +388,10 @@ class JobQueue:
             "total_processed": 0,
             "total_failed": 0,
             "total_retried": 0,
+            "total_decomposed": 0,
+            "total_sub_tasks": 0,
+            "parallel_executions": 0,
+            "decomposition_failures": 0,
         }
 
     def register_handler(self, handler: JobHandler) -> None:
@@ -385,6 +407,7 @@ class JobQueue:
         scheduled_at: datetime | None = None,
         depends_on: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
+        parent_job_id: str | None = None,
     ) -> Job:
         """Submit a new job to the queue."""
         if job_type not in self._handlers:
@@ -398,6 +421,7 @@ class JobQueue:
             scheduled_at=scheduled_at.timestamp() if scheduled_at else None,
             depends_on=depends_on or [],
             metadata=metadata or {},
+            parent_job_id=parent_job_id,
             max_retries=self._handlers[job_type].retry_config.max_retries,
         )
 
@@ -419,6 +443,7 @@ class JobQueue:
                 priority=job_spec.get("priority", JobPriority.NORMAL),
                 depends_on=job_spec.get("depends_on"),
                 metadata={"parent_job_id": parent_job_id, **job_spec.get("metadata", {})},
+                parent_job_id=parent_job_id,
             )
             created_jobs.append(job)
         return created_jobs
@@ -600,6 +625,7 @@ class JobQueue:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+
 class EmbeddingGenerationHandler(JobHandler):
     """Handler for batch embedding generation."""
 
@@ -673,6 +699,7 @@ class IndexBuildHandler(JobHandler):
         return JobResult(success=True, data={"index_name": index_name, "document_count": 1000})
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Factory and singleton
 # ─────────────────────────────────────────────────────────────────────────────
@@ -698,6 +725,7 @@ def get_job_queue() -> JobQueue:
         _queue.register_handler(IndexBuildHandler())
 
     return _queue
+
 
 
 async def init_queue() -> JobQueue:

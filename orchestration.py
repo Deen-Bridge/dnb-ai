@@ -1,9 +1,13 @@
-"""Asynchronous multi-agent orchestration with routing and resilient execution.
+"""Asynchronous multi-agent orchestration with intelligent task decomposition.
 
 The framework is deliberately provider-independent. Agents are regular async
 callables registered with capabilities and optional routing keywords. A query is
 analysed into an execution plan, the plan is validated as a DAG, ready tasks are
 scheduled concurrently, and successful outputs are synthesised into one result.
+
+Complex queries are decomposed into sub-tasks with dependency graphs, agent
+assignment is optimised by capability matching, and execution plans are
+generated to maximise parallel execution opportunities.
 
 All state is process-local so importing this module performs no network or
 storage operations. The public classes can be embedded in the FastAPI service or
@@ -27,6 +31,14 @@ from typing import Any
 AgentHandler = Callable[["AgentTask", "AgentContext"], Awaitable[Any]]
 LifecycleHook = Callable[[], Awaitable[None]]
 SynthesisHandler = Callable[[str, Mapping[str, "TaskResult"]], Awaitable[str]]
+
+
+class DecompositionError(ValueError):
+    """Raised when a query cannot be decomposed into a valid execution plan."""
+
+
+class DecompositionValidationError(DecompositionError):
+    """Raised when a decomposition fails completeness or coverage validation."""
 
 
 class PlanValidationError(ValueError):
@@ -67,6 +79,8 @@ class AgentTask:
     fallback_agent: str | None = None
     timeout_seconds: float | None = None
     required: bool = True
+    sub_task: str = ""
+    estimated_cost: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -139,6 +153,8 @@ class AgentSpec:
     default: bool = False
     start: LifecycleHook | None = None
     stop: LifecycleHook | None = None
+    cost_per_task: float = 1.0
+    specializations: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -149,6 +165,8 @@ class AgentSpec:
             raise ValueError("max_concurrency must be at least 1")
         if self.rate_limit_per_second < 0:
             raise ValueError("rate_limit_per_second must not be negative")
+        if self.cost_per_task < 0:
+            raise ValueError("cost_per_task must not be negative")
 
 
 class AgentRegistry:
@@ -182,6 +200,18 @@ class AgentRegistry:
         matches = [agent for agent in self._agents.values() if normalized in agent.capabilities]
         return tuple(sorted(matches, key=lambda agent: (-agent.priority, agent.name)))
 
+    def best_for(self, capability: str, *, exclude: Sequence[str] = ()) -> AgentSpec | None:
+        normalized = _normalize_term(capability)
+        excluded = set(exclude)
+        candidates = [
+            agent
+            for agent in self._agents.values()
+            if normalized in agent.capabilities and agent.name not in excluded
+        ]
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda agent: (-agent.priority, agent.cost_per_task, agent.name))[0]
+
 
 @dataclass(frozen=True)
 class QueryAnalysis:
@@ -190,6 +220,25 @@ class QueryAnalysis:
     capabilities: tuple[str, ...]
     sequential: bool
     scores: Mapping[str, float]
+    complexity: float = 0.0
+    sub_tasks: tuple["SubTask", ...] = ()
+
+    @property
+    def parallelizable(self) -> bool:
+        return any(not task.dependencies for task in self.sub_tasks) and len(self.sub_tasks) > 1
+
+    @property
+    def parallel_width(self) -> int:
+        if not self.sub_tasks:
+            return 0
+        levels: dict[str, int] = {}
+        for task in self.sub_tasks:
+            if not task.dependencies:
+                levels[task.id] = 0
+            else:
+                levels[task.id] = 1 + max(levels.get(dep, 0) for dep in task.dependencies)
+        counts: Counter[int] = Counter(levels.values())
+        return max(counts.values()) if counts else 0
 
 
 _TOKEN_PATTERN = re.compile(r"[^\W_]+(?:[-'][^\W_]+)*", re.UNICODE)
@@ -204,6 +253,34 @@ def _tokens(text: str) -> set[str]:
     return {_normalize_term(token) for token in _TOKEN_PATTERN.findall(text)}
 
 
+_CONJUNCTION_CUES = frozenset({"and", "also", "plus", "additionally", "moreover", "then"})
+_DEPENDENCY_CUES = frozenset({"after", "before", "then", "once", "using", "based_on", "depends_on"})
+
+
+@dataclass(frozen=True)
+class SubTask:
+    """A logical unit of work identified during query decomposition."""
+
+    id: str
+    description: str
+    capability: str
+    dependencies: tuple[str, ...] = ()
+    required: bool = True
+    estimated_cost: float = 1.0
+
+
+@dataclass(frozen=True)
+class DecompositionResult:
+    """Outcome of decomposing a query into sub-tasks."""
+
+    query: str
+    sub_tasks: tuple[SubTask, ...]
+    complexity: float
+    parallel_width: int
+    coverage: float
+    complete: bool
+
+
 class QueryAnalyzer:
     """Deterministic capability and agent selection engine."""
 
@@ -212,6 +289,13 @@ class QueryAnalyzer:
             raise ValueError("max_agents must be at least 1")
         self._registry = registry
         self._max_agents = max_agents
+
+    def _complexity(self, query: str, query_tokens: set[str]) -> float:
+        token_count = len(query_tokens)
+        conjunctions = len(query_tokens.intersection(_CONJUNCTION_CUES))
+        dependencies = len(query_tokens.intersection(_DEPENDENCY_CUES))
+        length_factor = min(token_count / 12.0, 3.0)
+        return round(length_factor + 0.5 * conjunctions + 0.75 * dependencies, 3)
 
     def analyze(self, query: str) -> QueryAnalysis:
         query_tokens = _tokens(query)
@@ -244,18 +328,63 @@ class QueryAnalyzer:
 
         sequential = len(selected_agents) > 1 and bool(query_tokens.intersection(_SEQUENCE_CUES))
         scores = {item[3].name: item[0] for item in selected}
+        complexity = self._complexity(query, query_tokens)
+        sub_tasks = self._decompose(query, query_tokens, selected, sequential)
         return QueryAnalysis(
             query=query,
             selected_agents=selected_agents,
             capabilities=tuple(detected_capabilities),
             sequential=sequential,
             scores=scores,
+            complexity=complexity,
+            sub_tasks=sub_tasks,
         )
+
+    def _decompose(
+        self,
+        query: str,
+        query_tokens: set[str],
+        selected: Sequence[tuple[float, int, str, AgentSpec, set[str]]],
+        sequential: bool,
+    ) -> tuple[SubTask, ...]:
+        if not selected:
+            return ()
+        sub_tasks: list[SubTask] = []
+        previous_id: str | None = None
+        for index, (_, _, agent_name, agent, matches) in enumerate(selected):
+            capability = sorted(matches)[0] if matches else sorted(agent.capabilities)[0]
+            task_id = f"sub-{index + 1}-{agent_name}"
+            dependencies: tuple[str, ...] = ()
+            if sequential and previous_id is not None:
+                dependencies = (previous_id,)
+            sub_tasks.append(
+                SubTask(
+                    id=task_id,
+                    description=f"{capability} for: {query}",
+                    capability=capability,
+                    dependencies=dependencies,
+                    estimated_cost=agent.cost_per_task,
+                )
+            )
+            previous_id = task_id
+        return tuple(sub_tasks)
 
 
 @dataclass(frozen=True)
 class ExecutionPlan:
     tasks: tuple[AgentTask, ...]
+
+    @property
+    def parallel_width(self) -> int:
+        if not self.tasks:
+            return 0
+        levels: dict[str, int] = {}
+        for task in self.tasks:
+            if not task.dependencies:
+                levels[task.id] = 0
+            else:
+                levels[task.id] = 1 + max(levels.get(dep, 0) for dep in task.dependencies)
+        return max(Counter(levels.values()).values())
 
     def validate(self, registry: AgentRegistry | None = None) -> None:
         task_by_id = {task.id: task for task in self.tasks}
@@ -307,7 +436,40 @@ class ExecutionPlanBuilder:
     def __init__(self, registry: AgentRegistry) -> None:
         self._registry = registry
 
+    def build_from_decomposition(self, decomposition: DecompositionResult) -> ExecutionPlan:
+        tasks: list[AgentTask] = []
+        for sub_task in decomposition.sub_tasks:
+            agent = self._registry.best_for(sub_task.capability)
+            if agent is None:
+                raise DecompositionError(f"No agent provides capability {sub_task.capability}")
+            tasks.append(
+                AgentTask(
+                    id=sub_task.id,
+                    agent=agent.name,
+                    capability=sub_task.capability,
+                    payload=decomposition.query,
+                    dependencies=sub_task.dependencies,
+                    fallback_agent=agent.fallback_agent,
+                    required=sub_task.required,
+                    sub_task=sub_task.description,
+                    estimated_cost=sub_task.estimated_cost,
+                )
+            )
+        plan = ExecutionPlan(tuple(tasks))
+        plan.validate(self._registry)
+        return plan
+
     def build(self, analysis: QueryAnalysis) -> ExecutionPlan:
+        if analysis.sub_tasks:
+            decomposition = DecompositionResult(
+                query=analysis.query,
+                sub_tasks=analysis.sub_tasks,
+                complexity=analysis.complexity,
+                parallel_width=analysis.parallel_width,
+                coverage=1.0,
+                complete=True,
+            )
+            return self.build_from_decomposition(decomposition)
         tasks: list[AgentTask] = []
         previous_id: str | None = None
         for index, agent_name in enumerate(analysis.selected_agents):
@@ -336,6 +498,96 @@ class ExecutionPlanBuilder:
             if capability in agent.capabilities:
                 return capability
         return sorted(agent.capabilities)[0]
+
+
+class TaskDecomposer:
+    """Intelligent query decomposition with dependency and coverage analysis."""
+
+    def __init__(self, registry: AgentRegistry, analyzer: QueryAnalyzer | None = None) -> None:
+        self._registry = registry
+        self._analyzer = analyzer or QueryAnalyzer(registry)
+
+    def decompose(self, query: str) -> DecompositionResult:
+        if not query.strip():
+            raise DecompositionError("Query must not be empty")
+        analysis = self._analyzer.analyze(query)
+        sub_tasks = analysis.sub_tasks
+        if not sub_tasks:
+            raise DecompositionError("Query could not be decomposed into any sub-tasks")
+        coverage = self._coverage(query, sub_tasks)
+        complete = coverage >= 0.9
+        return DecompositionResult(
+            query=query,
+            sub_tasks=sub_tasks,
+            complexity=analysis.complexity,
+            parallel_width=analysis.parallel_width,
+            coverage=coverage,
+            complete=complete,
+        )
+
+    def _coverage(self, query: str, sub_tasks: Sequence[SubTask]) -> float:
+        query_tokens = _tokens(query)
+        if not query_tokens:
+            return 1.0
+        covered: set[str] = set()
+        for sub_task in sub_tasks:
+            covered.update(_tokens(sub_task.description))
+            covered.update(_tokens(sub_task.capability))
+        matched = query_tokens.intersection(covered)
+        return round(len(matched) / len(query_tokens), 3)
+
+    def validate(self, decomposition: DecompositionResult, registry: AgentRegistry | None = None) -> None:
+        if not decomposition.sub_tasks:
+            raise DecompositionValidationError("Decomposition contains no sub-tasks")
+        ids = {task.id for task in decomposition.sub_tasks}
+        if len(ids) != len(decomposition.sub_tasks):
+            raise DecompositionValidationError("Sub-task identifiers must be unique")
+        for task in decomposition.sub_tasks:
+            missing = set(task.dependencies).difference(ids)
+            if missing:
+                raise DecompositionValidationError(
+                    f"Sub-task {task.id} has missing dependencies: {', '.join(sorted(missing))}"
+                )
+            if registry is not None and registry.best_for(task.capability) is None:
+                raise DecompositionValidationError(f"No agent provides capability {task.capability}")
+        if not decomposition.complete:
+            raise DecompositionValidationError(
+                f"Decomposition coverage {decomposition.coverage:.0%} below required threshold"
+            )
+
+    def replan(
+        self,
+        decomposition: DecompositionResult,
+        failed_task_ids: Sequence[str],
+    ) -> DecompositionResult:
+        failed = set(failed_task_ids)
+        if not failed:
+            return decomposition
+        remaining = tuple(task for task in decomposition.sub_tasks if task.id not in failed)
+        if not remaining:
+            raise DecompositionError("All sub-tasks failed; cannot replan")
+        remaining_ids = {task.id for task in remaining}
+        adjusted: list[SubTask] = []
+        for task in remaining:
+            deps = tuple(dep for dep in task.dependencies if dep in remaining_ids)
+            adjusted.append(
+                SubTask(
+                    id=task.id,
+                    description=task.description,
+                    capability=task.capability,
+                    dependencies=deps,
+                    required=task.required,
+                    estimated_cost=task.estimated_cost,
+                )
+            )
+        return DecompositionResult(
+            query=decomposition.query,
+            sub_tasks=tuple(adjusted),
+            complexity=decomposition.complexity,
+            parallel_width=decomposition.parallel_width,
+            coverage=decomposition.coverage,
+            complete=decomposition.complete,
+        )
 
 
 class AsyncRateLimiter:
@@ -461,6 +713,8 @@ class WorkflowResult:
     traces: tuple[TraceSpan, ...]
     duration_ms: float
     analysis: QueryAnalysis
+    decomposition: DecompositionResult | None = None
+    parallel_width: int = 0
 
     @property
     def partial_failure(self) -> bool:
@@ -498,6 +752,7 @@ class MultiAgentOrchestrator:
         broker: MessageBroker | None = None,
         synthesizer: ResultSynthesizer | None = None,
         metrics: Metrics | None = None,
+        decomposer: TaskDecomposer | None = None,
         circuit_failure_threshold: int = 3,
         circuit_recovery_seconds: float = 30.0,
         default_task_timeout: float = 8.0,
@@ -510,6 +765,7 @@ class MultiAgentOrchestrator:
         self.plan_builder = plan_builder or ExecutionPlanBuilder(registry)
         self.broker = broker or MessageBroker()
         self.synthesizer = synthesizer or ResultSynthesizer()
+        self.decomposer = decomposer or TaskDecomposer(registry, self.analyzer)
         self.metrics = metrics or Metrics()
         self.default_task_timeout = default_task_timeout
         self.workflow_timeout = workflow_timeout
@@ -566,6 +822,7 @@ class MultiAgentOrchestrator:
         *,
         metadata: Mapping[str, Any] | None = None,
         plan: ExecutionPlan | None = None,
+        decompose: bool = True,
     ) -> WorkflowResult:
         if not query.strip():
             raise ValueError("Query must not be empty")
@@ -573,8 +830,23 @@ class MultiAgentOrchestrator:
             await self.start()
 
         analysis = self.analyzer.analyze(query)
-        execution_plan = plan or self.plan_builder.build(analysis)
+        decomposition: DecompositionResult | None = None
+        if plan is None and decompose:
+            try:
+                decomposition = self.decomposer.decompose(query)
+                self.decomposer.validate(decomposition, self.registry)
+                self.metrics.increment("decompositions_succeeded")
+                self.metrics.observe("decomposition_complexity", decomposition.complexity * 1000.0)
+                execution_plan = self.plan_builder.build_from_decomposition(decomposition)
+            except DecompositionError:
+                self.metrics.increment("decompositions_failed")
+                decomposition = None
+                execution_plan = self.plan_builder.build(analysis)
+        else:
+            execution_plan = plan or self.plan_builder.build(analysis)
         execution_plan.validate(self.registry)
+        parallel_width = execution_plan.parallel_width
+        self.metrics.increment("plan_parallel_width", parallel_width)
         workflow_id = uuid.uuid4().hex
         started_at = time.monotonic()
         traces: list[TraceSpan] = []
@@ -620,6 +892,8 @@ class MultiAgentOrchestrator:
             traces=tuple(traces),
             duration_ms=duration_ms,
             analysis=analysis,
+            decomposition=decomposition,
+            parallel_width=parallel_width,
         )
 
     async def _execute_plan(
@@ -646,6 +920,7 @@ class MultiAgentOrchestrator:
                         status=TaskStatus.SKIPPED,
                         error="Dependency failed: " + ", ".join(failed_dependencies),
                     )
+                    self.metrics.increment("tasks_skipped")
                     skipped.append(task_id)
             for task_id in skipped:
                 del pending[task_id]
@@ -663,6 +938,7 @@ class MultiAgentOrchestrator:
             if not ready:
                 raise PlanValidationError("Execution plan cannot make progress")
 
+            self.metrics.increment("execution_waves")
             executions = [self._run_task(workflow_id, task, metadata, results, traces) for task in ready]
             completed = await asyncio.gather(*executions)
             for result in completed:

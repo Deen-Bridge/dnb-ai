@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import statistics
 import threading
 import time
 import uuid
@@ -31,6 +32,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,7 @@ logger = logging.getLogger(__name__)
 # table cannot drift apart: a rename in only one place would silently unprice
 # the model (priced=False / $0) instead of erroring.
 GEMINI_MODEL = "gemini-2.5-flash"
+DECOMPOSITION_STAGE = "decomposition"
 
 _DEFAULT_PRICE_TABLE: dict[str, dict[str, float]] = {
     # Gemini 2.5 Flash: the model this service currently calls.
@@ -117,6 +120,7 @@ class LlmCall:
     latency_ms: float
     trace_id: str
     stage: str = "generation"
+    task_id: str | None = None
 
     def as_labels(self) -> dict[str, Any]:
         """A content-free dict safe to log or expose."""
@@ -130,6 +134,7 @@ class LlmCall:
             "cost_usd": self.cost_usd,
             "priced": self.priced,
             "latency_ms": round(self.latency_ms, 2),
+            "task_id": self.task_id,
         }
 
 
@@ -149,6 +154,7 @@ def capture_usage(
     latency_ms: float,
     trace_id: str,
     stage: str = "generation",
+    task_id: str | None = None,
 ) -> LlmCall:
     """Build an LlmCall from a Gemini response's ``usage_metadata``.
 
@@ -171,6 +177,7 @@ def capture_usage(
         latency_ms=latency_ms,
         trace_id=trace_id,
         stage=stage,
+        task_id=task_id,
     )
 
 
@@ -181,6 +188,8 @@ def capture_usage(
 class Span:
     name: str
     duration_ms: float
+    task_id: str | None = None
+    parent_id: str | None = None
 
 
 @dataclass
@@ -190,6 +199,8 @@ class Trace:
     trace_id: str = field(default_factory=lambda: new_trace_id())
     spans: list[Span] = field(default_factory=list)
     calls: list[LlmCall] = field(default_factory=list)
+    task_spans: dict[str, list[Span]] = field(default_factory=lambda: defaultdict(list))
+    decomposition_metrics: dict[str, Any] = field(default_factory=dict)
 
     def request_totals(self) -> dict[str, Any]:
         """Sum this request's model calls, for optional response metadata."""
@@ -200,6 +211,8 @@ class Trace:
             "total_tokens": sum(c.total_tokens for c in self.calls),
             "cost_usd": round(sum(c.cost_usd for c in self.calls), 8),
             "model_calls": len(self.calls),
+            "task_count": len(self.task_spans),
+            "decomposition": self.decomposition_metrics,
         }
 
     def add_span(self, name: str, duration_ms: float) -> None:
@@ -212,6 +225,17 @@ class Trace:
             {"trace_id": self.trace_id, "stage": name, "duration_ms": rounded},
         )
 
+    def add_task_span(self, task_id: str, name: str, duration_ms: float, parent_id: str | None = None) -> None:
+        """Record a span scoped to a decomposed sub-task."""
+        rounded = round(duration_ms, 2)
+        span = Span(name=name, duration_ms=rounded, task_id=task_id, parent_id=parent_id)
+        self.task_spans[task_id].append(span)
+        self.spans.append(span)
+        logger.info(
+            "task_span=%s",
+            {"trace_id": self.trace_id, "task_id": task_id, "stage": name, "duration_ms": rounded, "parent_id": parent_id},
+        )
+
     @contextmanager
     def span(self, name: str) -> Iterator[None]:
         start = time.perf_counter()
@@ -220,10 +244,36 @@ class Trace:
         finally:
             self.add_span(name, (time.perf_counter() - start) * 1000.0)
 
+    @contextmanager
+    def task_span(self, task_id: str, name: str, parent_id: str | None = None) -> Iterator[None]:
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.add_task_span(task_id, name, (time.perf_counter() - start) * 1000.0, parent_id)
+
+    def record_decomposition(self, metrics: dict[str, Any]) -> None:
+        """Attach decomposition-level metrics (task counts, parallelism, etc.)."""
+        self.decomposition_metrics.update(metrics)
+        logger.info(
+            "decomposition=%s",
+            {"trace_id": self.trace_id, **metrics},
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
             "spans": [{"stage": s.name, "duration_ms": s.duration_ms} for s in self.spans],
+        }
+
+    def task_summary(self) -> dict[str, Any]:
+        """Per-task timing summary for decomposed execution."""
+        return {
+            task_id: {
+                "spans": len(spans),
+                "total_ms": round(sum(s.duration_ms for s in spans), 2),
+            }
+            for task_id, spans in self.task_spans.items()
         }
 
 
@@ -267,6 +317,9 @@ class MetricsRegistry:
         self._handler_latencies: list[float] = []
         self._model_latencies: list[float] = []
         self._by_model: dict[str, dict[str, float]] = {}
+        self._decomposition_count = 0
+        self._decomposition_parallelism: list[float] = []
+        self._decomposition_task_counts: list[int] = []
 
     def record_call(self, call: LlmCall) -> None:
         with self._lock:
@@ -284,6 +337,16 @@ class MetricsRegistry:
             bucket["total_tokens"] += call.total_tokens
             bucket["cost_usd"] = round(bucket["cost_usd"] + call.cost_usd, 8)
 
+    def record_decomposition(self, task_count: int, parallel_width: float, success: bool = True) -> None:
+        """Record a decomposition event: how many tasks and how much parallelism."""
+        with self._lock:
+            self._decomposition_count += 1
+            self._decomposition_task_counts.append(task_count)
+            self._trim_int(self._decomposition_task_counts)
+            if success and task_count > 0:
+                self._decomposition_parallelism.append(parallel_width)
+                self._trim(self._decomposition_parallelism)
+
     def record_request(self, handler_latency_ms: float, error: bool = False) -> None:
         with self._lock:
             self.request_count += 1
@@ -293,6 +356,10 @@ class MetricsRegistry:
             self._trim(self._handler_latencies)
 
     def _trim(self, samples: list[float]) -> None:
+        if len(samples) > self._max_samples:
+            del samples[: len(samples) - self._max_samples]
+
+    def _trim_int(self, samples: list[int]) -> None:
         if len(samples) > self._max_samples:
             del samples[: len(samples) - self._max_samples]
 
@@ -324,6 +391,15 @@ class MetricsRegistry:
                     }
                     for model, b in self._by_model.items()
                 },
+                "decomposition": {
+                    "count": self._decomposition_count,
+                    "avg_task_count": round(statistics.fmean(self._decomposition_task_counts), 2)
+                    if self._decomposition_task_counts
+                    else 0.0,
+                    "avg_parallel_width": round(statistics.fmean(self._decomposition_parallelism), 2)
+                    if self._decomposition_parallelism
+                    else 0.0,
+                },
             }
 
     def reset(self) -> None:
@@ -341,6 +417,9 @@ class MetricsRegistry:
             self._handler_latencies.clear()
             self._model_latencies.clear()
             self._by_model.clear()
+            self._decomposition_count = 0
+            self._decomposition_parallelism.clear()
+            self._decomposition_task_counts.clear()
 
 
 # Process-wide registry the app records into and /metrics reads from.
@@ -358,6 +437,7 @@ def record_model_call(
     latency_ms: float,
     stage: str = "generation",
     trace: Trace | None = None,
+    task_id: str | None = None,
 ) -> LlmCall:
     """Capture one model call, record it globally and on the request's trace.
 
@@ -367,9 +447,35 @@ def record_model_call(
     if trace is None:
         trace = current_trace.get()
     trace_id = trace.trace_id if trace is not None else "-"
-    call = capture_usage(response, model, latency_ms, trace_id, stage)
+    call = capture_usage(response, model, latency_ms, trace_id, stage, task_id)
     if trace is not None:
         trace.calls.append(call)
     registry.record_call(call)
     logger.info("llm=%s", call.as_labels())
     return call
+
+
+def record_decomposition(
+    task_count: int,
+    parallel_width: float,
+    success: bool = True,
+    trace: Trace | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> None:
+    """Record a decomposition event globally and on the request's trace.
+
+    ``parallel_width`` is the average number of sub-tasks that can run
+    concurrently given the dependency graph. Content-free by construction.
+    """
+    if trace is None:
+        trace = current_trace.get()
+    registry.record_decomposition(task_count, parallel_width, success)
+    if trace is not None:
+        payload: dict[str, Any] = {
+            "task_count": task_count,
+            "parallel_width": round(parallel_width, 2),
+            "success": success,
+        }
+        if metrics:
+            payload.update(metrics)
+        trace.record_decomposition(payload)

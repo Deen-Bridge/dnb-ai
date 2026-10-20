@@ -1,4 +1,4 @@
-"""Database query optimization — profile queries and flag anti-patterns offline.
+"""Database query optimization — profile queries, flag anti-patterns, decompose agent tasks.
 
 Why this exists
 ---------------
@@ -25,6 +25,11 @@ Python with no new dependencies and no network calls:
 
 Everything is in-memory and side-effect-free at import time: nothing here touches
 a live service, which is what lets the app boot in CI and keeps ``mypy .`` green.
+
+3. **Agent task decomposition** (:class:`TaskDecomposer`) breaks a complex query
+   into sub-tasks, builds a dependency graph, matches sub-tasks to agents by
+   capability, generates a parallel-aware execution plan and validates coverage.
+   It is deterministic and in-memory, mirroring the offline philosophy above.
 """
 
 from __future__ import annotations
@@ -34,6 +39,9 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock
+from typing import Iterable
+
+from collections import defaultdict, deque
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -1023,3 +1031,350 @@ def _classify_relationship(a: AyahText, b: AyahText, jaccard: float, topic_overl
     if jaccard >= 0.15:
         return "elaboration"
     return "complement"
+
+
+# ---------------------------------------------------------------------------
+# Intelligent agent task decomposition
+# ---------------------------------------------------------------------------
+
+
+class TaskKind(str, Enum):
+    """Coarse category of a decomposed sub-task."""
+
+    RETRIEVAL = "retrieval"
+    ANALYSIS = "analysis"
+    SYNTHESIS = "synthesis"
+    VALIDATION = "validation"
+    TRANSFORMATION = "transformation"
+
+
+class AgentCapability(str, Enum):
+    """Capabilities an agent may advertise for task matching."""
+
+    RETRIEVAL = "retrieval"
+    ANALYSIS = "analysis"
+    SYNTHESIS = "synthesis"
+    VALIDATION = "validation"
+    TRANSFORMATION = "transformation"
+    SQL = "sql"
+    TURKISH = "turkish"
+    QURAN = "quran"
+
+
+_KIND_TO_CAPABILITY: dict[TaskKind, AgentCapability] = {
+    TaskKind.RETRIEVAL: AgentCapability.RETRIEVAL,
+    TaskKind.ANALYSIS: AgentCapability.ANALYSIS,
+    TaskKind.SYNTHESIS: AgentCapability.SYNTHESIS,
+    TaskKind.VALIDATION: AgentCapability.VALIDATION,
+    TaskKind.TRANSFORMATION: AgentCapability.TRANSFORMATION,
+}
+
+
+class AgentProfile(BaseModel):
+    """An agent that can be assigned sub-tasks."""
+
+    agent_id: str = Field(..., min_length=1)
+    capabilities: list[AgentCapability] = Field(default_factory=list)
+    max_concurrency: int = Field(default=1, ge=1)
+    cost_per_task: float = Field(default=1.0, ge=0.0)
+
+
+class SubTask(BaseModel):
+    """One node in a decomposition's dependency graph."""
+
+    task_id: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    kind: TaskKind
+    depends_on: list[str] = Field(default_factory=list)
+    required_capabilities: list[AgentCapability] = Field(default_factory=list)
+    estimated_effort: float = Field(default=1.0, ge=0.0)
+
+
+class DecompositionRequest(BaseModel):
+    """Input to the decomposer: a complex query plus available agents."""
+
+    query: str = Field(..., min_length=1)
+    agents: list[AgentProfile] = Field(default_factory=list)
+    max_sub_tasks: int = Field(default=8, ge=1, le=64)
+
+
+class TaskAssignment(BaseModel):
+    """A sub-task bound to a concrete agent."""
+
+    task_id: str
+    agent_id: str
+    score: float = Field(..., ge=0.0)
+
+
+class ExecutionWave(BaseModel):
+    """A set of sub-tasks that can run in parallel (no inter-dependencies)."""
+
+    wave_index: int = Field(..., ge=0)
+    task_ids: list[str] = Field(default_factory=list)
+
+
+class ExecutionPlan(BaseModel):
+    """A dependency-ordered, parallel-aware schedule."""
+
+    waves: list[ExecutionWave] = Field(default_factory=list)
+    sequential_estimate: float = Field(..., ge=0.0)
+    parallel_estimate: float = Field(..., ge=0.0)
+    speedup: float = Field(..., ge=0.0)
+
+
+class DecompositionResult(BaseModel):
+    """Full decomposition output including graph, assignments and plan."""
+
+    query: str
+    complexity: int = Field(..., ge=0, le=100)
+    sub_tasks: list[SubTask] = Field(default_factory=list)
+    assignments: list[TaskAssignment] = Field(default_factory=list)
+    plan: ExecutionPlan
+    coverage: float = Field(..., ge=0.0, le=1.0)
+    is_complete: bool
+    warnings: list[str] = Field(default_factory=list)
+
+
+_COMPLEXITY_MARKERS = (
+    " and ",
+    " or ",
+    " then ",
+    " after ",
+    " before ",
+    " compare ",
+    " versus ",
+    " vs ",
+    " join ",
+    " aggregate ",
+    " group ",
+    " summarize ",
+    " explain ",
+    " why ",
+    " how ",
+    " list ",
+    " find ",
+    " count ",
+    " average ",
+    " top ",
+    " rank ",
+)
+
+
+def assess_complexity(query: str) -> int:
+    """Heuristic 0..100 complexity score for a natural-language query.
+
+    Longer queries, more clauses and more distinct marker words raise the score.
+    Deterministic and dependency-free.
+    """
+    lowered = f" {turkish_lower(query)} "
+    tokens = [t for t in re.findall(r"[a-z0-9çğıöşüâîû']+", lowered) if t]
+    if not tokens:
+        return 0
+    marker_hits = sum(1 for marker in _COMPLEXITY_MARKERS if marker in lowered)
+    length_score = min(40, len(tokens) * 2)
+    marker_score = min(40, marker_hits * 8)
+    conjunction_score = min(20, (lowered.count(" and ") + lowered.count(" or ")) * 5)
+    return min(100, length_score + marker_score + conjunction_score)
+
+
+_KIND_KEYWORDS: tuple[tuple[TaskKind, tuple[str, ...]], ...] = (
+    (TaskKind.RETRIEVAL, ("find", "list", "retrieve", "search", "select", "get", "fetch", "lookup")),
+    (TaskKind.ANALYSIS, ("analyze", "compare", "count", "average", "aggregate", "group", "rank", "top", "why")),
+    (TaskKind.TRANSFORMATION, ("convert", "transform", "normalize", "format", "translate", "map")),
+    (TaskKind.VALIDATION, ("validate", "verify", "check", "ensure", "confirm")),
+    (TaskKind.SYNTHESIS, ("summarize", "explain", "describe", "combine", "synthesize", "report")),
+)
+
+
+def _classify_kind(fragment: str) -> TaskKind:
+    lowered = f" {turkish_lower(fragment)} "
+    for kind, keywords in _KIND_KEYWORDS:
+        if any(f" {kw} " in lowered or lowered.strip().startswith(kw) for kw in keywords):
+            return kind
+    return TaskKind.ANALYSIS
+
+
+def _split_query(query: str, max_parts: int) -> list[str]:
+    """Split a query into candidate sub-task fragments on conjunctions."""
+    working = re.sub(r"\s+(and then|then|after that|afterwards)\s+", " ; ", query, flags=re.IGNORECASE)
+    working = re.sub(r"\s+and\s+", " ; ", working, flags=re.IGNORECASE)
+    working = re.sub(r"\s*;\s*", ";", working)
+    raw_parts = [part.strip(" ;") for part in working.split(";")]
+    parts = [part for part in raw_parts if part]
+    if not parts:
+        parts = [query.strip()]
+    if len(parts) > max_parts:
+        head = parts[: max_parts - 1]
+        tail = " and ".join(parts[max_parts - 1 :])
+        parts = head + [tail]
+    return parts
+
+
+def _required_capabilities(kind: TaskKind, fragment: str) -> list[AgentCapability]:
+    caps: list[AgentCapability] = [_KIND_TO_CAPABILITY[kind]]
+    lowered = turkish_lower(fragment)
+    if any(word in lowered for word in ("sql", "query", "select", "join", "table")):
+        caps.append(AgentCapability.SQL)
+    if any(ch in fragment for ch in "çğıöşüÇĞİÖŞÜ"):
+        caps.append(AgentCapability.TURKISH)
+    if any(term in lowered for term in ("quran", "ayah", "surah", "kuran", "ayet", "sure")):
+        caps.append(AgentCapability.QURAN)
+    return caps
+
+
+def build_sub_tasks(query: str, max_sub_tasks: int) -> list[SubTask]:
+    """Decompose ``query`` into ordered sub-tasks with linear dependencies.
+
+    Each fragment becomes a sub-task that depends on the previous one, which
+    keeps the graph acyclic and reflects the natural reading order of a query.
+    """
+    fragments = _split_query(query, max_sub_tasks)
+    tasks: list[SubTask] = []
+    previous_id: str | None = None
+    for index, fragment in enumerate(fragments):
+        kind = _classify_kind(fragment)
+        task_id = f"t{index + 1}"
+        tasks.append(
+            SubTask(
+                task_id=task_id,
+                description=fragment,
+                kind=kind,
+                depends_on=[previous_id] if previous_id else [],
+                required_capabilities=_required_capabilities(kind, fragment),
+                estimated_effort=1.0 + min(2.0, len(fragment) / 80.0),
+            )
+        )
+        previous_id = task_id
+    return tasks
+
+
+def _score_agent(agent: AgentProfile, task: SubTask) -> float:
+    """Score how well ``agent`` matches ``task`` (0..1)."""
+    if not task.required_capabilities:
+        return 0.5
+    provided = set(agent.capabilities)
+    required = set(task.required_capabilities)
+    matched = len(required & provided)
+    base = matched / len(required)
+    cost_penalty = min(0.2, agent.cost_per_task * 0.05)
+    return max(0.0, min(1.0, base - cost_penalty))
+
+
+def assign_tasks(sub_tasks: list[SubTask], agents: list[AgentProfile]) -> tuple[list[TaskAssignment], list[str]]:
+    """Greedily assign each sub-task to the best-scoring agent.
+
+    Returns the assignments and a list of warnings for unassignable tasks.
+    """
+    assignments: list[TaskAssignment] = []
+    warnings: list[str] = []
+    if not agents:
+        return assignments, ["no agents provided; tasks are unassigned"]
+    for task in sub_tasks:
+        best_agent: AgentProfile | None = None
+        best_score = -1.0
+        for agent in agents:
+            score = _score_agent(agent, task)
+            if score > best_score:
+                best_score = score
+                best_agent = agent
+        if best_agent is None or best_score <= 0.0:
+            warnings.append(f"no suitable agent for task {task.task_id}")
+            continue
+        assignments.append(TaskAssignment(task_id=task.task_id, agent_id=best_agent.agent_id, score=best_score))
+    return assignments, warnings
+
+
+def _topological_waves(sub_tasks: list[SubTask]) -> list[list[str]]:
+    """Group sub-tasks into waves so each wave has no internal dependencies."""
+    ids = {task.task_id for task in sub_tasks}
+    indegree: dict[str, int] = {task.task_id: 0 for task in sub_tasks}
+    children: dict[str, list[str]] = defaultdict(list)
+    for task in sub_tasks:
+        for dep in task.depends_on:
+            if dep in ids:
+                indegree[task.task_id] += 1
+                children[dep].append(task.task_id)
+    ready = deque(sorted(tid for tid, deg in indegree.items() if deg == 0))
+    waves: list[list[str]] = []
+    while ready:
+        wave = list(ready)
+        ready.clear()
+        waves.append(wave)
+        for tid in wave:
+            for child in children[tid]:
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    ready.append(child)
+    return waves
+
+
+def build_execution_plan(sub_tasks: list[SubTask]) -> ExecutionPlan:
+    """Build a parallel-aware execution plan from the dependency graph."""
+    effort = {task.task_id: task.estimated_effort for task in sub_tasks}
+    waves = _topological_waves(sub_tasks)
+    sequential = sum(effort.values())
+    parallel = 0.0
+    execution_waves: list[ExecutionWave] = []
+    for index, wave_ids in enumerate(waves):
+        execution_waves.append(ExecutionWave(wave_index=index, task_ids=wave_ids))
+        if wave_ids:
+            parallel += max(effort.get(tid, 0.0) for tid in wave_ids)
+    speedup = (sequential / parallel) if parallel > 0 else 1.0
+    return ExecutionPlan(
+        waves=execution_waves,
+        sequential_estimate=sequential,
+        parallel_estimate=parallel,
+        speedup=speedup,
+    )
+
+
+def validate_decomposition(query: str, sub_tasks: list[SubTask]) -> tuple[float, list[str]]:
+    """Estimate coverage of the original query by the sub-tasks (0..1)."""
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return 1.0, []
+    covered: set[str] = set()
+    for task in sub_tasks:
+        covered |= _tokenize(task.description)
+    coverage = len(query_tokens & covered) / len(query_tokens)
+    warnings: list[str] = []
+    if coverage < 0.9:
+        warnings.append(f"decomposition coverage {coverage:.2f} below 0.90 target")
+    return coverage, warnings
+
+
+class TaskDecomposer:
+    """Deterministic, in-memory agent task decomposition engine."""
+
+    def decompose(self, request: DecompositionRequest) -> DecompositionResult:
+        """Decompose ``request.query`` into sub-tasks, assignments and a plan."""
+        complexity = assess_complexity(request.query)
+        sub_tasks = build_sub_tasks(request.query, request.max_sub_tasks)
+        assignments, warnings = assign_tasks(sub_tasks, request.agents)
+        plan = build_execution_plan(sub_tasks)
+        coverage, coverage_warnings = validate_decomposition(request.query, sub_tasks)
+        warnings.extend(coverage_warnings)
+        return DecompositionResult(
+            query=request.query,
+            complexity=complexity,
+            sub_tasks=sub_tasks,
+            assignments=assignments,
+            plan=plan,
+            coverage=coverage,
+            is_complete=coverage >= 0.9 and not any("unassigned" in w for w in warnings),
+            warnings=warnings,
+        )
+
+
+_decomposer = TaskDecomposer()
+
+
+def get_decomposer() -> TaskDecomposer:
+    """Return the process-wide decomposer instance."""
+    return _decomposer
+
+
+@router.post("/decompose", response_model=DecompositionResult)
+async def decompose_endpoint(request: DecompositionRequest) -> DecompositionResult:
+    """Decompose a complex query into agent sub-tasks with a parallel plan."""
+    return get_decomposer().decompose(request)

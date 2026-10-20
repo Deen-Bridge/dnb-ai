@@ -778,3 +778,57 @@ class IntentAccuracyTracker:
 
 # Process-wide tracker the chat path records into and telemetry reads from.
 accuracy_tracker = IntentAccuracyTracker()
+
+
+class TaskDecomposition(BaseModel):
+    """Result of decomposing a complex query into an ordered task plan."""
+
+    sub_tasks: list[str] = Field(default_factory=list)
+    dependencies: dict[str, list[str]] = Field(default_factory=dict)
+    execution_order: list[str] = Field(default_factory=list)
+    parallel_groups: list[list[str]] = Field(default_factory=list)
+    is_complete: bool = False
+
+
+def decompose_query(prompt: str) -> TaskDecomposition:
+    """Decompose a prompt into sub-tasks using intent classification.
+
+    Segments the prompt the same way ``is_multi_intent`` does, then builds a
+    dependency graph: each segment depends on the previous one when it shares
+    no independent domain cues, otherwise it can run in parallel.
+    """
+    text = (prompt or "").casefold()
+    if not text.strip():
+        return TaskDecomposition()
+
+    segments = [s.strip() for s in _SEGMENT_SPLIT.split(prompt) if s and s.strip()]
+    if not segments:
+        segments = [prompt.strip()]
+
+    sub_tasks = [f"task_{i}: {seg}" for i, seg in enumerate(segments)]
+    dependencies: dict[str, list[str]] = {}
+    parallel_groups: list[list[str]] = []
+
+    for i, task in enumerate(sub_tasks):
+        if i == 0:
+            dependencies[task] = []
+            parallel_groups.append([task])
+            continue
+        prev = sub_tasks[i - 1]
+        seg_domains = detect_domains(segments[i].casefold())
+        prev_domains = detect_domains(segments[i - 1].casefold())
+        if seg_domains and prev_domains and not set(seg_domains) & set(prev_domains):
+            dependencies[task] = []
+            parallel_groups[-1].append(task)
+        else:
+            dependencies[task] = [prev]
+            parallel_groups.append([task])
+
+    execution_order = list(sub_tasks)
+    return TaskDecomposition(
+        sub_tasks=sub_tasks,
+        dependencies=dependencies,
+        execution_order=execution_order,
+        parallel_groups=parallel_groups,
+        is_complete=bool(sub_tasks),
+    )
