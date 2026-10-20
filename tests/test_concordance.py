@@ -111,6 +111,18 @@ class TestBrowseTopic:
             assert verse["context_type"] == "primary"
 
 
+    async def test_browse_filter_by_surah(self, client):
+        resp = await client.get("/concordance/topics/worship-salah", params={"surah": 2})
+
+        assert resp.status_code == 200
+        verses = resp.json()["verses"]
+        assert verses
+        assert all(verse["surah"] == 2 for verse in verses)
+
+    async def test_browse_rejects_invalid_surah_filter(self, client):
+        resp = await client.get("/concordance/topics/worship-salah", params={"surah": 115})
+
+        assert resp.status_code == 422
 # ---------------------------------------------------------------------------
 # Multi-topic AND/OR queries
 # ---------------------------------------------------------------------------
