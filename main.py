@@ -127,6 +127,7 @@ from stellar import (
     router as stellar_router,
 )
 from store import create_session_store, dicts_to_contents, history_to_dicts
+from memorization_planner import router as memorization_planner_router
 from study import router as study_router
 from swahili import (
     analyze_swahili,
@@ -328,6 +329,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(stellar_router)
 app.include_router(reasoning_router)
 app.include_router(study_router)
+# Quran memorization planner: personalized schedules, revision balance, and adaptive pacing
+app.include_router(memorization_planner_router)
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
