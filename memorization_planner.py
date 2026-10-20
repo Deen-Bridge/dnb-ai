@@ -1475,15 +1475,15 @@ class MemorizationPlannerEngine:
                         candidates.append(s)
         elif goal.goal_type == GoalType.SPECIFIC_SURAHS:
             for num in goal.target_surahs or []:
-                s = get_surah_info(num)
-                if s and s.number not in already_set:
-                    candidates.append(s)
+                surah_entry = get_surah_info(num)
+                if surah_entry and surah_entry.number not in already_set:
+                    candidates.append(surah_entry)
         elif goal.goal_type == GoalType.CUSTOM_RANGE and goal.custom_start and goal.custom_end:
             start_s, end_s = goal.custom_start[0], goal.custom_end[0]
             for num in range(start_s, end_s + 1):
-                s = get_surah_info(num)
-                if s and s.number not in already_set:
-                    candidates.append(s)
+                surah_entry = get_surah_info(num)
+                if surah_entry and surah_entry.number not in already_set:
+                    candidates.append(surah_entry)
         else:
             # Default to Juz 30 (Amma)
             candidates = [s for s in get_juz_surahs(30) if s.number not in already_set]
