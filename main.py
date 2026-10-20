@@ -84,6 +84,7 @@ from hadith_context import router as hadith_context_router
 from hadith_research import router as hadith_research_router
 from history import router as history_router
 from intent import accuracy_tracker as intent_accuracy_tracker, classify_intent
+from memorization_planner import router as memorization_planner_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -127,7 +128,6 @@ from stellar import (
     router as stellar_router,
 )
 from store import create_session_store, dicts_to_contents, history_to_dicts
-from memorization_planner import router as memorization_planner_router
 from study import router as study_router
 from swahili import (
     analyze_swahili,

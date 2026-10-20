@@ -178,7 +178,7 @@ def post_chat(payload: dict, max_retries: int = 5) -> requests.Response:
         if retry_after is not None:
             delay = float(retry_after)
         else:
-            delay = 2 ** attempt  # 1s, 2s, 4s, 8s, ...
+            delay = 2**attempt  # 1s, 2s, 4s, 8s, ...
 
         delay += random.uniform(0, 1)  # jitter to avoid thundering herd
         time.sleep(delay)

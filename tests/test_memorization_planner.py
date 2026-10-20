@@ -27,6 +27,7 @@ from memorization_planner import (
 @pytest.fixture
 def client():
     from fastapi import FastAPI
+
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)
