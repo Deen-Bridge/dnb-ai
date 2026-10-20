@@ -198,6 +198,57 @@ class SessionStore:
                 entry[1].discard(chat_id)
                 self._save_to_disk()
 
+    async def bookmark_answer(self, chat_id: str, message_index: int, user_id: str, tags: list[str] | None = None, note: str = "") -> dict[str, Any]:
+        """Bookmark a specific answer in a chat with optional tags and note."""
+        bookmark_id = f"{chat_id}:{message_index}"
+        bookmark = {
+            "id": bookmark_id,
+            "chat_id": chat_id,
+            "message_index": message_index,
+            "user_id": user_id,
+            "tags": tags or [],
+            "note": note,
+            "created_at": time.time(),
+        }
+        if self._use_redis:
+            await self._redis.hset(f"bookmarks:{user_id}", bookmark_id, json.dumps(bookmark))
+        else:
+            key = f"bookmarks:{user_id}"
+            entry = self._local.get(key, [time.monotonic() + SESSION_TTL_SECONDS, {}])
+            if time.monotonic() > entry[0]:
+                entry = [time.monotonic() + SESSION_TTL_SECONDS, {}]
+            entry[1][bookmark_id] = bookmark
+            self._local[key] = entry
+            self._save_to_disk()
+        return bookmark
+
+    async def get_bookmarks(self, user_id: str) -> list[dict[str, Any]]:
+        """Return all bookmarks for *user_id*."""
+        key = f"bookmarks:{user_id}"
+        if self._use_redis:
+            raw = await self._redis.hgetall(key)
+            return [json.loads(v) for v in raw.values()]
+        entry = self._local.get(key)
+        if entry is None:
+            return []
+        expires_at, bookmarks = entry
+        if time.monotonic() > expires_at:
+            del self._local[key]
+            return []
+        return list(bookmarks.values())
+
+    async def delete_bookmark(self, user_id: str, bookmark_id: str) -> bool:
+        """Remove a bookmark. Returns True if it existed."""
+        key = f"bookmarks:{user_id}"
+        if self._use_redis:
+            return (await self._redis.hdel(key, bookmark_id)) > 0
+        entry = self._local.get(key)
+        if entry and time.monotonic() <= entry[0] and bookmark_id in entry[1]:
+            del entry[1][bookmark_id]
+            self._save_to_disk()
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # Redis backend
     # ------------------------------------------------------------------

@@ -12,6 +12,11 @@ MAX_FACT_LENGTH = 500
 MAX_TOPIC_LENGTH = 100
 MAX_SUMMARY_LENGTH = 2000
 VALID_KNOWLEDGE_LEVELS = frozenset({"beginner", "intermediate", "advanced"})
+MAX_BOOKMARK_NOTE_LENGTH = 2000
+MAX_TAG_LENGTH = 50
+MAX_COLLECTION_NAME_LENGTH = 100
+MAX_BOOKMARKS_PER_USER = 1000
+VALID_EXPORT_FORMATS = frozenset({"json", "markdown", "csv", "html"})
 
 
 class TopicEntry(BaseModel):
@@ -39,6 +44,35 @@ class UserProfile(BaseModel):
     preferred_language: str | None = None
     topics_studied: list[TopicEntry] = Field(default_factory=list)
     remembered_facts: list[FactEntry] = Field(default_factory=list)
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+    model_config = {"extra": "forbid"}
+
+
+class BookmarkEntry(BaseModel):
+    bookmark_id: str
+    user_id: str
+    chat_id: str
+    message_id: str
+    content: str
+    note: str = Field(default="", max_length=MAX_BOOKMARK_NOTE_LENGTH)
+    tags: list[str] = Field(default_factory=list)
+    category: str | None = None
+    collection_id: str | None = None
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+    share_token: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+    model_config = {"extra": "forbid"}
+
+
+class BookmarkCollection(BaseModel):
+    collection_id: str
+    user_id: str
+    name: str = Field(max_length=MAX_COLLECTION_NAME_LENGTH)
+    description: str = ""
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 

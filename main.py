@@ -2005,6 +2005,217 @@ async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str
         ) from e
 
 
+# ---------------------------------------------------------------------------
+# Answer bookmarking system
+# ---------------------------------------------------------------------------
+
+
+class BookmarkCreate(BaseModel):
+    chat_id: str = Field(..., max_length=200)
+    message_id: str = Field(..., max_length=200)
+    user_id: str = Field(..., max_length=128)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    category: str | None = Field(None, max_length=100)
+    collection: str | None = Field(None, max_length=100)
+    note: str | None = Field(None, max_length=4000)
+
+
+class BookmarkUpdate(BaseModel):
+    tags: list[str] | None = Field(None, max_length=20)
+    category: str | None = Field(None, max_length=100)
+    collection: str | None = Field(None, max_length=100)
+    note: str | None = Field(None, max_length=4000)
+
+
+class BookmarkRecord(BaseModel):
+    bookmark_id: str
+    user_id: str
+    chat_id: str
+    message_id: str
+    prompt: str | None = None
+    answer: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    category: str | None = None
+    collection: str | None = None
+    note: str | None = None
+    created_at: str
+    updated_at: str
+
+
+bookmarks: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+BOOKMARK_MAX = 10000
+bookmark_shares: dict[str, str] = {}
+
+
+def _bookmark_to_record(data: dict[str, Any]) -> BookmarkRecord:
+    return BookmarkRecord(**data)
+
+
+@app.post("/bookmarks", status_code=201)
+async def create_bookmark(body: BookmarkCreate) -> dict[str, Any]:
+    """Bookmark a specific AI answer with optional tags, category, collection, and note."""
+    snapshot = answer_snapshots.get((body.chat_id, body.message_id))
+    now = datetime.now(timezone.utc).isoformat()  # noqa: UP017
+    bookmark_id = str(uuid.uuid4())
+    record = {
+        "bookmark_id": bookmark_id,
+        "user_id": body.user_id,
+        "chat_id": body.chat_id,
+        "message_id": body.message_id,
+        "prompt": snapshot["prompt"] if snapshot else None,
+        "answer": snapshot["answer"] if snapshot else None,
+        "tags": list(body.tags),
+        "category": body.category,
+        "collection": body.collection,
+        "note": body.note,
+        "created_at": now,
+        "updated_at": now,
+    }
+    bookmarks[bookmark_id] = record
+    while len(bookmarks) > BOOKMARK_MAX:
+        bookmarks.popitem(last=False)
+    logger.info("Bookmark created: %s for user %s", bookmark_id, body.user_id[:8])
+    return _bookmark_to_record(record).model_dump()
+
+
+@app.get("/bookmarks")
+async def list_bookmarks(
+    user_id: str,
+    tag: str | None = None,
+    category: str | None = None,
+    collection: str | None = None,
+    q: str | None = None,
+) -> dict[str, Any]:
+    """List a user's bookmarks, filterable by tag/category/collection and searchable."""
+    results = []
+    needle = q.lower() if q else None
+    for record in bookmarks.values():
+        if record["user_id"] != user_id:
+            continue
+        if tag and tag not in record["tags"]:
+            continue
+        if category and record["category"] != category:
+            continue
+        if collection and record["collection"] != collection:
+            continue
+        if needle:
+            haystack = " ".join(
+                filter(
+                    None,
+                    [
+                        record.get("prompt"),
+                        record.get("answer"),
+                        record.get("note"),
+                        " ".join(record.get("tags", [])),
+                    ],
+                )
+            ).lower()
+            if needle not in haystack:
+                continue
+        results.append(_bookmark_to_record(record).model_dump())
+    results.sort(key=lambda r: r["created_at"], reverse=True)
+    return {"bookmarks": results, "count": len(results)}
+
+
+@app.get("/bookmarks/{bookmark_id}")
+async def get_bookmark(bookmark_id: str) -> dict[str, Any]:
+    record = bookmarks.get(bookmark_id)
+    if record is None:
+        raise APIException(
+            status_code=404,
+            detail="Bookmark not found",
+            hint="Verify the bookmark_id is correct.",
+        )
+    return _bookmark_to_record(record).model_dump()
+
+
+@app.patch("/bookmarks/{bookmark_id}")
+async def update_bookmark(bookmark_id: str, body: BookmarkUpdate) -> dict[str, Any]:
+    record = bookmarks.get(bookmark_id)
+    if record is None:
+        raise APIException(
+            status_code=404,
+            detail="Bookmark not found",
+            hint="Verify the bookmark_id is correct.",
+        )
+    if body.tags is not None:
+        record["tags"] = list(body.tags)
+    if body.category is not None:
+        record["category"] = body.category
+    if body.collection is not None:
+        record["collection"] = body.collection
+    if body.note is not None:
+        record["note"] = body.note
+    record["updated_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
+    return _bookmark_to_record(record).model_dump()
+
+
+@app.delete("/bookmarks/{bookmark_id}")
+async def delete_bookmark(bookmark_id: str) -> dict[str, str]:
+    existed = bookmarks.pop(bookmark_id, None) is not None
+    if existed:
+        return {"message": "Bookmark deleted successfully"}
+    return {"message": "Bookmark not found"}
+
+
+@app.post("/bookmarks/bulk-delete")
+async def bulk_delete_bookmarks(bookmark_ids: list[str]) -> dict[str, Any]:
+    deleted = 0
+    for bid in bookmark_ids:
+        if bookmarks.pop(bid, None) is not None:
+            deleted += 1
+    return {"deleted": deleted}
+
+
+@app.get("/bookmarks/{bookmark_id}/export")
+async def export_bookmark(bookmark_id: str, format: str = "json") -> Response:
+    record = bookmarks.get(bookmark_id)
+    if record is None:
+        raise APIException(
+            status_code=404,
+            detail="Bookmark not found",
+            hint="Verify the bookmark_id is correct.",
+        )
+    if format == "markdown":
+        body = (
+            f"# Bookmark {record['bookmark_id']}\n\n"
+            f"**Tags:** {', '.join(record['tags']) or 'none'}\n\n"
+            f"**Category:** {record['category'] or 'none'}\n\n"
+            f"**Collection:** {record['collection'] or 'none'}\n\n"
+            f"**Note:** {record['note'] or ''}\n\n"
+            f"## Question\n\n{record.get('prompt') or ''}\n\n"
+            f"## Answer\n\n{record.get('answer') or ''}\n"
+        )
+        return Response(content=body, media_type="text/markdown")
+    return JSONResponse(content=_bookmark_to_record(record).model_dump())
+
+
+@app.post("/bookmarks/{bookmark_id}/share")
+async def share_bookmark(bookmark_id: str) -> dict[str, str]:
+    record = bookmarks.get(bookmark_id)
+    if record is None:
+        raise APIException(
+            status_code=404,
+            detail="Bookmark not found",
+            hint="Verify the bookmark_id is correct.",
+        )
+    token = secrets.token_urlsafe(16)
+    bookmark_shares[token] = bookmark_id
+    return {"share_token": token, "url": f"/bookmarks/shared/{token}"}
+
+
+@app.get("/bookmarks/shared/{token}")
+async def get_shared_bookmark(token: str) -> dict[str, Any]:
+    bookmark_id = bookmark_shares.get(token)
+    if bookmark_id is None or bookmark_id not in bookmarks:
+        raise APIException(
+            status_code=404,
+            detail="Shared bookmark not found",
+            hint="The share link may have expired or been revoked.",
+        )
+    return _bookmark_to_record(bookmarks[bookmark_id]).model_dump()
+
+
 @app.post("/evidence/verify", response_model=EvidenceVerificationResult)
 async def verify_evidence_endpoint(body: EvidenceVerifyRequest) -> EvidenceVerificationResult:
     """Run the evidence verification agent on a generated answer.

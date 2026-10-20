@@ -28,6 +28,7 @@ without mocking anything.
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -36,6 +37,8 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/history", tags=["history"])
 
 MAX_TEXT_LENGTH = 8_000
+MAX_NOTE_LENGTH = 2_000
+MAX_TAG_LENGTH = 64
 
 # ---------------------------------------------------------------------------
 # Curated knowledge base
@@ -954,3 +957,327 @@ def fiqh_timeline(topic: str) -> FiqhTimeline:
             raise HTTPException(status_code=404, detail=f"No timeline for topic '{topic}'")
         key = matched[0]
     return FiqhTimeline(key=key, **FIQH_TIMELINE[key])
+
+
+# ---------------------------------------------------------------------------
+# Answer bookmarking system
+#
+# In-memory store of bookmarked answers with tags, categories, collections,
+# personal notes, and share links. Every mutation goes through a small set of
+# pure helpers so the surface stays unit-testable without a database.
+# ---------------------------------------------------------------------------
+
+
+class Bookmark(BaseModel):
+    """A single bookmarked answer with its organisational metadata."""
+
+    id: str
+    answer_text: str
+    question: str = ""
+    tags: list[str] = Field(default_factory=list)
+    category: str = ""
+    collection: str = ""
+    note: str = ""
+    created_at: str = ""
+    share_token: str = ""
+
+
+class BookmarkCreate(BaseModel):
+    answer_text: str = Field(..., min_length=1, max_length=MAX_TEXT_LENGTH)
+    question: str = Field("", max_length=MAX_TEXT_LENGTH)
+    tags: list[str] = Field(default_factory=list)
+    category: str = Field("", max_length=MAX_TAG_LENGTH)
+    collection: str = Field("", max_length=MAX_TAG_LENGTH)
+    note: str = Field("", max_length=MAX_NOTE_LENGTH)
+
+
+class BookmarkUpdate(BaseModel):
+    tags: list[str] | None = None
+    category: str | None = Field(None, max_length=MAX_TAG_LENGTH)
+    collection: str | None = Field(None, max_length=MAX_TAG_LENGTH)
+    note: str | None = Field(None, max_length=MAX_NOTE_LENGTH)
+
+
+class BookmarkSearchRequest(BaseModel):
+    query: str = Field("", max_length=MAX_TEXT_LENGTH)
+    tag: str | None = None
+    category: str | None = None
+    collection: str | None = None
+
+
+class BulkBookmarkRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1)
+    add_tags: list[str] = Field(default_factory=list)
+    remove_tags: list[str] = Field(default_factory=list)
+    category: str | None = Field(None, max_length=MAX_TAG_LENGTH)
+    collection: str | None = Field(None, max_length=MAX_TAG_LENGTH)
+
+
+class CollectionSummary(BaseModel):
+    name: str
+    count: int
+    tags: list[str] = Field(default_factory=list)
+
+
+class ExportResponse(BaseModel):
+    format: str
+    content: str
+
+
+class ShareResponse(BaseModel):
+    id: str
+    share_token: str
+    share_url: str
+
+
+_BOOKMARKS: dict[str, Bookmark] = {}
+_SHARE_INDEX: dict[str, str] = {}
+
+
+def _normalise_tags(tags: list[str]) -> list[str]:
+    """Trim, lowercase, deduplicate and drop empty tags while preserving order."""
+    seen: list[str] = []
+    for tag in tags:
+        cleaned = tag.strip().lower()[:MAX_TAG_LENGTH]
+        if cleaned and cleaned not in seen:
+            seen.append(cleaned)
+    return seen
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_bookmark(bookmark_id: str) -> Bookmark:
+    bookmark = _BOOKMARKS.get(bookmark_id)
+    if bookmark is None:
+        raise HTTPException(status_code=404, detail=f"No bookmark with id '{bookmark_id}'")
+    return bookmark
+
+
+def _matches_query(bookmark: Bookmark, query: str) -> bool:
+    if not query:
+        return True
+    needle = query.lower()
+    haystack = " ".join(
+        [bookmark.answer_text, bookmark.question, bookmark.note, bookmark.category, bookmark.collection, *bookmark.tags]
+    ).lower()
+    return needle in haystack
+
+
+def _filter_bookmarks(
+    query: str = "",
+    tag: str | None = None,
+    category: str | None = None,
+    collection: str | None = None,
+) -> list[Bookmark]:
+    results: list[Bookmark] = []
+    for bookmark in _BOOKMARKS.values():
+        if not _matches_query(bookmark, query):
+            continue
+        if tag and tag.strip().lower() not in bookmark.tags:
+            continue
+        if category and bookmark.category.lower() != category.strip().lower():
+            continue
+        if collection and bookmark.collection.lower() != collection.strip().lower():
+            continue
+        results.append(bookmark)
+    return results
+
+
+@router.post("/bookmarks", response_model=Bookmark, status_code=201)
+def create_bookmark(body: BookmarkCreate) -> Bookmark:
+    """Bookmark an answer with optional tags, category, collection and note."""
+    bookmark = Bookmark(
+        id=uuid.uuid4().hex,
+        answer_text=body.answer_text,
+        question=body.question,
+        tags=_normalise_tags(body.tags),
+        category=body.category.strip(),
+        collection=body.collection.strip(),
+        note=body.note.strip(),
+        created_at=_now_iso(),
+    )
+    _BOOKMARKS[bookmark.id] = bookmark
+    return bookmark
+
+
+@router.get("/bookmarks", response_model=list[Bookmark])
+def list_bookmarks() -> list[Bookmark]:
+    """Return every bookmark, newest first."""
+    return sorted(_BOOKMARKS.values(), key=lambda b: b.created_at, reverse=True)
+
+
+@router.get("/bookmarks/{bookmark_id}", response_model=Bookmark)
+def get_bookmark(bookmark_id: str) -> Bookmark:
+    """Return a single bookmark by id."""
+    return _get_bookmark(bookmark_id)
+
+
+@router.patch("/bookmarks/{bookmark_id}", response_model=Bookmark)
+def update_bookmark(bookmark_id: str, body: BookmarkUpdate) -> Bookmark:
+    """Update the tags, category, collection or note of a bookmark."""
+    bookmark = _get_bookmark(bookmark_id)
+    if body.tags is not None:
+        bookmark.tags = _normalise_tags(body.tags)
+    if body.category is not None:
+        bookmark.category = body.category.strip()
+    if body.collection is not None:
+        bookmark.collection = body.collection.strip()
+    if body.note is not None:
+        bookmark.note = body.note.strip()
+    return bookmark
+
+
+@router.delete("/bookmarks/{bookmark_id}", status_code=204)
+def delete_bookmark(bookmark_id: str) -> None:
+    """Delete a bookmark and any share link pointing at it."""
+    _get_bookmark(bookmark_id)
+    _BOOKMARKS.pop(bookmark_id, None)
+    for token, target in list(_SHARE_INDEX.items()):
+        if target == bookmark_id:
+            _SHARE_INDEX.pop(token, None)
+
+
+@router.post("/bookmarks/search", response_model=list[Bookmark])
+def search_bookmarks(body: BookmarkSearchRequest) -> list[Bookmark]:
+    """Search bookmarked content by free text, tag, category or collection."""
+    return _filter_bookmarks(
+        query=body.query,
+        tag=body.tag,
+        category=body.category,
+        collection=body.collection,
+    )
+
+
+@router.post("/bookmarks/bulk", response_model=list[Bookmark])
+def bulk_update_bookmarks(body: BulkBookmarkRequest) -> list[Bookmark]:
+    """Apply tag/category/collection changes to several bookmarks at once."""
+    targets = [_get_bookmark(bookmark_id) for bookmark_id in body.ids]
+    add = _normalise_tags(body.add_tags)
+    remove = set(_normalise_tags(body.remove_tags))
+    for bookmark in targets:
+        merged = _normalise_tags([*bookmark.tags, *add])
+        bookmark.tags = [tag for tag in merged if tag not in remove]
+        if body.category is not None:
+            bookmark.category = body.category.strip()
+        if body.collection is not None:
+            bookmark.collection = body.collection.strip()
+    return targets
+
+
+@router.post("/bookmarks/bulk-delete", status_code=204)
+def bulk_delete_bookmarks(body: BulkBookmarkRequest) -> None:
+    """Delete several bookmarks at once."""
+    for bookmark_id in body.ids:
+        _BOOKMARKS.pop(bookmark_id, None)
+    for token, target in list(_SHARE_INDEX.items()):
+        if target not in _BOOKMARKS:
+            _SHARE_INDEX.pop(token, None)
+
+
+@router.get("/collections", response_model=list[CollectionSummary])
+def list_collections() -> list[CollectionSummary]:
+    """Return bookmark collections grouped by name with their tags."""
+    grouped: dict[str, list[Bookmark]] = {}
+    for bookmark in _BOOKMARKS.values():
+        if bookmark.collection:
+            grouped.setdefault(bookmark.collection, []).append(bookmark)
+    summaries: list[CollectionSummary] = []
+    for name, items in sorted(grouped.items()):
+        tags: list[str] = []
+        for item in items:
+            for tag in item.tags:
+                if tag not in tags:
+                    tags.append(tag)
+        summaries.append(CollectionSummary(name=name, count=len(items), tags=tags))
+    return summaries
+
+
+def _export_markdown(bookmarks: list[Bookmark]) -> str:
+    lines: list[str] = ["# Bookmarks", ""]
+    for bookmark in bookmarks:
+        lines.append(f"## {bookmark.question or bookmark.id}")
+        lines.append("")
+        lines.append(bookmark.answer_text)
+        lines.append("")
+        if bookmark.tags:
+            lines.append(f"Tags: {', '.join(bookmark.tags)}")
+        if bookmark.category:
+            lines.append(f"Category: {bookmark.category}")
+        if bookmark.collection:
+            lines.append(f"Collection: {bookmark.collection}")
+        if bookmark.note:
+            lines.append(f"Note: {bookmark.note}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _export_json(bookmarks: list[Bookmark]) -> str:
+    import json
+
+    return json.dumps([bookmark.model_dump() for bookmark in bookmarks], ensure_ascii=False, indent=2)
+
+
+def _export_csv(bookmarks: list[Bookmark]) -> str:
+    import csv
+    import io
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["id", "question", "answer_text", "tags", "category", "collection", "note", "created_at"])
+    for bookmark in bookmarks:
+        writer.writerow(
+            [
+                bookmark.id,
+                bookmark.question,
+                bookmark.answer_text,
+                ";".join(bookmark.tags),
+                bookmark.category,
+                bookmark.collection,
+                bookmark.note,
+                bookmark.created_at,
+            ]
+        )
+    return buffer.getvalue()
+
+
+_EXPORTERS = {
+    "markdown": _export_markdown,
+    "json": _export_json,
+    "csv": _export_csv,
+}
+
+
+@router.get("/bookmarks/export/{fmt}", response_model=ExportResponse)
+def export_bookmarks(fmt: str) -> ExportResponse:
+    """Export all bookmarks as markdown, json or csv."""
+    exporter = _EXPORTERS.get(fmt.lower())
+    if exporter is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported export format '{fmt}'")
+    return ExportResponse(format=fmt.lower(), content=exporter(list(_BOOKMARKS.values())))
+
+
+@router.post("/bookmarks/{bookmark_id}/share", response_model=ShareResponse)
+def share_bookmark(bookmark_id: str) -> ShareResponse:
+    """Create (or reuse) a public share link for a bookmark."""
+    bookmark = _get_bookmark(bookmark_id)
+    if not bookmark.share_token:
+        bookmark.share_token = uuid.uuid4().hex
+        _SHARE_INDEX[bookmark.share_token] = bookmark.id
+    return ShareResponse(
+        id=bookmark.id,
+        share_token=bookmark.share_token,
+        share_url=f"/history/bookmarks/shared/{bookmark.share_token}",
+    )
+
+
+@router.get("/bookmarks/shared/{token}", response_model=Bookmark)
+def get_shared_bookmark(token: str) -> Bookmark:
+    """Return a bookmark via its public share token."""
+    bookmark_id = _SHARE_INDEX.get(token)
+    if bookmark_id is None:
+        raise HTTPException(status_code=404, detail="Share link not found")
+    return _get_bookmark(bookmark_id)
