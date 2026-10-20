@@ -845,7 +845,7 @@ class _MockModel:
 
 def get_model() -> genai.GenerativeModel:
     if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
-        return _MockModel()  # type: ignore[return-value]
+        return _MockModel()
     return genai.GenerativeModel(
         model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,

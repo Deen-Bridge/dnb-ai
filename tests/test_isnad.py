@@ -47,7 +47,7 @@ class TestParseIsnad:
         chain = parse_isnad("")
         assert chain.narrators == []
 
-    def test_none_text(self):
+    def test_none_text(self) -> None:
         chain = parse_isnad(None)  # type: ignore[arg-type]
         assert chain.narrators == []
 

@@ -228,7 +228,7 @@ def _wav_rms(wav: WavInfo, data: bytes) -> float | None:
         samples = struct.unpack_from(f"<{((end - wav.data_offset) // stride)}h", data, wav.data_offset)
     else:
         raw = data[wav.data_offset : end]
-        samples = tuple(sample - 128 for sample in raw)  # type: ignore[assignment]
+        samples = tuple(sample - 128 for sample in raw)
     if not samples:
         return None
     mean_sq = sum(float(sample) * float(sample) for sample in samples) / len(samples)
