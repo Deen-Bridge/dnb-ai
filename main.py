@@ -83,7 +83,7 @@ from config import get_settings
 from consistency import consistency_router, get_consistency_enforcer
 from context_manager import router as context_router
 from crosslingual import CrosslingualSearchRequest, CrosslingualSearchResponse, crosslingual_search
-from errors import APIException
+from errors import APIException, error_payload
 from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
@@ -281,10 +281,11 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     retry_after = getattr(exc, "retry_after", 60)
     return JSONResponse(
         status_code=429,
-        content={
-            "detail": f"Rate limit exceeded: {exc.detail}",
-            "hint": f"Too many requests sent. Please wait {retry_after} seconds before retrying.",
-        },
+        content=error_payload(
+            f"Rate limit exceeded: {exc.detail}",
+            code="rate_limit_exceeded",
+            hint=f"Too many requests sent. Please wait {retry_after} seconds before retrying.",
+        ),
         headers={"Retry-After": str(retry_after)},
     )
 
@@ -293,16 +294,14 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     headers = getattr(exc, "headers", None) or {}
     hint = getattr(exc, "hint", None)
-
+    detail = exc.detail.get("detail", exc.detail) if isinstance(exc.detail, dict) else exc.detail
     if isinstance(exc.detail, dict):
-        content = dict(exc.detail)
-        if hint and "hint" not in content:
-            content["hint"] = hint
-    else:
-        content = {"detail": exc.detail}
-        if hint:
-            content["hint"] = hint
-
+        hint = hint or exc.detail.get("hint")
+    content = error_payload(
+        detail,
+        code=getattr(exc, "code", "http_error"),
+        hint=hint,
+    )
     return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(content), headers=headers)
 
 
@@ -323,10 +322,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         else:
             hints.append(msg)
     hint_str = "; ".join(hints) if hints else "Please check request parameters and schema."
-    content = {
-        "detail": errors,
-        "hint": f"Validation failed ({hint_str}). Please provide valid input according to the API schema.",
-    }
+    content = error_payload(
+        errors,
+        code="validation_error",
+        hint=f"Validation failed ({hint_str}). Please provide valid input according to the API schema.",
+    )
     return JSONResponse(
         status_code=422,
         content=jsonable_encoder(content),
