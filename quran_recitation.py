@@ -288,9 +288,7 @@ class _Alignment:
     matched: int
 
 
-def _snap(
-    tokens: list[str], vocab: list[str], cutoff: float
-) -> tuple[list[str], list[bool], list[tuple[str, str]]]:
+def _snap(tokens: list[str], vocab: list[str], cutoff: float) -> tuple[list[str], list[bool], list[tuple[str, str]]]:
     """Map each token onto the surah vocabulary: riwayah variants, then near-misses."""
     out: list[str] = []
     exact: list[bool] = []
@@ -479,9 +477,7 @@ class AnalyzeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _riwayah(
-    alignment: _Alignment, hint: str | None
-) -> RiwayahInfo:
+def _riwayah(alignment: _Alignment, hint: str | None) -> RiwayahInfo:
     hinted = _resolve_alias(hint, RIWAYAT)
     if alignment.variants:
         readers: tuple[str, ...] = ()
@@ -610,9 +606,7 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
     missing = [a for a in aligned if a.status == "missing"]
     for a in aligned:
         if a.status == "approximate":
-            issues.append(
-                RecitationIssue(type="substitution", ayah=a.ayah, expected=a.expected, heard=a.heard)
-            )
+            issues.append(RecitationIssue(type="substitution", ayah=a.ayah, expected=a.expected, heard=a.heard))
     for k, a in enumerate(missing):
         if k < len(inside_extra):
             issues.append(
@@ -662,9 +656,7 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
     else:
         verification = "inaccurate"
 
-    reference = (
-        f"{surah.number}:{ayah_start}" if ayah_start == ayah_end else f"{surah.number}:{ayah_start}-{ayah_end}"
-    )
+    reference = f"{surah.number}:{ayah_start}" if ayah_start == ayah_end else f"{surah.number}:{ayah_start}-{ayah_end}"
 
     reciter_match = find_reciter(request.reciter_hint, request.metadata_text)
     reciter = (
