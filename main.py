@@ -24,7 +24,7 @@ from logging_config import RequestContextMiddleware, configure_logging, prompt_d
 configure_logging()
 
 import google.generativeai as genai
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -133,6 +133,7 @@ from memory.extraction import (
 from model_router import router as model_routing_router
 from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
+from phoneme_alignment import alignment_stream, router as alignment_router
 from prompts import (
     ExperimentConfig,
     ExperimentHarness,
@@ -390,6 +391,18 @@ app.include_router(arabic_dialect_router)
 app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
 app.include_router(recitation_router)
+app.include_router(alignment_router, dependencies=[Depends(verify_api_key)])
+
+
+@app.websocket("/quran/alignment/stream")
+async def stream_phoneme_alignment(socket: WebSocket) -> None:
+    key = socket.headers.get("X-API-Key", "")
+    if not AUTH_DISABLED and (not SERVICE_API_KEY or not secrets.compare_digest(key, SERVICE_API_KEY)):
+        await socket.close(code=1008)
+        return
+    await alignment_stream(socket)
+
+
 # Scholarly attribution validation: prevent fabricated/misattributed scholarly opinions
 app.include_router(scholarly_attribution_router)
 
