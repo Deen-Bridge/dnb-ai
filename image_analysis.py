@@ -40,7 +40,7 @@ import logging
 import re
 from typing import Any, Protocol
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel, Field
 
 import telemetry
@@ -54,6 +54,7 @@ from manuscript_ocr import (
     UploadTooLargeError,
     analyze_manuscript_bytes,
 )
+from rate_limit import analysis_rate_limit, limit, media_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -515,7 +516,8 @@ async def analyze_content(
 
 
 @router.post("/analyze-extracted", response_model=AnalyzeExtractedResponse)
-async def analyze_extracted_text(body: AnalyzeExtractedRequest) -> AnalyzeExtractedResponse:
+@limit(analysis_rate_limit)
+async def analyze_extracted_text(request: Request, body: AnalyzeExtractedRequest) -> AnalyzeExtractedResponse:
     """Analyze already-extracted OCR text: verses, hadith, validation, translation."""
     from manuscript_ocr import ManuscriptTypeClassification
 
@@ -536,7 +538,9 @@ async def analyze_extracted_text(body: AnalyzeExtractedRequest) -> AnalyzeExtrac
 
 
 @router.post("/batch", response_model=BatchAnalysisResponse)
+@limit(media_rate_limit)
 async def analyze_batch(
+    request: Request,
     files: list[UploadFile] = File(...),
     language: str = "en",
     skip_translation: bool = False,

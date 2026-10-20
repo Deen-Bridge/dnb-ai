@@ -236,6 +236,12 @@ services:
 | `FEEDBACK_DB_PATH` | SQLite path for the feedback store (when Redis is not used) | `feedback.db` |
 | `FEEDBACK_RATE_LIMIT_MAX` | Max feedback submissions per IP per window | `20` |
 | `FEEDBACK_RATE_LIMIT_WINDOW` | Feedback rate-limit window in seconds | `60` |
+| `RATE_LIMIT_ENABLED` | Master switch for the slowapi request-rate limits | `true` |
+| `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-For` (set `true` behind Render); the rightmost hop is used | `false` |
+| `CHAT_RATE_LIMIT_MAX` / `CHAT_RATE_LIMIT_WINDOW_SECONDS` | Chat request rate per client | `60` / `60` |
+| `LLM_RATE_LIMIT_MAX` / `LLM_RATE_LIMIT_WINDOW_SECONDS` | LLM-generation rate per client | `10` / `60` |
+| `ANALYSIS_RATE_LIMIT_MAX` / `ANALYSIS_RATE_LIMIT_WINDOW_SECONDS` | Analysis rate per client | `30` / `60` |
+| `MEDIA_RATE_LIMIT_MAX` / `MEDIA_RATE_LIMIT_WINDOW_SECONDS` | Upload/media-processing rate per client | `10` / `60` |
 | `QURAN_API_BASE` | Base URL for tafsir/ayah retrieval | `https://api.quran.com/api/v4` |
 | `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
@@ -244,6 +250,28 @@ services:
 | `METRICS_TOKEN` | Bearer token / secret header for `/metrics` endpoint protection | — (unprotected) |
 | `METRICS_IP_ALLOWLIST` | Comma-separated allowed IPs/CIDRs for `/metrics` | — (unprotected) |
 | `ENABLE_METRICS` | Toggle HTTP metrics instrumentation | `true` |
+
+### Rate limiting
+
+Slowapi covers the expensive endpoints, not only `/chat`:
+
+| Tier | Endpoints | Default |
+| --- | --- | --- |
+| Chat | `POST /chat`, `POST /chat/stream` | 60 / 60s per client |
+| LLM generation | `POST /study/generate`, `POST /audio/generate` | 10 / 60s per client |
+| Analysis | `POST /adhkar/recommend`, `POST /page-analysis/analyze`, `POST /audio-hadith/verify`, `POST /tafsir`, `POST /tafsir/compare`, `POST /tafsir/batch`, `POST /image-analysis/analyze-extracted`, `POST /zakat` | 30 / 60s per client |
+| Media | `POST /audio/transcribe`, `POST /audio/analyze`, `POST /image-analysis/batch` | 10 / 60s per client |
+
+The client key is the `X-API-Key` when present, otherwise the rightmost
+`X-Forwarded-For` hop **only when `TRUST_PROXY_HEADERS=true`**, otherwise the
+direct peer address. Set `TRUST_PROXY_HEADERS=true` on Render so limits follow
+the real caller; leaving it `false` makes every proxied request share the proxy
+address, while trusting the leftmost hop would let a client rotate buckets.
+
+Every slowapi limit returns HTTP `429` with `detail`, `hint`, and a
+`Retry-After` header (60 seconds for the windows above). Limits are in-process
+and per instance; a shared backend such as Redis is required before running
+multiple replicas.
 
 ### Multilingual support (language field)
 

@@ -40,9 +40,7 @@ from google.api_core.exceptions import (
     ServiceUnavailable,
 )
 from pydantic import BaseModel, Field, field_validator
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 import metrics
 import telemetry
@@ -158,6 +156,13 @@ from prompts import (
     register_defaults,
 )
 from query_optimizer import router as query_optimizer_router
+from rate_limit import (
+    RATE_LIMIT_ENABLED,
+    TRUST_PROXY_HEADERS,
+    analysis_rate_limit,
+    client_key,
+    limiter,
+)
 from reasoning_chains import router as reasoning_router
 from recitation_quality import router as recitation_router
 from reformulation import router as reformulation_router
@@ -271,25 +276,10 @@ async def verify_api_key(
 
 
 # --- Per-client rate limiting ---
-# Default: 20 requests/minute per API key (falls back to client IP).
-# Render sits behind a proxy; use X-Forwarded-For for IP-based limiting.
-# NOTE: in-memory storage is fine for single-instance Render.  A shared Redis
-# backend is needed if multi-instance support is added (see session-persistence
-# issue).
-
-
-def _rate_limit_key(request: Request) -> str:
-    api_key = request.headers.get("X-API-Key")
-    if api_key:
-        return f"key:{api_key}"
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return get_remote_address(request)
-
-
-RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() not in {"0", "false", "off"}
-limiter = Limiter(key_func=_rate_limit_key, enabled=RATE_LIMIT_ENABLED)
+# The shared limiter and key function live in rate_limit.py so router modules
+# can import them without a circular dependency on this module.
+# NOTE: in-memory storage is fine for a single instance. A shared Redis backend
+# is needed if multi-instance support is added (see session-persistence issue).
 app.state.limiter = limiter
 
 
@@ -759,10 +749,9 @@ chat_message_ids: dict[str, list[str]] = {}
 FEEDBACK_SNAPSHOT_MAX = env_int("FEEDBACK_SNAPSHOT_MAX", 5000)
 answer_snapshots: "OrderedDict[tuple, dict[str, str]]" = OrderedDict()
 
-# Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
-# control; otherwise any client can rotate the header to mint a fresh rate-limit
-# bucket on every request and defeat the only control on the write endpoint.
-TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
+# TRUST_PROXY_HEADERS is defined in rate_limit.py and imported above; the
+# feedback limiter and the slowapi key function therefore agree on when
+# X-Forwarded-For may be trusted.
 
 
 def _record_answer(chat_id: str, prompt: str, answer: str) -> str:
@@ -1442,7 +1431,7 @@ async def _chat(
 
         # --- Token quota enforcement ---
         # Check quota before making any LLM call (cache miss path)
-        quota_key = body.user_id if body.user_id else _rate_limit_key(request)
+        quota_key = body.user_id if body.user_id else client_key(request)
         # Estimate token count for quota check (conservative estimate)
         estimated_tokens = len(prompt.split()) + len(body.context.split()) if body.context else len(prompt.split())
         # Use a conservative multiplier for system context and response
@@ -2891,7 +2880,8 @@ class AdhkarRecommendRequest(BaseModel):
 
 
 @app.post("/adhkar/recommend")
-async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
+@limiter.limit(analysis_rate_limit)
+async def recommend_adhkar(body: AdhkarRecommendRequest, request: Request) -> dict[str, Any]:
     matches = adhkar_corpus.search(category=body.category, query=body.query)
     message = (
         "Found authenticated supplications."
