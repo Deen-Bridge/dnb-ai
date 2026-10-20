@@ -96,6 +96,7 @@ from misinformation_api import router as misinformation_router
 from model_router import router as model_routing_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
+from quran_recitation import router as quran_recitation_router
 from reasoning_chains import router as reasoning_router
 from reformulation import router as reformulation_router
 from review import enqueue_for_review, router as review_router
@@ -344,6 +345,8 @@ app.include_router(reformulation_router)
 app.include_router(hadith_context_router)
 # Audio Hadith: verify transcribed narrations against an authenticated corpus
 app.include_router(audio_hadith_router)
+# Quran recitation: identify, align and verify transcribed recitation against the Mushaf
+app.include_router(quran_recitation_router)
 # Hadith Research: retrieval, isnad analysis, rijal cross-referencing, grading
 # justification, and variant alignment across ten major collections
 app.include_router(hadith_research_router)

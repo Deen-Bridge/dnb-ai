@@ -69,6 +69,8 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `POST` | `/hadith-research/lookup` | Resolve a hadith citation: grading, justification, and variant membership |
 | `POST` | `/hadith-research/chain` | Isnad analysis: narrator reliability and chain continuity |
 | `POST` | `/hadith-research/variants` | Find variant narrations by matn text or by citation |
+| `POST` | `/quran-recitation/analyze` | Identify surah/ayah from a recitation transcript, align it word-by-word (with timestamps) to the Mushaf, and report deviations, riwayah, reciter and maqam metadata |
+| `GET` | `/quran-recitation/surahs` | Surahs bundled for matching, recognised riwayat and maqamat |
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
