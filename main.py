@@ -84,6 +84,7 @@ from hadith_context import router as hadith_context_router
 from hadith_research import router as hadith_research_router
 from history import router as history_router
 from intent import accuracy_tracker as intent_accuracy_tracker, classify_intent
+from memorization_planner import router as memorization_planner_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -328,6 +329,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(stellar_router)
 app.include_router(reasoning_router)
 app.include_router(study_router)
+# Quran memorization planner: personalized schedules, revision balance, and adaptive pacing
+app.include_router(memorization_planner_router)
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
