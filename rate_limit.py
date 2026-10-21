@@ -89,7 +89,7 @@ def limit(limit_value: str | Callable[..., str]) -> Callable[[Callable[..., Any]
                 # the leading HTTP request parameter (handlers never read it).
                 parameters = list(inspect.signature(func).parameters)
                 if parameters and parameters[0] == "request":
-                    return await func(None, *args, **kwargs)  # type: ignore[arg-type]
+                    return await func(None, *args, **kwargs)
                 return await func(*args, **kwargs)
             return await limited(*args, **kwargs)
 
