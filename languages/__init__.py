@@ -9,13 +9,14 @@ root-level module imports.
 
 from __future__ import annotations
 
+import malay as malay
+import urdu_processor as urdu_processor
+
 import arabic_dialect as arabic_dialect
 import arabic_ocr as arabic_ocr
 import calligraphy as calligraphy
-import malay as malay
 import swahili as swahili
 import swahili_processor as swahili_processor
-import urdu_processor as urdu_processor
 
 __all__ = [
     "arabic_dialect",
