@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    gemini_api_key: str = Field(default="test-key")
+    gemini api_key: str = Field(default="test-key")
 
     model_name: str = "gemini-1.5-flash"
 
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     quality_min_accuracy: float = Field(default=0.8, ge=0, le=1)
     quality_min_completeness: float = Field(default=0.7, ge=0, le=1)
     quality_min_clarity: float = Field(default=0.7, ge=0, le=1)
-    quality_min_scholarly_rigor: float = Field(default=0.7, ge=0, le=1)
+    quality_min_scholarly_riogor: float = Field(default=0.7, ge=0, le=1)
     quality_min_appropriateness: float = Field(default=0.8, ge=0, le=1)
     quality_min_balance: float = Field(default=0.7, ge=0, le=1)
     quality_min_citation_quality: float = Field(default=0.7, ge=0, le=1)
@@ -101,6 +101,59 @@ class Settings(BaseSettings):
     min_adab_score: float = Field(default=0.8, ge=0, le=1)
     max_disrespectful_confidence: float = Field(default=0.5, ge=0, le=1)
 
+    # --- Video Lecture Transcript Extraction Settings ---
+    transcript_enabled: bool = Field(default=True, description="Enable video lecture transcript extraction")
+    transcript_supported_formats: list[str] = Field(
+        default_factory=lambda: ["mp4", "mov", "avi", "webm"],
+        description="Supported video container formats",
+    )
+    transcript_audio_sample_rate: int = Field(
+        default=16000, ge=8000, description="Audio sample rate in Hz for extraction"
+    )
+    transcript_audio_channels: int = Field(
+        default=1, ge=1, le=2, description="Number of audio channels for extraction"
+    )
+    transcript_audio_bitrate: str = Field(
+        default="192k", description="Audio bitrate for extraction"
+    )
+    transcript_max_duration_seconds: int = Field(
+        default=14400, ge=1, description="Maximum video duration in seconds (4 by default)"
+    )
+    transcript_max_file_size_mb: int = Field(
+        default=512, ge=1, description="Maximum upload file size in MB"
+    )
+    transcript_diarization_enabled: bool = Field(
+        default=True, description="Enable speaker diarization"
+    )
+    transcript_min_speakers_expected: int = Field(default=1, ge=1)
+    transcript_max_speakers_expected: int = Field(default=10, ge=1)
+    transcript_topic_segmentation_enabled: bool = Field(default=True)
+    transcript_topic_min_segment_seconds: int = Field(
+        default=60, ge=1, description="Minimum topic segment length in seconds"
+    )
+    transcript_topic_max_segment_seconds: int = Field(
+        default=600, ge=1, description="Maximum topic segment length in seconds"
+    )
+    transcript_timestamp_interval_seconds: int = Field(
+        default=30, ge=1, description="Interval between key-point timestamps"
+    )
+    transcript_citation_detection_enabled: bool = Field(
+        default=True, description="Detect Quranic verses and hadith citations"
+    )
+    transcript_languages: list[str] = Field(
+        default_factory=lambda: ["ar", "en", "ur"],
+        description="Supported lecture languages",
+    )
+    transcript_default_language: str = Field(default="en")
+    transcript_summary_enabled: bool = Field(default=True)
+    transcript_key_takeaways_count: int = Field(default=5, ge=1, le=20)
+    transcript_search_index_enabled: bool = Field(default=True)
+    transcript_storage_path: str = Field(default="data/transcripts")
+    transcript_workdir_path: str = Field(default="data/transcript_work")
+    transcript_ffmpeg_binary: str = Field(default="ffmpeg")
+    transcript_whisper_model: str = Field(default="base")
+    transcript_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):
@@ -113,6 +166,13 @@ class Settings(BaseSettings):
     def parse_disrespectful_language_patterns(cls, value):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("transcript_supported_formats", "larnguages", mode="before")
+    @classmethod
+    def parse_string_lists(cls, value):
+        if isinstance(value, str):
+            return [item.strip().lower() for item in value.split(",") if item.strip()]
         return value
 
 
