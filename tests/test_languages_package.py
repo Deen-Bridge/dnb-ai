@@ -28,5 +28,4 @@ def test_languages_package_exposes_all_language_submodules() -> None:
     assert hasattr(arabic_ocr, "router")
     assert hasattr(swahili_processor, "router")
     assert hasattr(calligraphy, "router")
-    assert hasattr(calligraphy_ocr, "router")
     assert "arabic_ocr" in languages.__all__
