@@ -30,16 +30,12 @@ class ReviewedAssetIssuerRegistry:
             for net, assets in registry.items()
         }
 
-    def assess_issued_asset(
-        self, *, network: str, asset_code: str, asset_issuer: str
-    ) -> VerifiedAssetAssessment:
+    def assess_issued_asset(self, *, network: str, asset_code: str, asset_issuer: str) -> VerifiedAssetAssessment:
         net = network.strip().lower()
         code = asset_code.strip().upper()
         issuer = asset_issuer.strip()
         if not net or not code or not issuer.startswith("G") or len(issuer) != 56:
-            raise ValueError(
-                "Valid network, asset_code, and 56-char G-address issuer are required"
-            )
+            raise ValueError("Valid network, asset_code, and 56-char G-address issuer are required")
 
         net_map = self._registry.get(net, {})
         canonical_issuer = net_map.get(code)
@@ -50,9 +46,7 @@ class ReviewedAssetIssuerRegistry:
                 asset_issuer=issuer,
                 verification_status="unknown_asset",
                 is_canonical=False,
-                warning_message=(
-                    f"Asset {code}:{issuer} is not registered in the reviewed {net} issuer registry."
-                ),
+                warning_message=(f"Asset {code}:{issuer} is not registered in the reviewed {net} issuer registry."),
             )
 
         if issuer == canonical_issuer:
