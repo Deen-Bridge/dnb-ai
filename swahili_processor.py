@@ -5,6 +5,8 @@ Re-exports core engines, models, and singleton processors for root-level access.
 
 from __future__ import annotations
 
+import logging
+
 from swahili.code_switching import code_switch_processor
 from swahili.cultural_context import cultural_context_engine
 from swahili.dialects import dialect_classifier
@@ -26,6 +28,8 @@ from swahili.models import (
 from swahili.optimizer import swahili_query_optimizer
 from swahili.router import router
 from swahili.terminology import terminology_db
+
+logger = logging.getLogger(__name__)
 
 
 def analyze_swahili(text: str) -> SwahiliAnalysisResult:
