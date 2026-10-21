@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field

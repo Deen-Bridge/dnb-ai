@@ -1,12 +1,3 @@
-"""Video lecture transcript extraction benchmark (#Enhancement).
-
-Extends the Quran accuracy benchmark with transcript extraction evaluation:
-speaker diarization, topic segmentation, timestamping, citation detection,
-and multilingual support for Islamic educational video lectures.
-
-All evaluation is deterministic and offline — no network, no LLM calls.
-"""
-
 """Quran Accuracy Benchmark (#122).
 
 A comprehensive, offline evaluation framework measuring:

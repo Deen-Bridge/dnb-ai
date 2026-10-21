@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    gemini api_key: str = Field(default="test-key")
+    gemini_api_key: str = Field(default="test-key")
 
     model_name: str = "gemini-1.5-flash"
 

@@ -12,21 +12,21 @@ from agent_orchestrator import (
 )
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_query_analysis_engine():
     caps = QueryAnalysisEngine.analyze_query("What is the fiqh ruling on wudu and zakat?")
     assert AgentCapability.FIQH in caps
     assert AgentCapability.ZAKAT in caps
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_query_analysis_empty_query():
     caps = QueryAnalysisEngine.analyze_query("")
     assert isinstance(caps, (set, list, tuple))
     assert len(caps) == 0
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_query_analysis_no_match():
     caps = QueryAnalysisEngine.analyze_query("tell me about the weather today")
     assert AgentCapability.FIQH not in caps
@@ -34,7 +34,7 @@ async def test_query_analysis_no_match():
     assert AgentCapability.ZAKAT not in caps
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_dag_scheduler():
     t1 = AgentTask(task_id="t1", agent_capability=AgentCapability.FIQH, payload={})
     t2 = AgentTask(task_id="t2", agent_capability=AgentCapability.HADITH, payload={}, dependencies=["t1"])
@@ -44,13 +44,13 @@ async def test_dag_scheduler():
     assert levels[1][0].task_id == "t2"
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_dag_scheduler_empty():
     levels = DAGScheduler.build_dag([])
     assert list(levels) == []
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_dag_scheduler_single_node():
     t = AgentTask(task_id="only", agent_capability=AgentCapability.FIQH, payload={})
     levels = DAGScheduler.build_dag([t])
@@ -58,7 +58,7 @@ async def test_dag_scheduler_single_node():
     assert levels[0][0].task_id == "only"
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_dag_scheduler_diamond():
     top = AgentTask(task_id="top", agent_capability=AgentCapability.FIQH, payload={})
     left = AgentTask(
@@ -69,7 +69,7 @@ async def test_dag_scheduler_diamond():
     )
     right = AgentTask(
         task_id="right",
-        agent_capability=AgentCapability.ZAKAT,,
+        agent_capability=AgentCapability.ZAKAT,
         payload={},
         dependencies=["top"],
     )
@@ -86,9 +86,9 @@ async def test_dag_scheduler_diamond():
     assert {lt.task_id for lt in levels[2]} == {"bottom"}
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_orchestrator_execution():
-    async def mock_fiqfih_handler(payload, context):
+    async def mock_fiqh_handler(payload, context):
         return "Fiqh ruling: permissible."
 
     async def mock_hadith_handler(payload, context):
@@ -104,11 +104,11 @@ async def test_orchestrator_execution():
     assert "Hadith grading" in result["synthesized_response"]
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_orchestrator_multi_step_flow():
     calls = []
 
-    async def fiqfih_handler(payload, context):
+    async def fiqh_handler(payload, context):
         calls.append("fiqh")
         return "Fiqh answer."
 
@@ -134,7 +134,7 @@ async def test_orchestrator_multi_step_flow():
     assert sorted(calls) == ["fiqh", "hadith", "zakat"]
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_orchestrator_partial_failure():
     async def ok_handler(payload, context):
         return "Fiqh answer."
@@ -152,7 +152,7 @@ async def test_orchestrator_partial_failure():
     assert "Fiqh answer" in result["synthesized_response"]
 
 
-@mark.asyncio
+@pytest.mark.asyncio
 async def test_orchestrator_cancellation():
     started = asyncio.Event()
 
@@ -165,10 +165,9 @@ async def test_orchestrator_cancellation():
     orchestrator.register_agent(SpecializedAgent("SlowAgent", AgentCapability.FIQH, slow_handler))
 
     task = asyncio.create_task(orchestrator.process_query("What is the fiqh ruling?"))
-    await as:
-        await started.wait()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
     assert task.cancelled()
 

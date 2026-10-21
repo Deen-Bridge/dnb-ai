@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from transcript import router as transcript_router
 
 import telemetry
 from arabic_dialect import router as arabic_dialect_router
@@ -145,7 +146,6 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
-from transcript import router as transcript_router
 from video_analysis import router as video_analysis_router
 from vocabulary import router as vocabulary_router
 
