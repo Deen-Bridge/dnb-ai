@@ -59,7 +59,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -193,7 +193,7 @@ def expressed_certainty(text: str) -> float:
 # ---------------------------------------------------------------------------
 
 
-class ConfidenceBand(str, Enum):
+class ConfidenceBand(StrEnum):
     ABSTAIN = "abstain"
     UNCERTAIN = "uncertain"
     CONFIDENT = "confident"
@@ -216,6 +216,8 @@ class ConfidenceSignals(BaseModel):
     expressed_certainty: float | None = Field(None, ge=0.0, le=1.0, description="Inverse of the answer's own hedging")
     is_religious: bool = False
     is_high_stakes: bool = False
+    topic: str | None = None
+    source: str | None = None
     prompt: str | None = None
     answer_text: str | None = None
     hadith_refs: list[Any] | None = None
@@ -270,15 +272,49 @@ def compute_confidence(signals: ConfidenceSignals) -> float:
     return round(min(1.0, max(0.0, score)), 4)
 
 
-def band_for(score: float) -> ConfidenceBand:
-    if score < CONFIDENCE_LOW_THRESHOLD:
+def _get_active_thresholds(
+    topic: str | None = None,
+    source: str | None = None,
+    request_key: str | None = None,
+) -> dict[str, float]:
+    try:
+        from confidence_tuning import get_tuning_manager
+
+        mgr = get_tuning_manager()
+        if topic or source or (mgr.ab_experiment and mgr.ab_experiment.active) or mgr.version > 1:
+            return mgr.get_effective_thresholds(topic=topic, source=source, request_key=request_key)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "low": CONFIDENCE_LOW_THRESHOLD,
+        "high": CONFIDENCE_HIGH_THRESHOLD,
+        "scholar_queue": SCHOLAR_QUEUE_THRESHOLD,
+        "high_stakes_penalty": HIGH_STAKES_PENALTY,
+        "no_signal_prior": NO_SIGNAL_PRIOR,
+    }
+
+
+def band_for(
+    score: float,
+    topic: str | None = None,
+    source: str | None = None,
+    request_key: str | None = None,
+) -> ConfidenceBand:
+    active = _get_active_thresholds(topic=topic, source=source, request_key=request_key)
+    if score < active["low"]:
         return ConfidenceBand.ABSTAIN
-    if score < CONFIDENCE_HIGH_THRESHOLD:
+    if score < active["high"]:
         return ConfidenceBand.UNCERTAIN
     return ConfidenceBand.CONFIDENT
 
 
-def should_queue_for_scholar(score: float, signals: ConfidenceSignals) -> bool:
+def should_queue_for_scholar(
+    score: float,
+    signals: ConfidenceSignals,
+    topic: str | None = None,
+    request_key: str | None = None,
+) -> bool:
     """Only religious answers reach a scholar; general trivia never does.
 
     The comparison is strict, matching ``band_for``: with the default
@@ -286,10 +322,18 @@ def should_queue_for_scholar(score: float, signals: ConfidenceSignals) -> bool:
     sitting precisely on the threshold cannot be queued while the user is shown
     an ordinary hedge.
     """
-    return signals.is_religious and score < SCHOLAR_QUEUE_THRESHOLD
+    if not signals.is_religious:
+        return False
+    active = _get_active_thresholds(topic=topic or signals.topic, request_key=request_key)
+    return score < active["scholar_queue"]
 
 
-def assess(signals: ConfidenceSignals) -> ConfidenceAssessment:
+def assess(
+    signals: ConfidenceSignals,
+    topic: str | None = None,
+    source: str | None = None,
+    request_key: str | None = None,
+) -> ConfidenceAssessment:
     """Score the answer and decide what to do with it."""
     score = compute_confidence(signals)
     try:
@@ -298,7 +342,10 @@ def assess(signals: ConfidenceSignals) -> ConfidenceAssessment:
         metrics.record_confidence_score(score)
     except Exception:  # noqa: BLE001
         pass
-    band = band_for(score)
+
+    effective_topic = topic or signals.topic
+    effective_source = source or signals.source
+    band = band_for(score, topic=effective_topic, source=effective_source, request_key=request_key)
 
     uncertainty_profile: UncertaintyQuantification | None = None
     if signals.is_religious or bool(signals.prompt) or bool(signals.answer_text):
@@ -320,11 +367,27 @@ def assess(signals: ConfidenceSignals) -> ConfidenceAssessment:
         except Exception:  # noqa: BLE001
             logger.exception("Failed to quantify uncertainty profile")
 
+    queued = should_queue_for_scholar(score, signals, topic=effective_topic, request_key=request_key)
+
+    # Record turn telemetry in tuning manager
+    try:
+        from confidence_tuning import get_tuning_manager
+
+        get_tuning_manager().record_turn(
+            score=score,
+            band=band.value,
+            is_religious=signals.is_religious,
+            topic=effective_topic,
+            request_key=request_key,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     return ConfidenceAssessment(
         score=score,
         band=band,
         abstained=band is ConfidenceBand.ABSTAIN,
-        queued=should_queue_for_scholar(score, signals),
+        queued=queued,
         signals=signals.present(),
         signals_used=sorted(signals.present()),
         uncertainty=uncertainty_profile,
@@ -385,6 +448,8 @@ def build_signals(
     prompt: str | None = None,
     hadith_refs: list[Any] | None = None,
     citations: list[Any] | None = None,
+    topic: str | None = None,
+    source: str | None = None,
 ) -> ConfidenceSignals:
     """Assemble signals for a turn, deriving only the text-based one here."""
     return ConfidenceSignals(
@@ -393,6 +458,8 @@ def build_signals(
         expressed_certainty=expressed_certainty(answer),
         is_religious=is_religious,
         is_high_stakes=is_high_stakes,
+        topic=topic,
+        source=source,
         prompt=prompt,
         answer_text=answer,
         hadith_refs=hadith_refs,
@@ -400,12 +467,14 @@ def build_signals(
     )
 
 
-def thresholds() -> dict[str, float]:
+def thresholds(
+    topic: str | None = None,
+    source: str | None = None,
+    request_key: str | None = None,
+) -> dict[str, float]:
     """Current policy configuration, for the stats endpoint and for tests."""
-    return {
-        "low": CONFIDENCE_LOW_THRESHOLD,
-        "high": CONFIDENCE_HIGH_THRESHOLD,
-        "scholar_queue": SCHOLAR_QUEUE_THRESHOLD,
-        "high_stakes_penalty": HIGH_STAKES_PENALTY,
-        "no_signal_prior": NO_SIGNAL_PRIOR,
-    }
+    return _get_active_thresholds(
+        topic=topic,
+        source=source,
+        request_key=request_key,
+    )
