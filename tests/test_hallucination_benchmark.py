@@ -44,7 +44,7 @@ class TestHallucinationDetectors:
         text = "Imam Malik, the founder of the Hanafi school, believed this."
         flags = detect_misattributions(text)
         assert len(flags) > 0
-        assert any(f.hallucination_type == HallucinationType.MISATTHIBUTION for f in flags)
+        assert any(f.hallucination_type == HallucinationType.MISATTRIBUTION for f in flags)
 
     def test_detect_unsupported_claims(self):
         text = "All scholars unanimously agree that this is required."
@@ -87,7 +87,7 @@ class TestBenchmarkRunner:
         assert len(examples) > 0
         assert examples[0].id is not None
 
-    def test_run_benchmark_self):
+    def test_run_benchmark_self(self):
         result = run_benchmark()
         assert result.total_examples > 0
         assert "overall_detection_>85%" in result.pass_criteria
