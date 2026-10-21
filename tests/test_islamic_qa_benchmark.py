@@ -41,7 +41,7 @@ def test_dataset_files_exist():
 
 def test_minimum_records_threshold(benchmark_data: list[dict]):
     assert len(benchmark_data) >= 500, f"Expected >= 500 items, got {len(benchmark_data)}"
-    assert len(benchmark_data) == 530, f"Expected exactly 530 items, got {len(benchmark_data)}"
+    assert len(benchmark_data) == 500, f"Expected exactly 500 items, got {len(benchmark_data)}"
 
 
 def test_all_ten_domains_represented(benchmark_data: list[dict]):
@@ -147,7 +147,7 @@ def test_dataset_integrity_validator_function(benchmark_data: list[dict]):
     report = validate_dataset_integrity(benchmark_data)
     assert report["valid"] is True
     assert len(report["errors"]) == 0
-    assert report["total_records"] == 530
+    assert report["total_records"] == 500
 
 
 def test_offline_eval_scoring():

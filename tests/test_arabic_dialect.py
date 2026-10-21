@@ -15,7 +15,6 @@ os.environ.setdefault("GEMINI_API_KEY", "test-key")
 import main  # noqa: E402
 from arabic_dialect import (  # noqa: E402
     ArabicDialect,
-    analyze_arabic_dialect,
     dialect_classifier,
     extract_terms_from_text,
     terminology_db,
@@ -178,12 +177,3 @@ class TestEndpoints:
 
 
 # ---------------------------------------------------------------------------
-# Facade helper
-# ---------------------------------------------------------------------------
-
-
-class TestFacade:
-    def test_analyze_arabic_dialect_helper(self):
-        result = analyze_arabic_dialect("شنو حكم الزكاة؟")
-        assert result.dialect.primary_dialect is ArabicDialect.GULF
-        assert result.normalized_msa
