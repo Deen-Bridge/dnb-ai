@@ -203,3 +203,11 @@ def detect_tajweed_errors(req: TajweedDetectionRequest) -> TajweedDetectionRespo
 async def analyze_tajweed_endpoint(body: TajweedDetectionRequest) -> TajweedDetectionResponse:
     """Analyze Quranic recitation segments and return structured Tajweed error findings."""
     return detect_tajweed_errors(body)
+
+
+def detect_violations(expected: str, actual: str) -> list[str]:
+    """Compare expected vs actual phoneme/word strings and return Tajweed violation descriptions."""
+    violations: list[str] = []
+    if expected != actual:
+        violations.append("خطأ في النطق أو أحكام التجويد")
+    return violations

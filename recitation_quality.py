@@ -139,7 +139,7 @@ class ProgressReport(BaseModel):
 
 _TAJWEED_AVAILABLE = False
 try:
-    from tajweed_detector import detect_violations as _detect_tajweed_violations  # type: ignore[import-not-found]
+    from tajweed_detector import detect_violations as _detect_tajweed_violations
 
     _TAJWEED_AVAILABLE = True
 except ImportError:
@@ -168,7 +168,7 @@ def detect_tajweed_violations(expected: str, actual: str) -> list[str]:
     """Detect tajweed rule violations with fallback to basic rules."""
     if _TAJWEED_AVAILABLE:
         try:
-            return _detect_tajweed_violations(expected, actual)  # type: ignore[no-any-return]
+            return _detect_tajweed_violations(expected, actual)
         except Exception:
             logger.debug("tajweed_detector raised; falling back to basic rules")
     return _basic_tajweed_check(expected, actual)
