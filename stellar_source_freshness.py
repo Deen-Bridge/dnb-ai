@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -59,7 +59,7 @@ class StellarSourceFreshnessTracker:
         checked_at: datetime,
     ) -> IndexedSourceFreshnessRecord:
         if checked_at.tzinfo is None:
-            checked_at = checked_at.replace(tzinfo=timezone.utc)
+            checked_at = checked_at.replace(tzinfo=UTC)
         digest = hashlib.sha256(content.strip().encode("utf-8")).hexdigest()
         existing = self._records.get(chunk_id)
         if existing is not None:
@@ -74,11 +74,9 @@ class StellarSourceFreshnessTracker:
         self._records[rec.chunk_id] = rec
         return rec
 
-    def evaluate_freshness(
-        self, chunk_id: str, *, now: datetime
-    ) -> RetrievalFreshnessSummary:
+    def evaluate_freshness(self, chunk_id: str, *, now: datetime) -> RetrievalFreshnessSummary:
         if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
+            now = now.replace(tzinfo=UTC)
         rec = self._records.get(chunk_id)
         if rec is None:
             return RetrievalFreshnessSummary(

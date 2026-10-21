@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from stellar_source_freshness import StellarSourceFreshnessTracker
 
 
 def test_unchanged_updated_stale_and_missing_freshness_states() -> None:
     tracker = StellarSourceFreshnessTracker(stale_threshold_days=14)
-    t0 = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    t0 = datetime(2026, 10, 1, tzinfo=UTC)
 
     tracker.record_chunk(
         chunk_id="soroban-fees#1",
