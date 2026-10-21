@@ -524,3 +524,8 @@ async def classify_route(traits: TraitVector) -> ClassificationResponse:
 async def analyze_route(traits: TraitVector) -> AnalysisResponse:
     """Classify a specimen and add legibility, embellishment, and OCR-hint notes."""
     return analyze(traits)
+
+
+from manuscript_upload_analyzer import router as manuscript_upload_router  # noqa: E402
+
+router.include_router(manuscript_upload_router)
