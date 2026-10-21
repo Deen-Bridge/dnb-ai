@@ -100,6 +100,7 @@ from query_optimizer import router as query_optimizer_router
 from quran_recitation import router as quran_recitation_router
 from reasoning_chains import router as reasoning_router
 from reformulation import router as reformulation_router
+from research_orchestration import router as research_orchestration_router
 from review import enqueue_for_review, router as review_router
 from review_store import get_review_store
 from safety import InputGate, OutputCheck, SafetyPipeline, load_policy
@@ -281,6 +282,10 @@ OPENAPI_TAGS = [
     {
         "name": "reasoning",
         "description": "Multi-step Islamic reasoning chains: generate, validate, and verify.",
+    },
+    {
+        "name": "orchestration",
+        "description": "Multi-agent Islamic research orchestration: query decomposition, DAG execution, synthesis, and traces.",
     },
     {
         "name": "vocabulary",
@@ -550,6 +555,9 @@ def _server_error_response(detail: str, hint: str) -> dict[str, Any]:
 # USDC arithmetic on the network the rest of Deen Bridge settles on.
 app.include_router(stellar_router)
 app.include_router(reasoning_router)
+# Research orchestration: decompose complex scholarly queries across Qur'an,
+# hadith, tafsir and fiqh agents, then synthesise and trace the run (#126)
+app.include_router(research_orchestration_router)
 app.include_router(study_router)
 # Quran memorization planner: personalized schedules, revision balance, and adaptive pacing
 app.include_router(memorization_planner_router)

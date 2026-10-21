@@ -566,9 +566,15 @@ class MultiAgentOrchestrator:
         *,
         metadata: Mapping[str, Any] | None = None,
         plan: ExecutionPlan | None = None,
+        task_timeout_seconds: float | None = None,
+        workflow_timeout_seconds: float | None = None,
     ) -> WorkflowResult:
         if not query.strip():
             raise ValueError("Query must not be empty")
+        if task_timeout_seconds is not None and task_timeout_seconds <= 0:
+            raise ValueError("task_timeout_seconds must be positive")
+        if workflow_timeout_seconds is not None and workflow_timeout_seconds <= 0:
+            raise ValueError("workflow_timeout_seconds must be positive")
         if not self._started:
             await self.start()
 
@@ -579,15 +585,17 @@ class MultiAgentOrchestrator:
         started_at = time.monotonic()
         traces: list[TraceSpan] = []
         results: dict[str, TaskResult] = {}
+        effective_workflow_timeout = workflow_timeout_seconds or self.workflow_timeout
 
         try:
-            async with asyncio.timeout(self.workflow_timeout):
+            async with asyncio.timeout(effective_workflow_timeout):
                 await self._execute_plan(
                     workflow_id,
                     execution_plan,
                     metadata or {},
                     results,
                     traces,
+                    task_timeout_seconds,
                 )
         except TimeoutError:
             self.metrics.increment("workflows_timed_out")
@@ -629,6 +637,7 @@ class MultiAgentOrchestrator:
         metadata: Mapping[str, Any],
         results: dict[str, TaskResult],
         traces: list[TraceSpan],
+        task_timeout_seconds: float | None = None,
     ) -> None:
         pending = {task.id: task for task in plan.tasks}
         while pending:
@@ -663,7 +672,9 @@ class MultiAgentOrchestrator:
             if not ready:
                 raise PlanValidationError("Execution plan cannot make progress")
 
-            executions = [self._run_task(workflow_id, task, metadata, results, traces) for task in ready]
+            executions = [
+                self._run_task(workflow_id, task, metadata, results, traces, task_timeout_seconds) for task in ready
+            ]
             completed = await asyncio.gather(*executions)
             for result in completed:
                 results[result.task_id] = result
@@ -676,6 +687,7 @@ class MultiAgentOrchestrator:
         metadata: Mapping[str, Any],
         existing_results: Mapping[str, TaskResult],
         traces: list[TraceSpan],
+        task_timeout_seconds: float | None = None,
     ) -> TaskResult:
         dependency_outputs = {dependency: existing_results[dependency].output for dependency in task.dependencies}
         context = AgentContext(
@@ -688,14 +700,14 @@ class MultiAgentOrchestrator:
         fallback_name = task.fallback_agent or self.registry.get(task.agent).fallback_agent
         started_at = time.monotonic()
         try:
-            output = await self._invoke(task.agent, task, context)
+            output = await self._invoke(task.agent, task, context, task_timeout_seconds)
             used_agent = task.agent
             fallback_used = False
         except Exception as primary_error:
             if fallback_name is None or fallback_name == task.agent:
                 return self._failed_result(task, task.agent, primary_error, started_at, traces, workflow_id)
             try:
-                output = await self._invoke(fallback_name, task, context)
+                output = await self._invoke(fallback_name, task, context, task_timeout_seconds)
                 used_agent = fallback_name
                 fallback_used = True
                 self.metrics.increment("fallbacks_succeeded")
@@ -728,7 +740,13 @@ class MultiAgentOrchestrator:
             fallback_used=fallback_used,
         )
 
-    async def _invoke(self, agent_name: str, task: AgentTask, context: AgentContext) -> Any:
+    async def _invoke(
+        self,
+        agent_name: str,
+        task: AgentTask,
+        context: AgentContext,
+        task_timeout_seconds: float | None = None,
+    ) -> Any:
         agent = self.registry.get(agent_name)
         breaker = self._breakers[agent_name]
         if not await breaker.allow():
@@ -738,7 +756,7 @@ class MultiAgentOrchestrator:
         limiter = self._limiters[agent_name]
         semaphore = self._semaphores[agent_name]
         await limiter.acquire()
-        timeout = task.timeout_seconds or self.default_task_timeout
+        timeout = task.timeout_seconds or task_timeout_seconds or self.default_task_timeout
         try:
             async with semaphore:
                 async with asyncio.timeout(timeout):
