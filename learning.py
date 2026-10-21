@@ -599,3 +599,8 @@ async def recommend_learning_path(
     model that cannot produce a grounded path after retries returns ``502``.
     """
     return _generate_learning_path(generator, request)
+
+
+from quiz_analytics import router as quiz_analytics_router  # noqa: E402
+
+router.include_router(quiz_analytics_router)
