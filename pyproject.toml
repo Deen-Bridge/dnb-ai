@@ -90,6 +90,31 @@ module = [
 ]
 ignore_missing_imports = true
 
+# Coverage is scoped to application modules. Run with
+# `pytest --cov --cov-report=term-missing` (see `make coverage`); the gate below
+# only applies when --cov is passed. Ratchet fail_under up as tests land.
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "*/tests/*",
+    "scripts/*",
+    "conftest.py",
+    "venv/*",
+    ".venv/*",
+    "generate_benchmark.py",
+]
+
+[tool.coverage.report]
+fail_under = 20
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
 [tool.evaluation]
 correlation_target = 0.85
 inter_judge_agreement_target = 0.80

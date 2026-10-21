@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -6,6 +7,22 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+__all__ = [
+    "AgentCapability",
+    "ExecutionMode",
+    "AgentStatus",
+    "AgentTask",
+    "TaskResult",
+    "CircuitBreaker",
+    "SpecializedAgent",
+    "MessageBroker",
+    "AgentRegistry",
+    "QueryAnalysisEngine",
+    "DAGScheduler",
+    "ResultSynthesisPipeline",
+    "MultiAgentOrchestrator",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +132,15 @@ class SpecializedAgent:
                 return TaskResult(
                     task_id=task.task_id, agent_name=self.name, success=True, data=result_data, latency_ms=latency
                 )
+        except asyncio.TimeoutError:
+            latency = (time.time() - start_time) * 1000
+            self.circuit_breaker.record_failure()
+            self.status = AgentStatus.FAILED
+            self.metrics["failures"] += 1
+            logger.warning(f"Agent {self.name} timed out on task {task.task_id}")
+            return TaskResult(
+                task_id=task.task_id, agent_name=self.name, success=False, error="Task timed out", latency_ms=latency
+            )
         except Exception as e:
             latency = (time.time() - start_time) * 1000
             self.circuit_breaker.record_failure()
@@ -124,6 +150,13 @@ class SpecializedAgent:
             return TaskResult(
                 task_id=task.task_id, agent_name=self.name, success=False, error=str(e), latency_ms=latency
             )
+        finally:
+            if self.status == AgentStatus.BUSY:
+                self.status = AgentStatus.IDLE
+
+    def supports_cancellation(self) -> bool:
+        """Return True if the handler is a coroutine function that can be cancelled."""
+        return inspect.iscoroutinefunction(self.handler)
 
 
 class MessageBroker:
@@ -557,10 +590,17 @@ class MultiAgentOrchestrator:
         for level in dag_levels:
             coros = []
             for task in level:
+                if task.task_id in ctx.get("cancelled_tasks", set()):
+                    all_results.append(
+                        TaskResult(task_id=task.task_id, agent_name="cancelled", success=False, error="Cancelled")
+                    )
+                    continue
                 subtask = next(
                     (st for st in plan.subtasks if st.subtask_id == task.task_id), None
                 )
                 agent = self.matcher.match(subtask) if subtask else None
+                if agent is None:
+                    agent = self.registry.get_agent_by_capability(task.agent_capability)
                 if agent:
                     coros.append(self._execute_with_timing(agent, task, ctx))
                 else:
