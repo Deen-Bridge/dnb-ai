@@ -170,4 +170,3 @@ async def test_orchestrator_cancellation():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert task.cancelled()
-

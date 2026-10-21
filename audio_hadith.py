@@ -744,9 +744,7 @@ def extract_lecture_transcript(
     topics = _segment_topics(segments)
     citations = _detect_citations(segments)
     summary, takeaways = _summarize(segments, topics)
-    searchable = "\n".join(
-        f"[{s.start:.1f}-{s.end:.1f}] {s.speaker}: {s.text}" for s in segments
-    )
+    searchable = "\n".join(f"[{s.start:.1f}-{s.end:.1f}] {s.speaker}: {s.text}" for s in segments)
     return LectureResponse(
         format=fmt or "unknown",
         language=language,

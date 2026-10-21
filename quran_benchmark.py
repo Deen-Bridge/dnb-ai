@@ -1034,8 +1034,10 @@ def detect_language(text: str) -> str:
     """Heuristic language detection for Arabic, English, and Urdu."""
     if not text:
         return "unknown"
-    arabic_chars = sum(1 for ch in text if "\u0600" <= ch <= "\u06FF")
-    urdu_chars = sum(1 for ch in text if "\u0600" <= ch <= "\u06FF" and ch in "\u0679\u0688\u0691\u06BA\u06BE\u06C1\u06D2")
+    arabic_chars = sum(1 for ch in text if "\u0600" <= ch <= "\u06ff")
+    urdu_chars = sum(
+        1 for ch in text if "\u0600" <= ch <= "\u06ff" and ch in "\u0679\u0688\u0691\u06ba\u06be\u06c1\u06d2"
+    )
     latin_chars = sum(1 for ch in text if ch.isascii() and ch.isalpha())
     total = max(len(text), 1)
     if urdu_chars / total > 0.05:
@@ -1063,31 +1065,20 @@ def run_transcript_benchmark(
 
         passed = False
         if cat == "audio_extraction":
-            passed = extract_audio_streams(case.get("video_format", "")) == case.get(
-                "expected_audio_streams", 0
-            )
+            passed = extract_audio_streams(case.get("video_format", "")) == case.get("expected_audio_streams", 0)
         elif cat == "speaker_diarization":
-            passed = diarization_valid(
-                case.get("segments", []), case.get("expected_speakers", 0)
-            )
+            passed = diarization_valid(case.get("segments", []), case.get("expected_speakers", 0))
         elif cat == "topic_segmentation":
-            passed = topic_segmentation_valid(
-                case.get("boundaries_sec", []), case.get("expected_topics", [])
-            )
+            passed = topic_segmentation_valid(case.get("boundaries_sec", []), case.get("expected_topics", []))
         elif cat == "timestamping":
             passed = timestamps_valid(case.get("key_points", []))
         elif cat == "citation_detection":
-            text = " ".join(
-                c.get("reference", "") for c in case.get("expected_citations", [])
-            )
+            text = " ".join(c.get("reference", "") for c in case.get("expected_citations", []))
             detected = detect_citations(text)
             passed = len(detected) >= len(case.get("expected_citations", []))
         elif cat == "multilingual":
             langs = case.get("languages", [])
-            passed = (
-                case.get("expected_detected") in langs
-                and set(langs).issubset(_SUPPORTED_LANGUAGES)
-            )
+            passed = case.get("expected_detected") in langs and set(langs).issubset(_SUPPORTED_LANGUAGES)
         elif cat == "searchable_metadata":
             passed = bool(case.get("required_fields"))
         elif cat == "summary_generation":
