@@ -42,14 +42,14 @@ def test_evaluate_knowledge_assessment_levels_and_growth() -> None:
 
 
 def test_questionnaire_and_evaluate_endpoints() -> None:
-    q_resp = client.get("/study/knowledge-assessment/questionnaire", params={"discipline": "fiqh"})
+    q_resp = client.get("/knowledge-assessment/questionnaire", params={"discipline": "fiqh"})
     assert q_resp.status_code == 200
     items = q_resp.json()
     assert items
     assert all(i["discipline"] == "fiqh" for i in items)
 
     ev_resp = client.post(
-        "/study/knowledge-assessment/evaluate",
+        "/knowledge-assessment/evaluate",
         json={
             "learner_id": "user-101",
             "responses": [{"discipline": "aqeedah", "difficulty": 3, "is_correct": True}],
