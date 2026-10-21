@@ -734,6 +734,12 @@ behave read-only (formats + terminology) or answer with the built-in template
 responder. WAV uploads also get a noise/SNR assessment that recommends a
 denoising profile.
 
+### Quran phoneme alignment
+
+Align reading-specific Quran phoneme references to acoustic frames, stream live
+model frames, or use an optional pinned CTC audio model through the authenticated
+`/quran/alignment` API. See [model setup, API examples, and accuracy limits](docs/phoneme-alignment.md).
+
 ### Answer feedback & the quality loop
 
 Every chat answer carries a stable `message_id`, so the frontend can rate a
