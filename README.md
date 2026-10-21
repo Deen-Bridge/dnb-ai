@@ -870,6 +870,10 @@ available with `SAFETY_LIVE_TESTS=1 GEMINI_API_KEY=... pytest -q tests/redteam/t
 
 Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI runs lint and syntax checks on every PR (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
+### Render keep-alive
+
+[`keep-render-awake.yml`](.github/workflows/keep-render-awake.yml) is intentional: Render's free-tier web services sleep after a period without traffic, so the workflow pings the production `/ping` endpoint every 15 minutes to keep the FastAPI instance warm and avoid cold-start latency for the next user. This consumes scheduled GitHub Actions minutes. If the service moves to a plan that no longer sleeps, remove the workflow; if the sleep window changes, adjust the cron interval deliberately.
+
 ## Contributing
 
 - Pull requests target **`dev`**; eligible changes are squash-merged automatically after CI and review gates pass.
