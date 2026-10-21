@@ -626,3 +626,8 @@ async def update_profile_endpoint(user_id: str, body: UpdateProfileRequest) -> U
         preferences=body.preferences,
     )
     return profile
+
+
+from token_budget import router as token_budget_router  # noqa: E402
+
+router.include_router(token_budget_router)
