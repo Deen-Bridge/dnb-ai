@@ -545,3 +545,8 @@ async def generate_study_content(request: StudyGenerateRequest):
         difficulty=request.difficulty,
         count=request.count,
     )
+
+
+from knowledge_assessment import router as knowledge_assessment_router  # noqa: E402
+
+router.include_router(knowledge_assessment_router)
