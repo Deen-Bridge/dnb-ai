@@ -482,3 +482,8 @@ async def element_types() -> list[ElementTypeInfo]:
         ElementTypeInfo(type=element_type, description=description)
         for element_type, description in _ELEMENT_TYPE_DESCRIPTIONS.items()
     ]
+
+
+from scanned_book_analyzer import router as scanned_book_router  # noqa: E402
+
+router.include_router(scanned_book_router)
