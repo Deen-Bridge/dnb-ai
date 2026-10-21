@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from arabic_ocr import (
+    BoundingBox,
     CalligraphyDetection,
     CalligraphyStyle,
     CharacterResult,
@@ -403,3 +404,70 @@ async def test_full_pipeline():
     assert len(result.image_hash) == 64  # SHA-256
     assert result.calligraphy is not None
     assert 0.0 <= result.confidence.overall <= 1.0
+
+
+class TestMultiLineAndDegradedInputCoverage:
+    """Expanded coverage for multi-line OCR, degraded regions, and error paths (#431)."""
+
+    def test_multiline_post_processing_and_confidence_aggregation(self):
+        lines = [
+            LineResult(
+                text="بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
+                words=[
+                    WordResult(
+                        text="بِسْمِ",
+                        confidence=0.92,
+                        characters=[
+                            CharacterResult(char="ب", confidence=0.95, is_diacritic=False),
+                            CharacterResult(char="ِ", confidence=0.82, is_diacritic=True),
+                        ],
+                        diacritic_count=1,
+                    ),
+                ],
+                confidence=0.92,
+            ),
+            LineResult(
+                text="الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ",
+                words=[
+                    WordResult(
+                        text="الْحَمْدُ",
+                        confidence=0.88,
+                        characters=[
+                            CharacterResult(char="ا", confidence=0.91, is_diacritic=False),
+                            CharacterResult(char="ْ", confidence=0.79, is_diacritic=True),
+                        ],
+                        diacritic_count=1,
+                    ),
+                ],
+                confidence=0.88,
+            ),
+        ]
+        raw_text = "\n".join(line.text for line in lines)
+        corrected_text, corrected_lines, corrections = apply_post_processing(raw_text, lines)
+        assert len(corrected_lines) == 2
+        assert "بِسْمِ" in corrected_text
+        assert isinstance(corrections, list)
+
+        clean_q = calculate_confidence_metrics(corrected_lines, damaged_regions=None)
+        damaged_q = calculate_confidence_metrics(
+            corrected_lines,
+            damaged_regions=[
+                BoundingBox(x=0, y=0, width=20, height=20),
+                BoundingBox(x=30, y=30, width=15, height=15),
+            ],
+        )
+        assert damaged_q.damaged_region_penalty == 0.1
+        assert damaged_q.overall < clean_q.overall
+
+    def test_word_confidence_diacritic_only_and_empty_lines_metrics(self):
+        diacritic_only = WordResult(
+            text="ِ",
+            confidence=0.9,
+            characters=[CharacterResult(char="ِ", confidence=0.9, is_diacritic=True)],
+            diacritic_count=1,
+        )
+        assert calculate_word_confidence(diacritic_only) == 0.5
+
+        empty_metrics = calculate_confidence_metrics([])
+        assert empty_metrics.overall == 0.0
+        assert empty_metrics.word_level == 0.0
