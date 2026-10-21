@@ -50,14 +50,10 @@ def build_grounded_stellar_answer(
         title = cit.title.strip()
         url = cit.canonical_url.strip()
         if not pid or not title or not url.startswith("https://"):
-            raise ValueError(
-                "Citation requires non-empty passage_id, title, and HTTPS canonical_url"
-            )
+            raise ValueError("Citation requires non-empty passage_id, title, and HTTPS canonical_url")
         if pid not in seen_ids:
             seen_ids.add(pid)
-            valid_citations.append(
-                StellarSourceCitation(passage_id=pid, title=title, canonical_url=url)
-            )
+            valid_citations.append(StellarSourceCitation(passage_id=pid, title=title, canonical_url=url))
 
     cleaned_answer = answer_text.strip()
     if is_protocol_specific and not valid_citations:
