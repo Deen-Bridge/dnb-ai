@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import base64
 import binascii
-from dataclasses import asdict, dataclass
 import struct
+from dataclasses import asdict, dataclass
 from typing import Any
 
 VERSION_BYTE_ACCOUNT_ID = 6 << 3  # 'G' (48)
@@ -45,9 +45,7 @@ class StrKeyValidationResult:
         return asdict(self)
 
 
-def validate_stellar_account_strkey(
-    address: str, *, allow_muxed: bool = True
-) -> StrKeyValidationResult:
+def validate_stellar_account_strkey(address: str, *, allow_muxed: bool = True) -> StrKeyValidationResult:
     """Validate checksum, version byte, and payload length without echoing sensitive inputs."""
     candidate = address.strip()
     if not candidate:
@@ -108,21 +106,13 @@ def validate_stellar_account_strkey(
             error_message="Secret seeds are forbidden.",
         )
 
-    if (
-        version_byte == VERSION_BYTE_ACCOUNT_ID
-        and len(payload) == 32
-        and len(candidate) == 56
-    ):
+    if version_byte == VERSION_BYTE_ACCOUNT_ID and len(payload) == 32 and len(candidate) == 56:
         return StrKeyValidationResult(
             is_valid=True,
             address_kind="ed25519_public_key",
         )
 
-    if (
-        version_byte == VERSION_BYTE_MUXED_ACCOUNT
-        and len(payload) == 40
-        and len(candidate) == 69
-    ):
+    if version_byte == VERSION_BYTE_MUXED_ACCOUNT and len(payload) == 40 and len(candidate) == 69:
         if not allow_muxed:
             return StrKeyValidationResult(
                 is_valid=False,
