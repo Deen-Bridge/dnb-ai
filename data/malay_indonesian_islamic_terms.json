@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "language": "ms-id",
+  "total_terms": 5,
+  "description": "Islamic terminology database for Malay and Indonesian with Arabic loanwords, regional variations, and Jawi support.",
+  "terms": [
+    {
+      "id": "ms-id-ibada-solat",
+      "malay_term": "Solat",
+      "indonesian_term": "Shalat",
+      "jawi_term": "صلاة",
+      "arabic_original": "صلاة",
+      "arabic_transliteration": "Salat",
+      "english_equivalent": "Prayer / Daily Ritual Prayer",
+      "category": "ibada",
+      "definition_ms": "Rukun Islam kedua yang merangkumi perbuatan dan perkataan tertentu yang dimulakan dengan takbiratul ihram dan disudahi dengan salam.",
+      "definition_id": "Rukun Islam kedua yang terdiri dari perkataan dan perbuatan tertentu yang dimulai dengan takbir dan diakhiri dengan salam.",
+      "variants": ["solat", "shalat", "sembahyang", "salat"],
+      "regional_notes": "'Solat' is standard in Malaysia, Brunei, and Singapore; 'Shalat' or 'Salat' is standard in Indonesia. 'Sembahyang' is traditional."
+    },
+    {
+      "id": "ms-id-ibada-puasa",
+      "malay_term": "Puasa",
+      "indonesian_term": "Puasa",
+      "jawi_term": "ڤواس",
+      "arabic_original": "صوم",
+      "arabic_transliteration": "Sawm",
+      "english_equivalent": "Fasting",
+      "category": "ibada",
+      "definition_ms": "Menahan diri daripada makan, minum dan perkara yang membatalkan puasa dari terbit fajar hingga terbenam matahari.",
+      "definition_id": "Menahan diri dari makan, minum, dan segala yang membatalkan dari terbit fajar hingga terbenam matahari dengan niat.",
+      "variants": ["puasa", "shaum", "sawm"],
+      "regional_notes": "'Puasa' is universal in Malay and Indonesian. 'Shaum' is often used in formal or religious discourse in Indonesia."
+    }
+  ]
+}
