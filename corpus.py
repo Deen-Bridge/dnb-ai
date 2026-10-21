@@ -1,6 +1,9 @@
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DATA_PATH = Path(__file__).parent / "data" / "quran_uthmani.json"
 RELATIONSHIP_DATA_PATH = Path(__file__).parent / "data" / "quran_relationships.json"
@@ -157,6 +160,6 @@ corpus = QuranCorpus()
 if __name__ == "__main__":
     # Build relationships on demand if file missing.
     if not corpus.relationship_file.exists():
-        print("Relationship data not found. Building now...")
+        logger.info("Relationship data not found. Building now...")
         corpus.build_relationships(threshold=0.2)
-        print(f"Relationships built and saved to {corpus.relationship_file}")
+        logger.info("Relationships built and saved to %s", corpus.relationship_file)
