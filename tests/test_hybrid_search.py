@@ -245,7 +245,7 @@ class TestAnalyzeQuery:
         assert analysis.mode == "semantic"
         assert analysis.signals == ["override"]
 
-    def test_invalid_override_raises(self):
+    def test_invalid_override_raises(self) -> None:
         with pytest.raises(ValueError):
             analyze_query("patience", override="aggressive")  # type: ignore[arg-type]
 
