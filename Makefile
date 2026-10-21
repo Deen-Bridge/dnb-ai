@@ -1,4 +1,4 @@
-.PHONY: dev run install lint test clean
+.PHONY: dev run install lint test coverage clean
 
 dev:
 	python3 -m uvicorn main:app --reload
@@ -14,6 +14,9 @@ lint:
 
 test:
 	pytest -q tests/redteam tests/test_study.py tests/test_semantic_cache.py tests/test_fiqh.py tests/test_hadith.py tests/test_hadith_research.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py
+
+coverage:
+	pytest -q --cov --cov-report=term-missing
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
