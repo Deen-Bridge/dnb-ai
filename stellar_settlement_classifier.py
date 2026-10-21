@@ -51,11 +51,7 @@ def classify_payment_settlement(
             ),
         )
 
-    if (
-        ledger_lookup_status == "found"
-        and ledger_sequence is not None
-        and ledger_sequence > 0
-    ):
+    if ledger_lookup_status == "found" and ledger_sequence is not None and ledger_sequence > 0:
         if ledger_tx_successful is True:
             return StellarSettlementEvaluation(
                 network=net,
@@ -63,9 +59,7 @@ def classify_payment_settlement(
                 is_settled=True,
                 ledger=ledger_sequence,
                 is_provider_stale=False,
-                explanation=(
-                    f"Transaction is confirmed in {net} ledger {ledger_sequence} with successful status."
-                ),
+                explanation=(f"Transaction is confirmed in {net} ledger {ledger_sequence} with successful status."),
             )
         if ledger_tx_successful is False:
             return StellarSettlementEvaluation(
@@ -74,9 +68,7 @@ def classify_payment_settlement(
                 is_settled=False,
                 ledger=ledger_sequence,
                 is_provider_stale=False,
-                explanation=(
-                    f"Transaction was included in {net} ledger {ledger_sequence} but failed execution."
-                ),
+                explanation=(f"Transaction was included in {net} ledger {ledger_sequence} but failed execution."),
             )
 
     if ledger_lookup_status == "pending" or (
