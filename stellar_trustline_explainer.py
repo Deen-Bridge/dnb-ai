@@ -6,8 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 OFFICIAL_TRUSTLINE_DOC_URL = (
-    "https://developers.stellar.org/docs/learn/fundamentals/"
-    "stellar-data-structures/accounts#trustlines"
+    "https://developers.stellar.org/docs/learn/fundamentals/stellar-data-structures/accounts#trustlines"
 )
 
 

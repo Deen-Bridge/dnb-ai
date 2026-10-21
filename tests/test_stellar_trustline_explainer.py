@@ -8,9 +8,7 @@ ISSUER = "G" + "C" * 55
 
 
 def test_native_xlm_requires_no_trustline() -> None:
-    res = explain_trustline_requirement(
-        network="public", asset_code="XLM", asset_issuer=None
-    )
+    res = explain_trustline_requirement(network="public", asset_code="XLM", asset_issuer=None)
     assert res.asset_type == "native"
     assert res.can_receive_payment is True
     assert res.subentry_reserve_increase == 0
