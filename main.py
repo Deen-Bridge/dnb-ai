@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import google.generativeai as genai
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -210,7 +210,143 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 EVIDENCE_VERIFICATION_ENABLED = os.getenv("EVIDENCE_VERIFICATION_ENABLED", "true").lower() not in {"0", "false", "off"}
 
-app = FastAPI(title="DeenBridge AI API")
+# Tag groups for the auto-generated OpenAPI reference at /docs. Endpoints
+# registered on `app` below declare their tag explicitly; mounted routers
+# (stellar, tafsir, study, …) carry their own tags in their modules. Every
+# tag used anywhere in the API is listed here so Swagger shows a description
+# for each group instead of a bare heading.
+OPENAPI_TAGS = [
+    {
+        "name": "chat",
+        "description": (
+            "LLM question answering with citations, content-safety gating, confidence "
+            "scoring, and scholar-review hand-off. `POST /chat` returns JSON; "
+            "`POST /chat/stream` returns the same turn as Server-Sent Events."
+        ),
+    },
+    {
+        "name": "chats",
+        "description": "Chat session listing, per-chat history retrieval, and deletion.",
+    },
+    {
+        "name": "feedback",
+        "description": "Answer-quality feedback submission plus admin-only analytics views.",
+    },
+    {
+        "name": "memory",
+        "description": "Long-term per-user memory: read the stored profile or erase it.",
+    },
+    {
+        "name": "evidence",
+        "description": "Offline verification of the evidence behind a generated answer.",
+    },
+    {
+        "name": "islamic-content",
+        "description": "Curated Islamic reference corpora served without an LLM call.",
+    },
+    {
+        "name": "observability",
+        "description": "Health/liveness probes, telemetry metrics, cache statistics, and confidence-policy introspection.",
+    },
+    {
+        "name": "scholar-review",
+        "description": "Scholar-review queue: pending items, verdicts, and stats — the human end of the abstention loop.",
+    },
+    {
+        "name": "stellar",
+        "description": "Read-only Stellar wallet and payment lookups plus deterministic USDC arithmetic.",
+    },
+    {
+        "name": "tafsir",
+        "description": "Grounded, attributed ayah explanations served from curated tafsir sources.",
+    },
+    {
+        "name": "study",
+        "description": "Study-content generator: schema-validated quizzes and flashcards.",
+    },
+    {
+        "name": "history",
+        "description": "Historical context injection: asbab al-nuzul, hadith circumstances, scholars, and timelines.",
+    },
+    {
+        "name": "hadith-research",
+        "description": "Hadith research agent: retrieval, isnad analysis, rijal cross-referencing, and matn variants.",
+    },
+    {
+        "name": "hadith-context",
+        "description": "Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis.",
+    },
+    {
+        "name": "reasoning",
+        "description": "Multi-step Islamic reasoning chains: generate, validate, and verify.",
+    },
+    {
+        "name": "vocabulary",
+        "description": "Quranic vocabulary analysis and learning: frequencies, roots, and verse examples.",
+    },
+    {
+        "name": "reformulation",
+        "description": "Deterministic, dependency-free question-reformulation suggestions.",
+    },
+    {
+        "name": "model-routing",
+        "description": "Model routing intelligence: classify a query, pick a model, and review routing metrics.",
+    },
+    {
+        "name": "misinformation",
+        "description": "Religious misinformation flagging: scan answers, validate quotations, and record corrections.",
+    },
+    {
+        "name": "sentiment",
+        "description": "Deterministic religious sentiment analysis over answer and comment text.",
+    },
+    {
+        "name": "arabic-dialect",
+        "description": "Arabic dialect identification (Egyptian, Khaleeji, Shami) and normalization to MSA.",
+    },
+    {
+        "name": "arabic-ocr",
+        "description": "OCR of Arabic Islamic manuscript images, including page layout extraction.",
+    },
+    {
+        "name": "swahili",
+        "description": "Swahili support: code-switching detection, dialect handling, and terminology.",
+    },
+    {
+        "name": "audio-hadith",
+        "description": "Audio hadith verification: match a transcript or recording against the authenticated corpus.",
+    },
+    {
+        "name": "calligraphy",
+        "description": "Islamic calligraphy style analysis and style catalog.",
+    },
+    {
+        "name": "page-analysis",
+        "description": "Islamic book page layout analysis: elements, regions, and reading order.",
+    },
+    {
+        "name": "video-analysis",
+        "description": "Progressive screen-recording analysis for Islamic lectures.",
+    },
+    {
+        "name": "db-optimizer",
+        "description": "Offline database query profiling and anti-pattern detection.",
+    },
+]
+
+app = FastAPI(
+    title="DeenBridge AI API",
+    description=(
+        "AI backend for Deen Bridge: Islamic Q&A with verified citations, madhhab-aware "
+        "framing, content-safety gating, confidence scoring, and scholar-review hand-off.\n\n"
+        "**Errors:** every non-2xx response shares the `{detail, hint}` envelope — `detail` is "
+        "the error summary (or the raw validation-error list on 422) and `hint` is an "
+        "actionable suggestion. Rate-limited responses also set a `Retry-After` header.\n\n"
+        "**Headers:** mutating chat endpoints return telemetry headers such as `X-Trace-Id`, "
+        "`X-LLM-Total-Tokens`, `X-LLM-Cost-USD`, `X-Handler-Latency-Ms`, and `X-Cache-Tier`."
+    ),
+    openapi_tags=OPENAPI_TAGS,
+)
 
 # --- Service API-key authentication ---
 # A shared secret between the DeenBridge backend/frontend and this service.
@@ -324,6 +460,90 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+# --- OpenAPI error-response documentation ---------------------------------
+# The handlers above, and every APIException raised by the routes below,
+# serialize to the same {"detail", "hint"} envelope. These helpers keep the
+# `responses={...}` blocks on the route decorators honest so /docs shows the
+# real error shapes instead of a bare "Unexpected error".
+
+
+class ErrorBody(BaseModel):
+    """Standard error envelope returned by every non-2xx response."""
+
+    detail: Any = Field(
+        ...,
+        description=(
+            "Human-readable error summary (string), or the raw Pydantic validation-error list when status is 422."
+        ),
+    )
+    hint: str | None = Field(
+        None,
+        description="Actionable suggestion for fixing or retrying the request.",
+    )
+
+
+_RETRY_AFTER_HEADER = {
+    "Retry-After": {
+        "description": "Seconds to wait before retrying.",
+        "schema": {"type": "integer"},
+    },
+}
+
+
+def _json_error(
+    description: str,
+    example: dict[str, Any],
+    *,
+    headers: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build one OpenAPI ``responses`` entry backed by the ErrorBody schema.
+
+    FastAPI reads the ``model`` key at the response-object level (it is
+    stripped before serialization); the ``example`` rides along in
+    ``content`` alongside the generated schema.
+    """
+    response: dict[str, Any] = {
+        "description": description,
+        "model": ErrorBody,
+        "content": {"application/json": {"example": example}},
+    }
+    if headers:
+        response["headers"] = headers
+    return response
+
+
+def _validation_error_response() -> dict[str, Any]:
+    """422 raised by the RequestValidationError handler for schema mismatches."""
+    return _json_error(
+        "Request validation failed — a body or query parameter is missing or invalid.",
+        {
+            "detail": [{"loc": ["body", "prompt"], "msg": "Field required", "type": "missing"}],
+            "hint": (
+                "Validation failed (Field 'prompt': Field required). "
+                "Please provide valid input according to the API schema."
+            ),
+        },
+    )
+
+
+def _rate_limited_response() -> dict[str, Any]:
+    """429 from the slowapi limiter, the chat token quota, or upstream Gemini."""
+    return _json_error(
+        "Rate limit or hourly token quota exceeded. Rate limiting is keyed by "
+        "X-API-Key or client IP; the token quota is keyed by user_id when supplied.",
+        {
+            "detail": "Rate limit exceeded: 60 per 60 seconds",
+            "hint": "Too many requests sent. Please wait 60 seconds before retrying.",
+        },
+        headers=_RETRY_AFTER_HEADER,
+    )
+
+
+def _server_error_response(detail: str, hint: str) -> dict[str, Any]:
+    """500 emitted by a route's own exception handling."""
+    return _json_error("Unexpected server error.", {"detail": detail, "hint": hint})
+
+
 # Stellar integration: read-only wallet and payment lookups plus deterministic
 # USDC arithmetic on the network the rest of Deen Bridge settles on.
 app.include_router(stellar_router)
@@ -373,11 +593,69 @@ from adhkar import corpus as adhkar_corpus
 
 
 class AdhkarRecommendRequest(BaseModel):
-    category: str | None = None
-    query: str | None = None
+    category: str | None = Field(
+        None, description="Corpus category to match, e.g. 'morning' or 'evening' (case-insensitive)."
+    )
+    query: str | None = Field(
+        None,
+        description="Free-text needle searched over the entry's arabic, transliteration, translation, category, and source fields.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"category": "morning", "query": "ayat al-kursi"},
+                {"query": "sleep"},
+                {"category": "evening"},
+            ]
+        }
+    }
 
 
-@app.post("/adhkar/recommend")
+class AdhkarRecommendResponse(BaseModel):
+    matches: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Matching adhkar entries (id, title, arabic, transliteration, translation, category, source, grading). Empty when nothing matches.",
+    )
+    message: str = Field(..., description="Human-readable summary of how many supplications matched.")
+
+
+@app.post(
+    "/adhkar/recommend",
+    response_model=AdhkarRecommendResponse,
+    summary="Recommend adhkar (supplications) from the bundled corpus",
+    description=(
+        "Searches the bundled authenticated adhkar corpus (`data/adhkar.json`) by category "
+        "and/or free-text query. Fully offline and deterministic — no LLM call, no safety "
+        "pipeline. Both filters are optional; supply neither to receive the whole corpus."
+    ),
+    tags=["islamic-content"],
+    responses={
+        200: {
+            "description": "Matching supplications; `matches` is empty when nothing qualifies.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "matches": [
+                            {
+                                "id": "morning_1",
+                                "title": "Morning adhkar",
+                                "arabic": "أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ",
+                                "transliteration": "Asbahna wa asbaha al-mulku lillah",
+                                "translation": "We have reached the morning and the dominion belongs to Allah.",
+                                "category": "morning",
+                                "source": "Hisnul Muslim",
+                                "grading": "authentic",
+                            }
+                        ],
+                        "message": "Found 1 authenticated supplication(s) matching your request.",
+                    }
+                }
+            },
+        },
+        422: _validation_error_response(),
+    },
+)
 async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
     matches = adhkar_corpus.search(category=body.category, query=body.query)
     message = (
@@ -429,7 +707,130 @@ class EvidenceVerificationResult(BaseModel):
 
 
 class EvidenceVerifyRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=30000)
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=30000,
+        description="Generated answer to audit, including any <<<CITATIONS>>> block it contains.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "text": (
+                        'Patience is beloved by Allah. "Indeed, Allah is with the patient" '
+                        '(2:153). <<<CITATIONS>>>[{"type": "quran", "surah": 2, '
+                        '"ayah_start": 153, "surah_name": "Al-Baqarah"}]<<<END_CITATIONS>>>'
+                    )
+                }
+            ]
+        }
+    }
+
+
+# --- OpenAPI response models for the app-level endpoints -------------------
+
+
+class HistoryMessage(BaseModel):
+    """One persisted chat turn as returned by GET /chat/{chat_id}/history."""
+
+    role: str = Field(..., description="Turn author: 'user' or 'model' (Gemini role names).")
+    text: str = Field(..., description="Turn content, with system context stripped from user turns.")
+
+    model_config = {"extra": "allow"}
+
+
+class UserChatSummary(BaseModel):
+    """Listed chat session metadata for GET /user/{user_id}/chats."""
+
+    chat_id: str
+    title: str = Field(..., description="First user message (truncated to 80 chars), or a 'Chat <id>' fallback.")
+    snippet: str = Field(..., description="Latest message truncated to 120 chars.")
+    message_count: int
+    created_at: float | None = Field(None, description="Session creation timestamp (epoch seconds); null when unknown.")
+
+
+class UserChatsResponse(BaseModel):
+    chats: list[UserChatSummary] = Field(
+        default_factory=list, description="All sessions for the user, most recent first."
+    )
+
+
+class MessageResponse(BaseModel):
+    """Generic {'message': ...} acknowledgement used by delete endpoints."""
+
+    message: str
+
+
+class FeedbackSubmitResponse(BaseModel):
+    status: str = Field(..., description="'ok' once the record is stored.")
+    feedback_id: str = Field(..., description="Server-assigned id of the (possibly overwritten) feedback record.")
+
+
+class FeedbackStatsResponse(BaseModel):
+    """Aggregate quality metrics from GET /feedback/stats."""
+
+    total: int
+    up: int
+    down: int
+    up_ratio: float | None = Field(
+        None, description="up / total, rounded to 4 decimals; null when there are no records."
+    )
+    by_category: dict[str, dict[str, int]] = Field(
+        default_factory=dict, description="Taxonomy category → {up, down} counts."
+    )
+    by_model: dict[str, dict[str, int]] = Field(default_factory=dict, description="Model name → {up, down} counts.")
+    by_day: dict[str, dict[str, int]] = Field(
+        default_factory=dict, description="YYYY-MM-DD → {up, down} counts for the last 14 distinct days."
+    )
+
+
+class FeedbackRecordsResponse(BaseModel):
+    records: list[dict[str, Any]] = Field(default_factory=list, description="Stored feedback records, newest first.")
+
+
+class PingResponse(BaseModel):
+    status: str = Field(..., description="Always 'ok' when the process is alive.")
+
+
+class HealthResponse(BaseModel):
+    """Readiness payload from GET /health."""
+
+    status: str = Field(..., description="'ok' (200) or 'unhealthy' (503).")
+    version: str | None = Field(None, description="Reported FastAPI app version.")
+    checks: dict[str, str] = Field(
+        default_factory=dict, description="Named readiness checks, each 'ok'/'fail'/'skipped'."
+    )
+    failing_check: str | None = Field(None, description="Name of the first failing check; null when healthy.")
+    hint: str | None = Field(None, description="How to fix the failing check; null when healthy.")
+
+
+class CacheStatsResponse(BaseModel):
+    """Hit/miss counters per cache tier from GET /cache/stats."""
+
+    semantic: dict[str, Any] = Field(
+        ..., description="Semantic (embedding) cache counters: hits, misses, hit_rate, size, threshold, enabled, …"
+    )
+    exact: dict[str, Any] = Field(
+        ..., description="Exact (keyed) cache counters: hits, misses, hit_rate, size, tokens_saved, …"
+    )
+    combined: dict[str, Any] = Field(
+        ..., description="Cross-tier totals: total_hits, total_misses, total_tokens_saved."
+    )
+
+
+class ConfidencePolicyResponse(BaseModel):
+    """Live confidence policy from GET /confidence/policy."""
+
+    thresholds: dict[str, Any] = Field(..., description="Current low/high/queue thresholds and calibration knobs.")
+    review_queue: dict[str, Any] = Field(
+        ..., description="Scholar-review queue stats: pending, reviewed, durability, degraded flag."
+    )
+    calibration: dict[str, Any] | None = Field(
+        None,
+        description="Observed score distribution (observations, mean/min/max, band counts); null before any observation.",
+    )
 
 
 class ChatRequest(BaseModel):
@@ -445,6 +846,25 @@ class ChatRequest(BaseModel):
     # pass the user's JWT so this service can fetch history from dnb-backend.
     transactions: list[PurchaseTransaction] | None = None
     auth_token: str | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "prompt": "What are the conditions of a valid wudu according to the Shafi'i school?",
+                    "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90",
+                    "madhhab": "shafii",
+                    "language": "en",
+                    "user_id": "user-123",
+                    "remember": True,
+                },
+                {
+                    "prompt": "How much zakat is due on 10,000 USDC held for a full lunar year?",
+                    "language": "en",
+                },
+            ]
+        }
+    }
 
 
 class Message(BaseModel):
@@ -491,6 +911,27 @@ class FeedbackRequest(BaseModel):
     # rate limiter caps request count, not request size.
     prompt: str | None = Field(None, max_length=8000)
     answer: str | None = Field(None, max_length=16000)
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90",
+                    "message_id": "b31f6d0a-2c44-4f9b-8a77-90de5f1c2b34",
+                    "rating": "up",
+                    "comment": "Citation matched the printed mushaf.",
+                },
+                {
+                    "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90",
+                    "message_id": "b31f6d0a-2c44-4f9b-8a77-90de5f1c2b34",
+                    "rating": "down",
+                    "categories": ["incorrect_information"],
+                    "prompt": "Original question (supplied when the server snapshot is gone)",
+                    "answer": "Original answer (supplied when the server snapshot is gone)",
+                },
+            ]
+        }
+    }
 
     @field_validator("rating")
     @classmethod
@@ -948,7 +1389,116 @@ def verify_evidence_claims(
     return result
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    summary="Ask a question and get a cited, safety-checked answer",
+    description=(
+        "Single-turn JSON question answering. The request runs through the full pipeline: "
+        "Stellar secret-key redaction → fiqh/intent/madhhab classification → best-effort "
+        "retrieval (tafsir, zakat, purchases, Stellar calculations) → user memory load → "
+        "two-tier response cache (exact, then semantic) → Gemini generation wrapped in the "
+        "safety input/output gates → citation extraction and hadith grading → evidence "
+        "verification → confidence scoring (abstain/hedge/queue-for-scholar) → cache write "
+        "for confident answers only.\n\n"
+        "Send `X-Cache-Bypass: 1` to skip the response cache. Reuse `chat_id` to continue a "
+        "conversation. Telemetry is echoed on the response headers: `X-Trace-Id`, "
+        "`X-LLM-Total-Tokens`, `X-LLM-Cost-USD`, `X-Handler-Latency-Ms`, and `X-Cache-Tier` "
+        "(`exact` / `semantic` / `miss`)."
+    ),
+    tags=["chat"],
+    responses={
+        200: {
+            "description": "Answer with history, citations, confidence, and any retrieval context.",
+            "headers": {
+                "X-Trace-Id": {
+                    "description": "Correlation id for logs and error reports.",
+                    "schema": {"type": "string"},
+                },
+                "X-LLM-Total-Tokens": {
+                    "description": "Tokens consumed upstream for this request.",
+                    "schema": {"type": "string"},
+                },
+                "X-LLM-Cost-USD": {"description": "Upstream cost of the request in USD.", "schema": {"type": "string"}},
+                "X-Handler-Latency-Ms": {
+                    "description": "Server-side handler latency in milliseconds.",
+                    "schema": {"type": "string"},
+                },
+                "X-Cache-Tier": {
+                    "description": "Which tier served the answer: exact, semantic, or miss.",
+                    "schema": {"type": "string"},
+                },
+            },
+            "content": {
+                "application/json": {
+                    "example": {
+                        "response": (
+                            "In the Shafi'i school, wudu requires, among other conditions, "
+                            "intention and washing the face, the arms to the elbows, wiping "
+                            "the head, and washing the feet to the ankles (Muslim 226)."
+                        ),
+                        "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90",
+                        "message_id": "b31f6d0a-2c44-4f9b-8a77-90de5f1c2b34",
+                        "history": [
+                            {"role": "user", "content": "What are the conditions of a valid wudu?", "message_id": None},
+                            {
+                                "role": "model",
+                                "content": "In the Shafi'i school, wudu requires …",
+                                "message_id": "b31f6d0a-2c44-4f9b-8a77-90de5f1c2b34",
+                            },
+                        ],
+                        "moderation": {"category_id": None, "action": "allow"},
+                        "fiqh": {"is_fiqh_question": True, "madhhab_requested": "shafii"},
+                        "confidence": {
+                            "score": 0.82,
+                            "band": "confident",
+                            "abstained": False,
+                            "queued": False,
+                            "signals": {"citation_verification": 1.0, "evidence_verification": 0.8},
+                            "signals_used": ["citation_verification", "evidence_verification"],
+                            "review_id": None,
+                        },
+                        "language": "en",
+                        "citations": [
+                            {"type": "quran", "surah": 5, "ayah_start": 6, "ayah_end": None, "surah_name": "Al-Ma'idah"}
+                        ],
+                        "text": "In the Shafi'i school, wudu requires …",
+                    }
+                }
+            },
+        },
+        400: _json_error(
+            "Gemini rejected the request as invalid (e.g. prompt or context over the configured limits).",
+            {
+                "detail": "Invalid request parameters.",
+                "hint": (
+                    "Verify request fields (e.g., prompt length must be 1-10000 characters, "
+                    "context must be <= 5000 characters)."
+                ),
+            },
+        ),
+        422: _validation_error_response(),
+        429: _rate_limited_response(),
+        500: _server_error_response(
+            "Internal server error",
+            "Unexpected error while generating the answer. Retry; if it persists, report the X-Trace-Id.",
+        ),
+        503: _json_error(
+            "Upstream Gemini service temporarily unavailable.",
+            {
+                "detail": "AI service temporarily unavailable.",
+                "hint": "The AI service is temporarily experiencing high load or provider downtime. Please retry in 30-60 seconds.",
+            },
+        ),
+        504: _json_error(
+            "Upstream Gemini call timed out.",
+            {
+                "detail": "AI service timed out.",
+                "hint": "The AI provider did not respond within the deadline. Retry in a few seconds or try a shorter prompt.",
+            },
+        ),
+    },
+)
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat(body: ChatRequest, request: Request, fastapi_response: Response) -> ChatResponse:
     trace = telemetry.Trace()
@@ -1533,7 +2083,41 @@ async def _summarize_history(
         logger.warning("History summarization failed for %s", chat_id[:8], exc_info=True)
 
 
-@app.post("/chat/stream")
+@app.post(
+    "/chat/stream",
+    summary="Stream a chat answer as Server-Sent Events",
+    description=(
+        "SSE twin of `POST /chat`: same `ChatRequest` schema, same safety pipeline, citation "
+        "extraction, hadith grading, confidence scoring, and scholar-review hand-off. "
+        "Events arrive in order:\n\n"
+        "1. `metadata` — `chat_id` and effective `language`\n"
+        '2. `content` — incremental text deltas (`{"type": "content", "delta": "…"}`)\n'
+        "3. `done` — final text, history, and metadata\n"
+        "4. `error` — explicit terminal failure (content policy refusal or upstream error); "
+        "the stream is never silently truncated\n\n"
+        "Streamed turns share session history with `POST /chat`, so a follow-up request with "
+        "the same `chat_id` sees the streamed answer as context."
+    ),
+    tags=["chat"],
+    responses={
+        200: {
+            "description": "Open SSE stream (`text/event-stream`) of metadata/content/done/error events.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"type": "string"},
+                    "example": (
+                        'data: {"type": "metadata", "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90", "language": "en"}\n\n'
+                        'data: {"type": "content", "delta": "In the Shafi"}\n\n'
+                        'data: {"type": "content", "delta": "\'i school, wudu requires …"}\n\n'
+                        'data: {"type": "done", "text": "In the Shafi\'i school, wudu requires …", "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90", "language": "en", "history": [{"role": "user", "text": "…"}, {"role": "model", "text": "…"}]}\n\n'
+                    ),
+                }
+            },
+        },
+        422: _validation_error_response(),
+        429: _rate_limited_response(),
+    },
+)
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     """Streaming chat endpoint using Server-Sent Events (SSE).
@@ -1921,8 +2505,46 @@ async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session:
         logger.warning("Failed to persist chat history for %s: %s", chat_id, exc)
 
 
-@app.get("/user/{user_id}/chats")
-async def get_user_chats(user_id: str) -> dict[str, Any]:
+@app.get(
+    "/user/{user_id}/chats",
+    response_model=UserChatsResponse,
+    summary="List a user's chat sessions",
+    description=(
+        "Returns every chat session linked to `user_id`, most recent first. Each entry "
+        "carries a title derived from the first user message, a snippet of the latest "
+        "message, the turn count, and the creation timestamp. System context is stripped "
+        "from the quoted text. An unknown user yields an empty `chats` list."
+    ),
+    tags=["chats"],
+    responses={
+        200: {
+            "description": "Chat sessions for the user, most recent first.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "chats": [
+                            {
+                                "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90",
+                                "title": "What are the conditions of a valid wudu?",
+                                "snippet": "In the Shafi'i school, wudu requires …",
+                                "message_count": 4,
+                                "created_at": 1760937600.0,
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+        422: _validation_error_response(),
+        500: _server_error_response(
+            "Internal server error",
+            "Failed to load user chat sessions. Verify user_id format and retry.",
+        ),
+    },
+)
+async def get_user_chats(
+    user_id: str = Path(..., description="Opaque user identifier used when the chat was created."),
+) -> dict[str, Any]:
     """List all chat IDs for a user."""
     try:
         chat_ids = await session_store.get_user_chats(user_id)
@@ -1962,8 +2584,38 @@ async def get_user_chats(user_id: str) -> dict[str, Any]:
         ) from e
 
 
-@app.get("/chat/{chat_id}/history")
-async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
+@app.get(
+    "/chat/{chat_id}/history",
+    response_model=list[HistoryMessage],
+    summary="Fetch the message history of one chat",
+    description=(
+        "Returns the persisted turn-by-turn history for a chat as `role`/`text` pairs, "
+        "with system context stripped from user turns (including turns stored before "
+        "that fix shipped). An unknown `chat_id` returns an empty list rather than 404."
+    ),
+    tags=["chats"],
+    responses={
+        200: {
+            "description": "Persisted turns; empty list when the chat is unknown.",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {"role": "user", "text": "What are the conditions of a valid wudu?"},
+                        {"role": "model", "text": "In the Shafi'i school, wudu requires …"},
+                    ]
+                }
+            },
+        },
+        422: _validation_error_response(),
+        500: _server_error_response(
+            "Internal server error",
+            "Failed to retrieve chat history. Verify chat_id and retry.",
+        ),
+    },
+)
+async def get_chat_history(
+    chat_id: str = Path(..., description="Chat session id returned by POST /chat."),
+) -> list[dict[str, str]]:
     """Get the message history for a specific chat."""
     try:
         history = await session_store.load_history(chat_id)
@@ -1982,8 +2634,33 @@ async def get_chat_history(chat_id: str) -> list[dict[str, str]]:
         ) from e
 
 
-@app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str]:
+@app.delete(
+    "/chat/{chat_id}",
+    response_model=MessageResponse,
+    summary="Delete a chat session and its bookkeeping",
+    description=(
+        "Drops the in-memory session, its persisted history, the per-message id list and "
+        "answer snapshots used for feedback, and — when `user_id` is supplied as a query "
+        "parameter — the user's link to the chat. Idempotent: deleting an unknown chat "
+        "still returns 200 with a 'not found' message."
+    ),
+    tags=["chats"],
+    responses={
+        200: {
+            "description": "Deletion acknowledged (whether or not the chat existed).",
+            "content": {"application/json": {"example": {"message": "Chat session deleted successfully"}}},
+        },
+        422: _validation_error_response(),
+        500: _server_error_response(
+            "Internal server error",
+            "Failed to delete chat session. Please retry.",
+        ),
+    },
+)
+async def delete_chat(
+    chat_id: str = Path(..., description="Chat session id to delete."),
+    user_id: str | None = Query(None, description="Also unlink this chat from the user's session list."),
+) -> dict[str, str]:
     try:
         existed = chat_id in active_chats
         active_chats.pop(chat_id, None)
@@ -2008,7 +2685,51 @@ async def delete_chat(chat_id: str, user_id: str | None = None) -> dict[str, str
         ) from e
 
 
-@app.post("/evidence/verify", response_model=EvidenceVerificationResult)
+@app.post(
+    "/evidence/verify",
+    response_model=EvidenceVerificationResult,
+    summary="Verify the evidence behind a generated answer",
+    description=(
+        "Runs the offline evidence-verification agent over a finished answer: extracts any "
+        "`<<<CITATIONS>>>` block, parses Quran/Hadith references, links them to the claims "
+        "that rely on them, and returns per-claim support status (`supported` / `mismatch` / "
+        "`unverified` / `not_quoted`) plus `overall_score` (supported claims ÷ total claims) "
+        "and an `audit_trail`. No LLM call — fully deterministic."
+    ),
+    tags=["evidence"],
+    responses={
+        200: {
+            "description": "Structured claim/evidence audit for the supplied text.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "claims": [
+                            {
+                                "claim": "Allah is with the patient",
+                                "evidence": ["Indeed, Allah is with the patient (2:153)"],
+                                "source_type": "quran",
+                                "verification_status": "supported",
+                                "confidence": 1.0,
+                                "reason": "Exact match for Al-Baqarah 2:153",
+                                "alternative_evidence": [],
+                            }
+                        ],
+                        "overall_score": 1.0,
+                        "audit_trail": [
+                            {"step": "citation_extraction", "detail": "1 Quran citation parsed"},
+                            {"step": "claim_linking", "detail": "1 claim linked to 1 citation"},
+                        ],
+                    }
+                }
+            },
+        },
+        422: _validation_error_response(),
+        500: _server_error_response(
+            "Evidence verification failed.",
+            "The evidence verification agent could not process the supplied text. Verify the text is well-formed and retry.",
+        ),
+    },
+)
 async def verify_evidence_endpoint(body: EvidenceVerifyRequest) -> EvidenceVerificationResult:
     """Run the evidence verification agent on a generated answer.
 
@@ -2050,7 +2771,55 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-@app.post("/feedback", status_code=200)
+@app.post(
+    "/feedback",
+    response_model=FeedbackSubmitResponse,
+    status_code=200,
+    summary="Rate one model answer up or down",
+    description=(
+        "Attaches a rating and optional failure categories to a single answer identified by "
+        "`(chat_id, message_id)`. The prompt/answer snapshot is resolved server-side from "
+        "what the user was shown; if the snapshot has been evicted, the request MUST include "
+        "`prompt` and `answer` or it is rejected with 422. Rate-limited to 20 submissions per "
+        "minute per IP (429 with `Retry-After`). Idempotent: resubmitting the same "
+        "`(chat_id, message_id)` overwrites the earlier record."
+    ),
+    tags=["feedback"],
+    responses={
+        200: {
+            "description": "Feedback stored (or overwritten).",
+            "content": {
+                "application/json": {"example": {"status": "ok", "feedback_id": "3f1d9c74-0a5e-4f2b-9d88-71c6b0e2a4d1"}}
+            },
+        },
+        422: _json_error(
+            "Schema validation failed, or the answer snapshot is gone and prompt/answer were not supplied.",
+            {
+                "detail": (
+                    "This answer is no longer in memory. Please supply 'prompt' and "
+                    "'answer' in the request body so the feedback has context."
+                ),
+                "hint": (
+                    "Supply both 'prompt' and 'answer' string fields in the JSON body "
+                    "(e.g. {'chat_id': '...', 'message_id': '...', 'rating': 'up', "
+                    "'prompt': '...', 'answer': '...'})."
+                ),
+            },
+        ),
+        429: _json_error(
+            "Feedback rate limit exceeded (20 per minute per IP).",
+            {
+                "detail": "Too many feedback submissions. Please wait before trying again.",
+                "hint": "Feedback submissions are rate-limited to 20 per minute per IP. Please wait up to 60 seconds before submitting again.",
+            },
+            headers=_RETRY_AFTER_HEADER,
+        ),
+        500: _server_error_response(
+            "Failed to store feedback.",
+            "Database error storing feedback record. Please retry in a few moments.",
+        ),
+    },
+)
 async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, Any]:
     """Attach a rating and optional failure categories to one model answer.
 
@@ -2120,7 +2889,54 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
     return {"status": "ok", "feedback_id": record.feedback_id}
 
 
-@app.get("/feedback/stats", dependencies=[Depends(require_admin)])
+@app.get(
+    "/feedback/stats",
+    response_model=FeedbackStatsResponse,
+    dependencies=[Depends(require_admin)],
+    summary="Aggregate feedback quality metrics (admin)",
+    description=(
+        "Rating ratios overall, per taxonomy category, per model, and per day (last 14 "
+        "distinct days). Requires the `X-Admin-Token` header; returns 403 when the token is "
+        "missing/wrong and 503 when `ADMIN_TOKEN` is not configured on the server."
+    ),
+    tags=["feedback"],
+    responses={
+        200: {
+            "description": "Aggregated feedback metrics.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 42,
+                        "up": 31,
+                        "down": 11,
+                        "up_ratio": 0.7381,
+                        "by_category": {"incorrect_information": {"up": 0, "down": 6}},
+                        "by_model": {"gemini-2.5-flash": {"up": 31, "down": 11}},
+                        "by_day": {"2026-10-20": {"up": 4, "down": 1}},
+                    }
+                }
+            },
+        },
+        403: _json_error(
+            "Missing or invalid X-Admin-Token header.",
+            {
+                "detail": "Invalid or missing admin token.",
+                "hint": "Include the configured admin secret in the 'X-Admin-Token' request header (e.g., 'X-Admin-Token: <admin_token>').",
+            },
+        ),
+        503: _json_error(
+            "Admin endpoints disabled — ADMIN_TOKEN is unset on this server.",
+            {
+                "detail": "ADMIN_TOKEN is not configured on this server.",
+                "hint": "Set the ADMIN_TOKEN environment variable in server configuration to enable admin management routes.",
+            },
+        ),
+        500: _server_error_response(
+            "Failed to fetch stats.",
+            "Database error aggregating feedback metrics. Please retry.",
+        ),
+    },
+)
 async def feedback_stats() -> dict[str, Any]:
     """Aggregate quality metrics: rating ratios, per-category, per-model, by day.
 
@@ -2137,11 +2953,72 @@ async def feedback_stats() -> dict[str, Any]:
         ) from exc
 
 
-@app.get("/feedback/records", dependencies=[Depends(require_admin)])
+@app.get(
+    "/feedback/records",
+    response_model=FeedbackRecordsResponse,
+    dependencies=[Depends(require_admin)],
+    summary="List recent feedback records (admin)",
+    description=(
+        "Stored feedback records, newest first, filterable by `rating` and taxonomy "
+        "`category`. Requires the `X-Admin-Token` header (403/503 as on /feedback/stats); "
+        "invalid filter values are rejected with 422 and an actionable hint."
+    ),
+    tags=["feedback"],
+    responses={
+        200: {
+            "description": "Matching feedback records, newest first.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "records": [
+                            {
+                                "feedback_id": "3f1d9c74-0a5e-4f2b-9d88-71c6b0e2a4d1",
+                                "chat_id": "8f2c9a1e-4b7d-4e2a-9c3f-1d5b6a7e8f90",
+                                "message_id": "b31f6d0a-2c44-4f9b-8a77-90de5f1c2b34",
+                                "rating": "down",
+                                "categories": ["incorrect_information"],
+                                "comment": "Ayah number was wrong",
+                                "model_name": "gemini-2.5-flash",
+                                "created_at": "2026-10-20T12:00:00+00:00",
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+        403: _json_error(
+            "Missing or invalid X-Admin-Token header.",
+            {
+                "detail": "Invalid or missing admin token.",
+                "hint": "Include the configured admin secret in the 'X-Admin-Token' request header (e.g., 'X-Admin-Token: <admin_token>').",
+            },
+        ),
+        422: _json_error(
+            "Invalid query parameter — rating not up/down, unknown category, or limit outside 1..500.",
+            {
+                "detail": "rating must be 'up' or 'down'",
+                "hint": "Set the 'rating' query parameter to either 'up' or 'down' (e.g., ?rating=down).",
+            },
+        ),
+        503: _json_error(
+            "Admin endpoints disabled — ADMIN_TOKEN is unset on this server.",
+            {
+                "detail": "ADMIN_TOKEN is not configured on this server.",
+                "hint": "Set the ADMIN_TOKEN environment variable in server configuration to enable admin management routes.",
+            },
+        ),
+        500: _server_error_response(
+            "Failed to fetch records.",
+            "Database error retrieving feedback records. Please retry.",
+        ),
+    },
+)
 async def feedback_records(
-    rating: str | None = None,
-    category: str | None = None,
-    limit: int = 50,
+    rating: str | None = Query(None, description="Filter to 'up' or 'down' ratings only."),
+    category: str | None = Query(
+        None, description=f"Filter to one taxonomy category: {', '.join(sorted(FEEDBACK_TAXONOMY))}."
+    ),
+    limit: int = Query(50, description="Maximum records to return (validated to 1..500; default 50)."),
 ) -> dict[str, Any]:
     """Recent flagged records, filterable by rating and category.
 
@@ -2177,14 +3054,77 @@ async def feedback_records(
         ) from exc
 
 
-@app.get("/ping")
+@app.get(
+    "/ping",
+    response_model=PingResponse,
+    summary="Liveness probe",
+    description="Cheap always-200 probe for container healthchecks and keep-alive pings; performs no dependency checks (see /health for readiness).",
+    tags=["observability"],
+    responses={
+        200: {
+            "description": "Process is alive.",
+            "content": {"application/json": {"example": {"status": "ok"}}},
+        },
+    },
+)
 async def ping() -> dict[str, str]:
     """Lightweight liveness probe for container healthchecks and keep-alive pings."""
     return {"status": "ok"}
 
 
-@app.get("/memory/{user_id}")
-async def get_memory(user_id: str) -> dict[str, Any]:
+@app.get(
+    "/memory/{user_id}",
+    response_model=UserProfile,
+    summary="Read a user's stored memory profile",
+    description=(
+        "Returns the long-term profile accumulated from the user's chats: knowledge level, "
+        "madhhab, preferred language, topics studied, and remembered facts. Returns 404 when "
+        "no profile exists yet (memory is created lazily on the first chat with a "
+        "`user_id`). Not yet bound to an authenticated principal — anyone who knows a "
+        "`user_id` can read it (TODO #9)."
+    ),
+    tags=["memory"],
+    responses={
+        200: {
+            "description": "Stored memory profile.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "user_id": "user-123",
+                        "knowledge_level": "intermediate",
+                        "madhhab": "shafii",
+                        "preferred_language": "en",
+                        "topics_studied": [
+                            {"topic": "wudu", "last_asked": 1760937600.0, "embedding": [], "shared": False}
+                        ],
+                        "remembered_facts": [
+                            {
+                                "fact": "Prefers evidence-based answers",
+                                "created_at": 1760937600.0,
+                                "version": 1,
+                                "last_accessed": 1760937600.0,
+                                "archived": False,
+                            }
+                        ],
+                        "created_at": 1760937600.0,
+                        "updated_at": 1760937600.0,
+                    }
+                }
+            },
+        },
+        404: _json_error(
+            "No memory profile exists for this user_id.",
+            {
+                "detail": "Memory not found",
+                "hint": "No user profile found for the provided user_id. Memory is created automatically when chatting with user_id provided.",
+            },
+        ),
+        422: _validation_error_response(),
+    },
+)
+async def get_memory(
+    user_id: str = Path(..., description="Opaque user identifier passed as `user_id` on /chat."),
+) -> dict[str, Any]:
     """Retrieve the stored user profile for transparency.
 
     TODO(#9): bind to authenticated principal — anyone who knows a user_id
@@ -2200,8 +3140,27 @@ async def get_memory(user_id: str) -> dict[str, Any]:
     return profile.model_dump()
 
 
-@app.delete("/memory/{user_id}")
-async def delete_memory(user_id: str) -> dict[str, str]:
+@app.delete(
+    "/memory/{user_id}",
+    response_model=MessageResponse,
+    summary="Erase a user's memory profile",
+    description=(
+        "Permanently deletes the stored profile for `user_id`. Idempotent: an unknown or "
+        "already-erased profile still returns 200 with a 'not found' message. Not yet bound "
+        "to an authenticated principal (TODO #9)."
+    ),
+    tags=["memory"],
+    responses={
+        200: {
+            "description": "Erasure acknowledged (whether or not a profile existed).",
+            "content": {"application/json": {"example": {"message": "Memory deleted successfully"}}},
+        },
+        422: _validation_error_response(),
+    },
+)
+async def delete_memory(
+    user_id: str = Path(..., description="Opaque user identifier whose profile should be erased."),
+) -> dict[str, str]:
     """Completely erase the stored user profile.
 
     TODO(#9): bind to authenticated principal — anyone who knows a user_id
@@ -2230,13 +3189,86 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
     }, 503
 
 
-@app.get("/health")
-async def health(deep: bool = False) -> JSONResponse:
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Readiness probe",
+    description=(
+        "Checks that `GEMINI_API_KEY` is configured. Returns 200 with `checks` when healthy, "
+        "or 503 with `failing_check` and a `hint` when it is not. `deep=true` reserves room "
+        "for upstream reachability checks (currently reported as 'skipped')."
+    ),
+    tags=["observability"],
+    responses={
+        200: {
+            "description": "Service ready.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "ok",
+                        "version": "0.1.0",
+                        "checks": {"gemini_api_key_configured": "ok", "gemini_api_reachable": "skipped"},
+                    }
+                }
+            },
+        },
+        503: {
+            "description": "Service not ready — see `failing_check` and `hint`.",
+            "model": HealthResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "unhealthy",
+                        "version": "0.1.0",
+                        "checks": {"gemini_api_key_configured": "fail"},
+                        "failing_check": "gemini_api_key_configured",
+                        "hint": "Configure the GEMINI_API_KEY environment variable with a valid Google Gemini API key.",
+                    }
+                }
+            },
+        },
+        422: _validation_error_response(),
+    },
+)
+async def health(
+    deep: bool = Query(False, description="Ask for dependency reachability checks (currently skipped)."),
+) -> JSONResponse:
     body, code = get_health_status(deep=deep)
     return JSONResponse(content=body, status_code=code)
 
 
-@app.get("/cache/stats")
+@app.get(
+    "/cache/stats",
+    response_model=CacheStatsResponse,
+    summary="Response-cache hit/miss statistics",
+    description=(
+        "Counters for both response-cache tiers — the semantic (embedding) cache and the "
+        "exact keyed cache — plus combined totals (hits, misses, tokens saved). "
+        "Semantic-cache hit rate uses the cache's own precise counters (#27)."
+    ),
+    tags=["observability"],
+    responses={
+        200: {
+            "description": "Per-tier and combined cache counters.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "semantic": {
+                            "hits": 12,
+                            "misses": 240,
+                            "bypasses": 3,
+                            "hit_rate": 0.047,
+                            "size": 15,
+                            "enabled": True,
+                        },
+                        "exact": {"hits": 58, "misses": 194, "hit_rate": 0.23, "size": 40, "tokens_saved": 11840},
+                        "combined": {"total_hits": 70, "total_misses": 234, "total_tokens_saved": 11840},
+                    }
+                }
+            },
+        },
+    },
+)
 async def cache_stats() -> dict[str, Any]:
     exact_cache = get_chat_exact_cache()
     return {
@@ -2250,7 +3282,37 @@ async def cache_stats() -> dict[str, Any]:
     }
 
 
-@app.get("/metrics")
+@app.get(
+    "/metrics",
+    response_model=dict[str, Any],
+    summary="Telemetry metrics snapshot",
+    description=(
+        "Lightweight LLM observability surface: token, cost, and latency aggregates plus "
+        "error rate (`requests`), followed by `semantic_cache`, `exact_cache`, and "
+        "`combined_cache` statistics. Contains only counts, durations, costs, model names, "
+        "and trace-derived aggregates — never prompt or answer content. Free-form schema: "
+        "keys are additive."
+    ),
+    tags=["observability"],
+    responses={
+        200: {
+            "description": "Telemetry snapshot (free-form keys).",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "requests": {"total": 1042, "errors": 7, "error_rate": 0.0067},
+                        "tokens": {"input": 812340, "output": 195600, "total": 1007940},
+                        "cost_usd": 1.2345,
+                        "latency_ms": {"handler_p50": 742.1, "handler_p95": 2310.4},
+                        "semantic_cache": {"hits": 12, "misses": 240, "hit_rate": 0.047},
+                        "exact_cache": {"hits": 58, "misses": 194, "hit_rate": 0.23},
+                        "combined_cache": {"total_hits": 70, "total_misses": 234, "total_tokens_saved": 11840},
+                    }
+                }
+            },
+        },
+    },
+)
 async def metrics() -> dict[str, Any]:
     """Lightweight LLM observability surface: token, cost, and latency
     aggregates plus error rate. Contains only counts, durations, costs, model
@@ -2273,7 +3335,44 @@ async def metrics() -> dict[str, Any]:
     return snapshot
 
 
-@app.get("/confidence/policy")
+@app.get(
+    "/confidence/policy",
+    response_model=ConfidencePolicyResponse,
+    summary="Confidence thresholds, review-queue state, and calibration",
+    description=(
+        "The live abstention policy: low/high confidence thresholds and the scholar-queue "
+        "cut-off, current scholar-review queue statistics (pending/reviewed, durability), "
+        "and a calibration summary of observed scores (null until the first observation)."
+    ),
+    tags=["observability"],
+    responses={
+        200: {
+            "description": "Live thresholds, queue state, and calibration.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "thresholds": {
+                            "low": 0.4,
+                            "high": 0.7,
+                            "scholar_queue": 0.4,
+                            "high_stakes_penalty": 0.15,
+                            "no_signal_prior": 0.55,
+                            "unverified_ceiling": 0.65,
+                        },
+                        "review_queue": {"pending": 3, "reviewed": 41, "durable": False, "degraded": False},
+                        "calibration": {
+                            "observations": 120,
+                            "mean_score": 0.712,
+                            "min_score": 0.21,
+                            "max_score": 0.97,
+                            "bands": {"abstain": 12, "uncertain": 28, "confident": 80},
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
 async def confidence_policy() -> dict[str, Any]:
     """Current confidence thresholds and the queue's durability."""
     calibration = None
