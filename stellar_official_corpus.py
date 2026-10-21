@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 ALLOWED_STELLAR_DOMAINS: frozenset[str] = frozenset(
@@ -114,11 +114,7 @@ class OfficialStellarCorpus:
 
     def search_passages(self, query: str) -> list[StellarCorpusPassage]:
         """Deterministic token-overlap retrieval over indexed official passages."""
-        tokens = {
-            tok.lower()
-            for tok in query.replace(",", " ").replace(".", " ").split()
-            if len(tok) >= 3
-        }
+        tokens = {tok.lower() for tok in query.replace(",", " ").replace(".", " ").split() if len(tok) >= 3}
         if not tokens:
             return []
         scored: list[tuple[int, str, StellarCorpusPassage]] = []
