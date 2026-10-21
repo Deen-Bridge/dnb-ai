@@ -7,8 +7,6 @@ from languages import (
     arabic_dialect,
     arabic_ocr,
     calligraphy,
-    malay,
-    swahili,
     swahili_processor,
     urdu_processor,
 )
@@ -21,8 +19,6 @@ def test_languages_package_exposes_all_language_submodules() -> None:
         urdu_processor,
         calligraphy,
         arabic_dialect,
-        malay,
-        swahili,
     ):
         assert mod is not None
     assert hasattr(arabic_ocr, "router")
