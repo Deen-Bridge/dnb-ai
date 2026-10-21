@@ -187,3 +187,43 @@ class TestFacade:
         result = analyze_arabic_dialect("شنو حكم الزكاة؟")
         assert result.dialect.primary_dialect is ArabicDialect.GULF
         assert result.normalized_msa
+
+    def test_mixed_dialect_and_edge_cases(self):
+        # Empty / whitespace text defaults to MSA with high confidence
+        empty_profile = dialect_classifier.classify_dialect("   ")
+        assert empty_profile.primary_dialect is ArabicDialect.MSA
+        assert empty_profile.is_msa is True
+
+        # Mixed Egyptian + Levantine markers pick the higher-density dialect
+        mixed = "عايز أسأل دلوقتي امبارح كده عن بدي"
+        mixed_profile = dialect_classifier.classify_dialect(mixed)
+        assert mixed_profile.primary_dialect is ArabicDialect.EGYPTIAN
+        assert "عايز" in mixed_profile.detected_markers
+        assert "بدي" in mixed_profile.detected_markers
+
+        # detect_dialect_terms deduplicates repeated markers
+        terms = dialect_classifier.detect_dialect_terms("عايز عايز دلوقتي")
+        assert terms.count("عايز") == 1
+        assert "دلوقتي" in terms
+
+    async def test_multi_sentence_segments_and_category_filter(self, client):
+        resp = await client.post(
+            "/arabic-dialect/analyze",
+            json={"text": "عايز أسأل عن الصلاة؟ بدي أعرف الحكم الشرعي. الحمد لله رب العالمين."},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["segments"]) == 3
+        dialects = [seg["dialect"] for seg in body["segments"]]
+        assert dialects == ["egyptian", "levantine", "msa"]
+
+        # Category filter on /arabic-dialect/terms
+        cat_resp = await client.get("/arabic-dialect/terms", params={"category": "worship"})
+        assert cat_resp.status_code == 200
+        items = cat_resp.json()
+        assert items
+        assert all(item["category"] == "worship" for item in items)
+
+        # Validation failure (empty text) returns 422
+        bad_resp = await client.post("/arabic-dialect/analyze", json={"text": ""})
+        assert bad_resp.status_code == 422
