@@ -6,6 +6,7 @@ FastAPI app for the HTTP tests, so the suite needs none of the app's heavy
 dependencies and never touches the network or genai.
 """
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -112,6 +113,27 @@ def test_classification_is_deterministic() -> None:
     assert first.model_dump() == second.model_dump()
 
 
+@pytest.mark.parametrize("style", list(StyleName))
+def test_every_catalog_ideal_classifies_as_its_own_style(style: StyleName) -> None:
+    # Recognition path for each hand in the catalog, including the hands that
+    # the textbook vectors above do not exercise (Thuluth, Ruq'ah, Muhaqqaq,
+    # Nasta'liq).
+    profile = CALLIGRAPHY_STYLES[style]
+    result = classify(TraitVector(**profile.ideal))
+    assert result.predicted_style is style
+    assert result.ambiguous is False
+    assert result.ranking[0].style is style
+
+
+def test_trait_vector_defaults_and_key_order() -> None:
+    traits = TraitVector(angularity=0.9)
+    values = traits.as_dict()
+
+    assert tuple(values) == TRAIT_NAMES
+    assert values["angularity"] == 0.9
+    assert all(values[name] == 0.5 for name in TRAIT_NAMES if name != "angularity")
+
+
 # ---------------------------------------------------------------------------
 # Confidence normalization and ranking
 # ---------------------------------------------------------------------------
@@ -171,6 +193,45 @@ def test_analyze_flags_high_embellishment() -> None:
     assert result.embellishment == "high"
 
 
+def test_analyze_explains_an_ambiguous_low_confidence_specimen() -> None:
+    # Neutral traits sit near several ideals; the notes must make the
+    # provisional top hand explicit instead of presenting it as certain.
+    result = analyze(TraitVector())
+
+    assert result.classification.ambiguous is True
+    assert result.legibility == "moderate"
+    assert result.embellishment == "moderate"
+    assert any("sits between" in note for note in result.notes)
+    assert not any("lowers legibility" in note for note in result.notes)
+
+
+def test_analyze_rewards_a_rounded_well_voweled_hand() -> None:
+    result = analyze(TraitVector(**_NASKH_TRAITS))
+
+    assert result.legibility == "high"
+    assert result.embellishment != "high"
+    assert any("favourable for text reconstruction" in note for note in result.notes)
+
+
+def test_analyze_flags_ocr_risk_for_an_ornate_dense_hand() -> None:
+    ornate = TraitVector(
+        angularity=0.9,
+        curvature=0.1,
+        stroke_contrast=0.9,
+        diacritic_density=0.1,
+        geometric_regularity=0.9,
+        elongation=0.9,
+        slant=0.9,
+        letter_stacking=0.9,
+    )
+    result = analyze(ornate)
+
+    assert result.legibility == "low"
+    assert result.embellishment == "high"
+    assert any("lowers legibility" in note for note in result.notes)
+    assert "Heavy ornament" in result.text_reconstruction_hint
+
+
 # ---------------------------------------------------------------------------
 # HTTP endpoints
 # ---------------------------------------------------------------------------
@@ -227,3 +288,21 @@ def test_analyze_endpoint() -> None:
     assert body["classification"]["predicted_style"] == "naskh"
     assert "legibility" in body and "embellishment" in body
     assert body["text_reconstruction_hint"]
+
+
+def test_analyze_endpoint_surfaces_low_confidence_note() -> None:
+    resp = _client().post("/calligraphy/analyze", json={})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["classification"]["ambiguous"] is True
+    assert any("sits between" in note for note in body["notes"])
+
+
+def test_classify_endpoint_recognizes_a_less_common_hand() -> None:
+    resp = _client().post("/calligraphy/classify", json=CALLIGRAPHY_STYLES[StyleName.MUHAQQAQ].ideal)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["predicted_style"] == "muhaqqaq"
+    assert body["ranking"][0]["style"] == "muhaqqaq"
