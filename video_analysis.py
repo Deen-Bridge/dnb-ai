@@ -122,7 +122,7 @@ def transcribe_audio(audio: Path | None) -> tuple[str, list[dict[str, Any]]]:
 def ocr_frame(frame: Path) -> str:
     try:
         import pytesseract  # type: ignore
-        from PIL import Image  # type: ignore
+        from PIL import Image
 
         return pytesseract.image_to_string(Image.open(frame), lang="ara+eng").strip()
     except (ImportError, OSError, RuntimeError):
@@ -132,8 +132,9 @@ def ocr_frame(frame: Path) -> str:
 def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="dnb-video-") as directory:
         audio, frames = extract_media(video_path, Path(directory))
+        timestamps: list[dict[str, Any]] = []
         if transcript.strip():
-            transcript, timestamps = transcript.strip(), []
+            transcript = transcript.strip()
         else:
             transcript, timestamps = transcribe_audio(audio)
         for frame in frames:
