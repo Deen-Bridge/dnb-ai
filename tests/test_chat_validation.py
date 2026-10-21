@@ -59,7 +59,7 @@ def test_delete_unknown_chat_returns_404():
     response = client.delete(f"/chat/{uuid.uuid4()}")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Chat session not found"}
+    assert response.json() == {"code": "http_error", "detail": "Chat session not found"}
 
 
 def test_delete_existing_in_memory_chat_returns_200():
