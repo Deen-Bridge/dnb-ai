@@ -35,6 +35,7 @@ dist/
 # Logs and review data
 *.log
 data/review/
+data/experiments.sqlite3*
 
 # Misc
 Makefile

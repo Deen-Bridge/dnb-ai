@@ -826,6 +826,13 @@ python scripts/build_index.py --index-path /tmp/idx.db --fake-embeddings
 
 The full schema and design notes live in [`docs/retrieval.md`](docs/retrieval.md).
 
+### Experiment rollout and rollback
+
+Experiments can gradually route chat traffic to versioned models, prompts, and
+generation settings, with stable fallback and automatic error/latency rollback.
+See [Experiment rollout and rollback](docs/experiments.md) for activation,
+thresholds, configuration history, metrics, and state-storage requirements.
+
 ### Structured logging & request correlation
 
 Logs are **newline-delimited JSON on stdout** ([`logging_config.py`](logging_config.py)),

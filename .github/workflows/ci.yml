@@ -112,6 +112,9 @@ jobs:
       - name: Run prompt registry and A/B experiment tests
         run: pytest -q tests/test_prompt_registry.py
 
+      - name: Run experiment rollout and rollback tests
+        run: pytest -q tests/test_experiments.py tests/test_experiment_api.py
+
       - name: Run Islamic answer evaluation harness tests
         run: pytest -q tests/test_evals.py
 
