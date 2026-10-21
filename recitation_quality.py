@@ -593,3 +593,8 @@ async def endpoint_feedback(body: RecitationInput) -> QualityFeedback:
         raise _HTTP(status_code=503, detail="Recitation quality analysis is disabled.")
     analysis = analyze_recitation(body)
     return generate_quality_feedback(analysis)
+
+
+from tajweed_detector import router as tajweed_detector_router  # noqa: E402
+
+router.include_router(tajweed_detector_router)
