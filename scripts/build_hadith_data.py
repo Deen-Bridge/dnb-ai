@@ -18,7 +18,10 @@ normalization policy (implemented in hadith.py, shared by this script and
 the runtime lookup so there is exactly one normalizer).
 """
 
+import argparse
 import json
+import logging
+import os
 import sys
 import urllib.request
 from datetime import date
@@ -29,6 +32,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import hadith  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+def configure_script_logging(verbose: bool = False) -> int:
+    env_level = os.environ.get("LOG_LEVEL", "").upper()
+    if verbose:
+        level = logging.DEBUG
+    elif env_level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        level = getattr(logging, env_level)
+    else:
+        level = logging.INFO
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+    logger.setLevel(level)
+    return level
+
 
 SOURCE_REPO = "fawazahmed0/hadith-api"
 SOURCE_TAG = "1"
