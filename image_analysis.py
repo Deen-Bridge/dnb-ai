@@ -559,3 +559,8 @@ async def analyze_batch(
         language=language,
         skip_translation=skip_translation,
     )
+
+
+from screen_recording_analysis import router as screen_recording_router  # noqa: E402
+
+router.include_router(screen_recording_router)
