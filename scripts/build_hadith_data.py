@@ -18,7 +18,10 @@ normalization policy (implemented in hadith.py, shared by this script and
 the runtime lookup so there is exactly one normalizer).
 """
 
+import argparse
 import json
+import logging
+import os
 import sys
 import urllib.request
 from datetime import date
@@ -29,6 +32,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import hadith  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+def configure_script_logging(verbose: bool = False) -> int:
+    env_level = os.environ.get("LOG_LEVEL", "").upper()
+    if verbose:
+        level = logging.DEBUG
+    elif env_level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        level = getattr(logging, env_level)
+    else:
+        level = logging.INFO
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+    logger.setLevel(level)
+    return level
+
 
 SOURCE_REPO = "fawazahmed0/hadith-api"
 SOURCE_TAG = "1"
@@ -89,7 +108,7 @@ def build_record(raw_hadith: dict, collection: str) -> dict:
 
 
 def build_collection(collection: str) -> None:
-    print(f"Fetching {collection}...")
+    logger.debug("Fetching %s...", collection)
     edition = fetch_edition(collection)
     records = [build_record(h, collection) for h in edition["hadiths"]]
 
@@ -107,7 +126,11 @@ def build_collection(collection: str) -> None:
     print(f"  wrote {len(records)} hadiths to {out_path}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Build bundled hadith grading dataset.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose diagnostic logging")
+    args = parser.parse_args(argv)
+    configure_script_logging(verbose=args.verbose)
     for collection in COLLECTIONS:
         build_collection(collection)
 
