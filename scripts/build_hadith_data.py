@@ -108,7 +108,7 @@ def build_record(raw_hadith: dict, collection: str) -> dict:
 
 
 def build_collection(collection: str) -> None:
-    print(f"Fetching {collection}...")
+    logger.debug("Fetching %s...", collection)
     edition = fetch_edition(collection)
     records = [build_record(h, collection) for h in edition["hadiths"]]
 
@@ -126,7 +126,11 @@ def build_collection(collection: str) -> None:
     print(f"  wrote {len(records)} hadiths to {out_path}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Build bundled hadith grading dataset.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose diagnostic logging")
+    args = parser.parse_args(argv)
+    configure_script_logging(verbose=args.verbose)
     for collection in COLLECTIONS:
         build_collection(collection)
 
