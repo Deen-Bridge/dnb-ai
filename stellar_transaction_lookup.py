@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any, Callable
+from typing import Any
 
 SUPPORTED_NETWORKS: frozenset[str] = frozenset({"testnet", "public"})
 
@@ -111,18 +112,10 @@ def lookup_stellar_transaction(
         )
 
     succeeded = raw.get("successful")
-    tx_status = (
-        "successful"
-        if succeeded is True
-        else ("failed" if succeeded is False else "unknown")
-    )
-    ledger = (
-        int(raw["ledger"]) if "ledger" in raw and raw["ledger"] is not None else None
-    )
+    tx_status = "successful" if succeeded is True else ("failed" if succeeded is False else "unknown")
+    ledger = int(raw["ledger"]) if "ledger" in raw and raw["ledger"] is not None else None
     created_at = str(raw["created_at"]) if raw.get("created_at") else None
-    fee_charged = (
-        str(raw["fee_charged"]) if raw.get("fee_charged") is not None else None
-    )
+    fee_charged = str(raw["fee_charged"]) if raw.get("fee_charged") is not None else None
     memo_type = str(raw["memo_type"]) if raw.get("memo_type") else None
 
     return StellarTransactionLookupResult(
