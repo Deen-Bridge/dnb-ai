@@ -6,7 +6,9 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+import adaptive_teaching
 import main
+from answer_depth import DepthLevel
 from main import app
 
 client = TestClient(app)
@@ -150,6 +152,77 @@ def test_chat_rejects_empty_prompt_and_missing_prompt_without_calling_gemini(mon
     assert empty_prompt.status_code == 422
     assert missing_prompt.status_code == 422
     get_model.assert_not_called()
+
+
+def test_chat_applies_requested_depth_instructions(fake_model):
+    response = client.post("/chat", json={"prompt": "What is zakat?", "depth": "eli5"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["depth"]["level"] == "eli5"
+    assert payload["depth"]["can_go_deeper"] is True
+    assert payload["depth"]["can_go_simpler"] is False
+    prompt_sent = fake_model.sessions[0].messages[0]
+    assert "ANSWER DEPTH: Explain like I'm 5" in prompt_sent
+    assert "ruling" in prompt_sent
+
+
+def test_chat_rejects_unknown_depth_before_generating(monkeypatch):
+    get_model = MagicMock()
+    monkeypatch.setattr(main, "get_model", get_model)
+
+    response = client.post("/chat", json={"prompt": "What is zakat?", "depth": "wizard"})
+
+    assert response.status_code == 400
+    assert "hint" in response.json()
+    get_model.assert_not_called()
+
+
+def test_chat_answer_can_then_be_explained_more_simply(fake_model):
+    chat_id = str(uuid4())
+    answer = client.post(
+        "/chat",
+        json={"prompt": "What is zakat?", "chat_id": chat_id, "depth": "advanced"},
+    )
+
+    assert answer.status_code == 200
+    adjustment = client.post(
+        "/depth/adjust",
+        json={
+            "chat_id": chat_id,
+            "message_id": answer.json()["message_id"],
+            "direction": "simpler",
+        },
+    )
+
+    assert adjustment.status_code == 200
+    payload = adjustment.json()
+    assert payload["original_answer"] == answer.json()["response"]
+    assert payload["current_level"] == "intermediate"
+    assert payload["depth"]["position"] == 3
+
+
+def test_chat_uses_adaptive_recommendation_when_asked(fake_model, monkeypatch, tmp_path):
+    profile_store = adaptive_teaching.LearningProfileStore(str(tmp_path / "profiles.json"))
+    profile = profile_store.get("learner-1")
+    profile.level = DepthLevel.ELI5
+    profile.preferred_style = adaptive_teaching.TeachingStyle.VISUAL
+    profile_store.save(profile)
+
+    monkeypatch.setattr(main, "get_learning_profile_store", lambda: profile_store)
+    monkeypatch.setattr(main, "get_teaching_engine", lambda: adaptive_teaching.AdaptiveTeachingEngine())
+
+    response = client.post(
+        "/chat",
+        json={"prompt": "What is zakat?", "user_id": "learner-1", "adaptive": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["depth"]["level"] == "eli5"
+    assert payload["depth"]["adaptive"] is True
+    prompt_sent = fake_model.sessions[0].messages[0]
+    assert "Teaching style: visual" in prompt_sent
 
 
 def test_get_model_uses_islamic_prompt_and_safety_settings(monkeypatch):
