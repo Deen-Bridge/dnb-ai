@@ -145,6 +145,7 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from misinformation_api import router as misinformation_router
 from model_router import router as model_routing_router
 from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
@@ -398,6 +399,8 @@ app.include_router(swahili_router)
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
 # normalization and dialectal terminology lexicon (#136)
 app.include_router(arabic_dialect_router)
+# Religious misinformation flagging: detection, correction, and blocking of misinformation
+app.include_router(misinformation_router)
 # Factual consistency: cross-session contradiction prevention and reconciliation
 app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
