@@ -476,3 +476,8 @@ async def verse_themes(surah: int, ayah: int) -> VerseThemesResponse:
         )
     themes.sort(key=lambda t: -t["relevance_score"])
     return VerseThemesResponse(surah=surah, ayah=ayah, reference=f"{surah}:{ayah}", themes=themes)
+
+
+from recitation_verse_sync import router as recitation_sync_router  # noqa: E402
+
+router.include_router(recitation_sync_router)
