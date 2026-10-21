@@ -117,3 +117,8 @@ def _split_segments(text: str) -> list[str]:
 
     parts = [p.strip() for p in _re.split(r"[.!؟?،,؛;]+", text) if p and p.strip()]
     return parts or ([text] if text else [])
+
+
+from arabic_stt_optimizer import router as stt_optimizer_router  # noqa: E402
+
+router.include_router(stt_optimizer_router)
