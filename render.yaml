@@ -10,6 +10,8 @@ services:
         sync: false
       - key: SERVICE_API_KEY
         sync: false
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
       - key: LLM_PRIMARY
         value: gemini
       - key: LLM_FALLBACKS

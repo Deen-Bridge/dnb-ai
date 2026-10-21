@@ -29,8 +29,10 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from rate_limit import analysis_rate_limit, limit
 
 router = APIRouter(prefix="/audio-hadith", tags=["audio-hadith"])
 
@@ -486,11 +488,12 @@ def verify_transcript(transcript: str, language: str = "en") -> VerifyResponse:
 
 
 @router.post("/verify", response_model=VerifyResponse)
-async def verify_audio_hadith(request: VerifyRequest) -> VerifyResponse:
+@limit(analysis_rate_limit)
+async def verify_audio_hadith(request: Request, body: VerifyRequest) -> VerifyResponse:
     """Verify a transcribed audio Hadith narration against the bundled corpus."""
-    if not request.transcript.strip():
+    if not body.transcript.strip():
         raise HTTPException(status_code=422, detail="Transcript must not be empty.")
-    return verify_transcript(request.transcript, request.language)
+    return verify_transcript(body.transcript, body.language)
 
 
 from lecture_transcription import router as lecture_transcription_router  # noqa: E402

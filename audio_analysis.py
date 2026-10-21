@@ -72,10 +72,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from audio_hadith import normalize_text as hadith_normalize, strip_arabic_diacritics
+from rate_limit import limit, llm_rate_limit, media_rate_limit
 from sentiment import SentimentAnalysis, analyze as analyze_sentiment
 
 router = APIRouter(prefix="/audio", tags=["audio-analysis"])
@@ -1581,7 +1582,9 @@ def _failure(status_code: int, detail: str, hint: str | None = None) -> HTTPExce
 
 
 @router.post("/transcribe", response_model=TranscriptionOutput)
+@limit(media_rate_limit)
 async def transcribe_audio(
+    request: Request,
     file: UploadFile = File(..., description="Voice note / audio file (MP3, WAV, M4A, OGG)."),
     language: str | None = None,
 ) -> TranscriptionOutput:
@@ -1607,7 +1610,9 @@ async def transcribe_audio(
 
 
 @router.post("/analyze", response_model=AudioAnalysis)
+@limit(media_rate_limit)
 async def analyze_audio(
+    request: Request,
     file: UploadFile = File(..., description="Voice note / audio file (MP3, WAV, M4A, OGG)."),
     language: str | None = None,
 ) -> AudioAnalysis:
@@ -1641,10 +1646,11 @@ async def analyze_audio(
 
 
 @router.post("/generate", response_model=GenerateResponse)
-async def generate_answer(request: GenerateRequest) -> GenerateResponse:
+@limit(llm_rate_limit)
+async def generate_answer(request: Request, body: GenerateRequest) -> GenerateResponse:
     """Generate a grounded answer from transcribed content."""
     try:
-        return await get_responder().generate(request)
+        return await get_responder().generate(body)
     except TranscribeError as exc:
         raise _failure(503, str(exc), "Set GEMINI_API_KEY to enable response generation.") from exc
 

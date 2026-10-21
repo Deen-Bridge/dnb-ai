@@ -50,11 +50,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from async_runtime import http_client_pool
 from errors import APIException
+from rate_limit import analysis_rate_limit, limit
 from semantic_cache import get_keyed_cache
 
 logger = logging.getLogger(__name__)
@@ -1936,10 +1937,11 @@ async def list_tafsir_sources() -> list[TafsirSourceInfo]:
 
 
 @router.post("/tafsir", response_model=TafsirResponse)
-async def get_tafsir(request: TafsirRequest) -> TafsirResponse:
+@limit(analysis_rate_limit)
+async def get_tafsir(request: Request, body: TafsirRequest) -> TafsirResponse:
     """Explain an ayah (or a short range) from named classical tafsir works."""
     try:
-        response = await build_tafsir_response(request)
+        response = await build_tafsir_response(body)
     except InvalidReference as exc:
         raise APIException(
             status_code=400,
@@ -1952,18 +1954,19 @@ async def get_tafsir(request: TafsirRequest) -> TafsirResponse:
 
     logger.info(
         "Tafsir lookup %s (%s) -> %d ayat",
-        request.reference,
-        request.language,
+        body.reference,
+        body.language,
         len(response.ayat),
     )
     return response
 
 
 @router.post("/tafsir/compare", response_model=TafsirComparisonResponse)
-async def compare_tafsir(request: TafsirComparisonRequest) -> TafsirComparisonResponse:
+@limit(analysis_rate_limit)
+async def compare_tafsir(request: Request, body: TafsirComparisonRequest) -> TafsirComparisonResponse:
     """Compare at least ten attributed tafsir works for one ayah."""
     try:
-        response = await build_tafsir_comparison(request, generator=_get_comparison_generator())
+        response = await build_tafsir_comparison(body, generator=_get_comparison_generator())
     except InvalidReference as exc:
         raise APIException(
             status_code=400,
@@ -1976,8 +1979,8 @@ async def compare_tafsir(request: TafsirComparisonRequest) -> TafsirComparisonRe
 
     logger.info(
         "Tafsir comparison %s (%s) -> %d available works, %d unavailable",
-        request.reference,
-        request.language,
+        body.reference,
+        body.language,
         len(response.sources),
         len(response.unavailable),
     )
@@ -1985,10 +1988,11 @@ async def compare_tafsir(request: TafsirComparisonRequest) -> TafsirComparisonRe
 
 
 @router.post("/tafsir/batch", response_model=TafsirBatchResponse)
-async def get_tafsir_batch(request: TafsirBatchRequest) -> TafsirBatchResponse:
+@limit(analysis_rate_limit)
+async def get_tafsir_batch(request: Request, body: TafsirBatchRequest) -> TafsirBatchResponse:
     """Explain multiple ayah references concurrently with partial failure handling."""
     try:
-        response = await build_tafsir_batch_response(request)
+        response = await build_tafsir_batch_response(body)
     except InvalidBatchRequest as exc:
         raise APIException(
             status_code=400,

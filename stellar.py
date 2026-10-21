@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import overload
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from stellar_sdk import Server
 from stellar_sdk.exceptions import NotFoundError
@@ -28,6 +28,7 @@ from stellar_sdk.strkey import StrKey
 from async_runtime import http_client_pool
 from errors import APIException
 from nisab import NisabQuote, get_nisab, override_quote
+from rate_limit import analysis_rate_limit, limiter
 
 logger = logging.getLogger(__name__)
 
@@ -762,7 +763,8 @@ async def zakat_for_account(public_key: str, nisab_usd_override: float | None = 
 
 
 @router.post("/zakat", response_model=ZakatResponse)
-async def calculate_zakat(request: ZakatRequest):
+@limiter.limit(analysis_rate_limit)
+async def calculate_zakat(request: Request, body: ZakatRequest):
     """Calculate zakat due on a wallet's on-chain USDC balance."""
-    public_key = validate_public_key(request.public_key)
-    return await zakat_for_account(public_key, request.nisab_usd)
+    public_key = validate_public_key(body.public_key)
+    return await zakat_for_account(public_key, body.nisab_usd)
