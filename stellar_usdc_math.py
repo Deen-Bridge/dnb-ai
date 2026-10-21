@@ -28,7 +28,7 @@ class DeterministicPaymentBreakdown:
 
 
 def calculate_stellar_usdc_breakdown(
-    amount_input: str | int | Decimal,
+    amount_input: str | int | Decimal | float,
     network: str = "mainnet",
     asset_code: str = "USDC",
     operation_count: int = 1,
