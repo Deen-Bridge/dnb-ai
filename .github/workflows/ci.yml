@@ -38,6 +38,9 @@ jobs:
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam
 
+      - name: Run main app smoke tests
+        run: pytest -q tests/test_main.py
+
       - name: Run study generator tests
         run: pytest -q tests/test_study.py
 
