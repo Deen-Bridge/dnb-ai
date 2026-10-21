@@ -331,3 +331,8 @@ async def get_gregorian(hijri: str = Query(..., description="Hijri date (YYYY-MM
         raise HTTPException(status_code=400, detail=f"Invalid Hijri date: {str(e)}") from e
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+from voice_note_qa import router as voice_note_router  # noqa: E402
+
+router.include_router(voice_note_router)
