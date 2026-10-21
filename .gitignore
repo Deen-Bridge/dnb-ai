@@ -59,6 +59,9 @@ data/store.json
 feedback.db
 feedback.db-*
 
+# Versioned experiment state and metrics (runtime SQLite database)
+data/experiments.sqlite3*
+
 # Retrieval vector index (build artifact — large, binary; rebuilt from data/)
 data/retrieval_index.db
 data/retrieval_index.db-*
@@ -66,3 +69,7 @@ data/retrieval_index.db-*
 
 # Committed virtual environments are machine-specific — never commit them
 venv_linux/
+
+# Durable flashcard schedules and SQLite journals
+data/repetition.db
+data/repetition.db-*

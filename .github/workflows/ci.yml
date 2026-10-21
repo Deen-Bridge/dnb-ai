@@ -20,6 +20,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: '**/requirements*.txt'
 
       - name: Install dependencies
         run: |
@@ -39,15 +40,18 @@ jobs:
       - name: Run full test suite
         run: pytest -q tests/
 
-      - name: Verify the streaming cache measurably cuts latency (offline)
-        timeout-minutes: 5
-        run: python -m scripts.bench_stream_cache --rounds 3 --chunk-delay 0.2
-
       - name: Verify retrieval backfill is idempotent (offline demo)
         run: |
           python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings
           python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings | tee /tmp/ci-backfill-2.log
           grep -q "0 added, 0 updated" /tmp/ci-backfill-2.log
+
+      - name: Verify the streaming cache measurably cuts latency (offline)
+        timeout-minutes: 5
+        run: python -m scripts.bench_stream_cache --rounds 3 --chunk-delay 0.2
+
+      - name: Benchmark Quran phoneme alignment
+        run: python -m scripts.bench_phoneme_alignment
 
       - name: Validate theme-verse concordance dataset
         run: python scripts/build_theme_mappings.py --check
@@ -83,6 +87,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

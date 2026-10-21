@@ -230,7 +230,7 @@ class TestProgressTracking:
                 )
                 analysis = analyze_recitation(inp)
                 # Force the overall_score for trend detection
-                analysis.overall_score = s  # type: ignore[assignment]
+                analysis.overall_score = s
                 track_progress(self.user_id, analysis)
         report = track_progress(self.user_id, analyze_recitation(_perfect_input()))
         # At least we can verify the history grew

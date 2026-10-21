@@ -13,10 +13,11 @@ import os
 from enum import Enum
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from errors import APIException
+from rate_limit import limiter, llm_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -512,14 +513,15 @@ def _generate_content(
 
 
 @router.post("/study/generate", response_model=StudyGenerateResponse)
-async def generate_study_content(request: StudyGenerateRequest):
+@limiter.limit(llm_rate_limit)
+async def generate_study_content(request: Request, body: StudyGenerateRequest):
     """Generate quizzes and/or flashcards for Islamic study.
 
     Accepts a topic or lesson text and returns schema-validated quizzes
     and/or flashcards at the requested difficulty level.
     """
-    if isinstance(request.source, LessonTextSource):
-        text_len = len(request.source.lesson_text)
+    if isinstance(body.source, LessonTextSource):
+        text_len = len(body.source.lesson_text)
         if text_len > MAX_LESSON_TEXT_LENGTH:
             raise APIException(
                 status_code=422,
@@ -540,10 +542,10 @@ async def generate_study_content(request: StudyGenerateRequest):
 
     return _generate_content(
         generator=generator,
-        source=request.source,
-        kind=request.kind,
-        difficulty=request.difficulty,
-        count=request.count,
+        source=body.source,
+        kind=body.kind,
+        difficulty=body.difficulty,
+        count=body.count,
     )
 
 

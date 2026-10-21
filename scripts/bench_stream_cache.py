@@ -217,7 +217,7 @@ def run_benchmark(rounds: int = 5, chunk_delay: float = 0.25) -> BenchResult:
     original_chats = main.active_chats
 
     semantic_cache.set_fake_embedding(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))
-    main.get_model = lambda: model  # type: ignore[assignment]
+    main.get_model = lambda: model
     main.active_chats = {}
 
     with (
@@ -232,7 +232,7 @@ def run_benchmark(rounds: int = 5, chunk_delay: float = 0.25) -> BenchResult:
                 _time_stream(client, url, prompt)
                 warm = [_time_stream(client, url, prompt) for _ in range(rounds)]
         finally:
-            main.get_model = original_get_model  # type: ignore[assignment]
+            main.get_model = original_get_model
             main.active_chats = original_chats
             semantic_cache.set_fake_embedding(None)
             cache.clear()

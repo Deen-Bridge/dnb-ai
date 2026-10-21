@@ -47,8 +47,10 @@ from __future__ import annotations
 import re
 from enum import Enum
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+
+from rate_limit import analysis_rate_limit, limit
 
 router = APIRouter(prefix="/page-analysis", tags=["page-analysis"])
 
@@ -466,7 +468,8 @@ _ELEMENT_TYPE_DESCRIPTIONS: dict[ElementType, str] = {
 
 
 @router.post("/analyze", response_model=PageAnalysisResponse)
-async def analyze(page: PageInput) -> PageAnalysisResponse:
+@limit(analysis_rate_limit)
+async def analyze(request: Request, page: PageInput) -> PageAnalysisResponse:
     """Analyze one scanned Islamic book page from its OCR block layout.
 
     Returns per-block classification, a layout-aware reading order, extracted
