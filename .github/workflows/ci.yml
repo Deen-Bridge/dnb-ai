@@ -38,6 +38,9 @@ jobs:
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam
 
+      - name: Run main app smoke tests
+        run: pytest -q tests/test_main.py
+
       - name: Run corpus tests
         run: pytest -q tests/test_corpus.py
 
