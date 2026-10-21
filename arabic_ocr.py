@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -43,6 +44,8 @@ from typing import Any
 
 from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/arabic-ocr", tags=["arabic-ocr"])
 

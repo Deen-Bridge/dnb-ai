@@ -40,10 +40,13 @@ What it produces
 
 from __future__ import annotations
 
+import logging
 from enum import Enum
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/calligraphy", tags=["calligraphy"])
 
