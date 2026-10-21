@@ -307,10 +307,11 @@ async def browse_topic(
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     min_relevance: float = Query(0.0, ge=0.0, le=1.0),
     context_type: str | None = Query(None, description="'primary' or 'secondary'"),
+    surah: int | None = Query(None, ge=1, le=114, description="Restrict results to one surah"),
 ) -> ThemeBrowseResponse:
     """Browse one topic: its metadata, children, related topics, and verses.
 
-    ``min_relevance`` and ``context_type`` filter the verse list, giving the
+    ``min_relevance``, ``context_type``, and ``surah`` filter the verse list, giving the
     topic-browsing search the filtering capability the issue calls for.
     """
     retriever = _resolve_retriever()
@@ -319,7 +320,10 @@ async def browse_topic(
         theme_id,
         min_relevance=min_relevance,
         context_type=context_type,
-    )[:limit]
+    )
+    if surah is not None:
+        mappings = [mapping for mapping in mappings if mapping.surah == surah]
+    mappings = mappings[:limit]
     children = retriever.taxonomy.get_children(theme_id) if include_children else []
     related = retriever.taxonomy.get_related_themes(theme_id)
 
