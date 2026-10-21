@@ -55,9 +55,7 @@ def validate_stellar_network_context(
                 network=req,
                 data=None,
                 error_code="CONTRADICTORY_NETWORK_CONTEXT",
-                error_message=(
-                    f"Request network '{req}' contradicts configured network '{cfg}'."
-                ),
+                error_message=(f"Request network '{req}' contradicts configured network '{cfg}'."),
             )
 
     return StellarLookupEnvelope(
