@@ -491,3 +491,8 @@ async def verify_audio_hadith(request: VerifyRequest) -> VerifyResponse:
     if not request.transcript.strip():
         raise HTTPException(status_code=422, detail="Transcript must not be empty.")
     return verify_transcript(request.transcript, request.language)
+
+
+from lecture_transcription import router as lecture_transcription_router  # noqa: E402
+
+router.include_router(lecture_transcription_router)
