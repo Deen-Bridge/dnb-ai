@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/concordance/recitation-sync", tags=["recitation-sync"])
+router = APIRouter(prefix="/recitation-sync", tags=["recitation-sync"])
 
 
 class CanonicalVerseEntry(BaseModel):
