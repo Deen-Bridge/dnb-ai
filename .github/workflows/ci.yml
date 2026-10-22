@@ -151,3 +151,6 @@ jobs:
 
       - name: Run offline citation extraction eval
         run: pytest -q tests/test_page_analysis.py
+
+      - name: Run study session optimization tests
+        run: pytest -q tests/test_study_optimizer.py

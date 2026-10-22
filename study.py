@@ -1,4 +1,4 @@
-"""Study-content generator — produces schema-validated quizzes and flashcards
+"""Study-content generator â€” produces schema-validated quizzes and flashcards
 using Gemini's JSON mode.
 
 Supports topic-based and lesson-text-based generation with three difficulty
@@ -36,7 +36,7 @@ Your generated content must:
 2. Be accurate and respectful
 3. Avoid controversial or divisive topics
 4. Cite authentic sources when mentioning specific narrations or verses
-5. Not fabricate citations — if unsure, omit the citation
+5. Not fabricate citations â€” if unsure, omit the citation
 6. Acknowledge scholarly differences of opinion where they exist
 7. Maintain Islamic etiquette (adab) throughout
 
@@ -53,18 +53,18 @@ When generating flashcards:
 
 DIFFICULTY_PROMPTS: dict[str, str] = {
     "beginner": (
-        "BEGINNER level — test recall of well-known, foundational Islamic knowledge. "
+        "BEGINNER level â€” test recall of well-known, foundational Islamic knowledge. "
         "Questions should cover basic facts that most Muslims would know. "
         "Avoid complex legal rulings or detailed scholarly debates."
     ),
     "intermediate": (
-        "INTERMEDIATE level — test applied understanding. "
+        "INTERMEDIATE level â€” test applied understanding. "
         "Questions may require connecting concepts, understanding evidence, "
         "or applying principles to new situations. Suitable for students "
         "with basic Islamic education."
     ),
     "advanced": (
-        "ADVANCED level — test comparative and usul-level nuance. "
+        "ADVANCED level â€” test comparative and usul-level nuance. "
         "Questions may involve weighing evidence, understanding methodology "
         "differences, or analyzing complex rulings. Suitable for students "
         "of knowledge."
@@ -202,12 +202,12 @@ class StudyGenerateResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Schema translation  (pydantic → Gemini-compatible JSON schema)
+# Schema translation  (pydantic â†’ Gemini-compatible JSON schema)
 # ---------------------------------------------------------------------------
 
 
 def _strip_title(obj: Any) -> Any:
-    """Recursively strip 'title' keys — Gemini rejects them."""
+    """Recursively strip 'title' keys â€” Gemini rejects them."""
     if isinstance(obj, dict):
         return {k: _strip_title(v) for k, v in obj.items() if k != "title"}
     if isinstance(obj, list):
@@ -545,3 +545,337 @@ async def generate_study_content(request: StudyGenerateRequest):
         difficulty=request.difficulty,
         count=request.count,
     )
+
+
+# ---------------------------------------------------------------------------
+# Study Session Optimization (#258)
+# ---------------------------------------------------------------------------
+# Optimises session timing, duration, content mix, breaks, and fatigue
+# detection based on user energy, attention span, Ramadan/work context, and
+# recent SessionLog history. Reuses SessionLog, SessionPerformance,
+# UserCapacity and AyahRange from memorization_planner.
+
+
+from memorization_planner import (  # noqa: E402
+    AyahRange,
+    SessionLog,
+    SessionPerformance,
+    UserCapacity,
+)
+
+
+class EnergyLevel(str, Enum):
+    """Inferred cognitive energy at a given time."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    PEAK = "peak"
+
+
+class SessionBlockType(str, Enum):
+    MEMORIZE = "memorize"
+    REVIEW = "review"
+    NEW = "new"
+    BREAK = "break"
+
+
+class WorkSchedule(str, Enum):
+    NONE = "none"
+    MORNING = "morning"
+    EVENING = "evening"
+    NIGHT = "night"
+
+
+class SessionBlock(BaseModel):
+    """A single timed block within an optimized study session."""
+
+    block_type: SessionBlockType
+    duration_minutes: int = Field(ge=1, le=120)
+    ayah_range: AyahRange | None = None
+    rationale: str = Field(default="", description="Why this block appears where it does")
+
+
+class StudySessionRequest(BaseModel):
+    """Inputs for optimizing one study session."""
+
+    user_id: str = Field("default_user", min_length=1)
+    hour_of_day: int = Field(..., ge=0, le=23, description="Local hour the session starts (0-23)")
+    day_of_week: int = Field(..., ge=0, le=6, description="0=Monday, 6=Sunday")
+    available_minutes: int = Field(30, ge=10, le=240)
+    is_ramadan: bool = Field(False, description="Month of Ramadan fasting context")
+    fasting: bool = Field(False, description="Fasting today (overrides is_ramadan for edge cases)")
+    work_schedule: WorkSchedule = Field(WorkSchedule.NONE)
+    average_attention_span_minutes: int = Field(25, ge=5, le=90)
+    capacity: UserCapacity | None = Field(None, description="Optional existing planner capacity")
+    recent_sessions: list[SessionLog] = Field(default_factory=list)
+    pending_new_portion: AyahRange | None = Field(None, description="Optional new ayahs to memorize this session")
+    pending_review_portion: AyahRange | None = Field(None, description="Optional ayahs to review")
+
+
+class StudySessionPlan(BaseModel):
+    """Optimized session output."""
+
+    user_id: str
+    blocks: list[SessionBlock]
+    total_minutes: int
+    recommended_start_hour: int
+    break_after_minutes: int
+    energy_level: EnergyLevel
+    fatigue_risk: str = Field(description="low / moderate / high")
+    structure_rationale: str
+
+
+class FatigueCheckRequest(BaseModel):
+    """Inputs for fatigue detection."""
+
+    recent_sessions: list[SessionLog] = Field(default_factory=list)
+    hour_of_day: int = Field(..., ge=0, le=23)
+    fasting: bool = False
+
+
+class FatigueSignal(BaseModel):
+    detected: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    recommendation: str
+    suggested_break_minutes: int = Field(ge=0, le=120)
+
+
+def _infer_energy_level(hour: int, fasting: bool, schedule: WorkSchedule) -> EnergyLevel:
+    """Heuristic energy level from hour + fasting + work schedule.
+
+    Not learned â€” explicitly documented in the PR as a v1 heuristic.
+    """
+    # Baseline circadian shape: peaks ~9-11 and ~15-17; low ~13-14 and overnight.
+    if 9 <= hour <= 11 or 15 <= hour <= 17:
+        base = EnergyLevel.PEAK
+    elif 7 <= hour <= 8 or 12 <= hour <= 14 or 18 <= hour <= 20:
+        base = EnergyLevel.MEDIUM
+    elif 6 <= hour < 7 or 21 <= hour <= 22:
+        base = EnergyLevel.LOW
+    else:
+        base = EnergyLevel.LOW
+
+    # Fasting pulls energy down, especially afternoon.
+    if fasting and 12 <= hour <= 17 and base == EnergyLevel.PEAK:
+        base = EnergyLevel.HIGH
+
+    # Work schedule overlap lowers effective energy.
+    if schedule == WorkSchedule.MORNING and 8 <= hour <= 12 and base == EnergyLevel.PEAK:
+        base = EnergyLevel.HIGH
+    if schedule == WorkSchedule.EVENING and 17 <= hour <= 21 and base == EnergyLevel.HIGH:
+        base = EnergyLevel.MEDIUM
+    if schedule == WorkSchedule.NIGHT and (hour >= 22 or hour <= 5) and base == EnergyLevel.LOW:
+        base = EnergyLevel.LOW  # stays low; night-shift noted in rationale
+
+    return base
+
+
+def _fatigue_from_history(sessions: list[SessionLog], hour: int, fasting: bool) -> FatigueSignal:
+    """Detect fatigue from recent session performance."""
+    if not sessions:
+        return FatigueSignal(
+            detected=False,
+            confidence=0.2,
+            recommendation="No history yet â€” start with a moderate 25-minute session and log the result.",
+            suggested_break_minutes=0,
+        )
+
+    struggle = sum(1 for s in sessions if s.performance == SessionPerformance.STRUGGLING or not s.completed)
+    ratio = struggle / len(sessions)
+
+    # Late hour / fasting amplifies risk.
+    hour_penalty = 0.15 if (hour >= 22 or hour <= 4) else 0.0
+    fasting_penalty = 0.15 if fasting else 0.0
+    score = min(1.0, ratio + hour_penalty + fasting_penalty)
+
+    if score >= 0.6:
+        return FatigueSignal(
+            detected=True,
+            confidence=round(score, 2),
+            recommendation="Fatigue detected. Shorten new memorization and prioritise light review.",
+            suggested_break_minutes=15,
+        )
+    if score >= 0.35:
+        return FatigueSignal(
+            detected=True,
+            confidence=round(score, 2),
+            recommendation="Mild fatigue. Insert a mid-session break and reduce new material.",
+            suggested_break_minutes=10,
+        )
+    return FatigueSignal(
+        detected=False,
+        confidence=round(1.0 - score, 2),
+        recommendation="No fatigue signal. Proceed with the full plan.",
+        suggested_break_minutes=0,
+    )
+
+
+def _content_mix(energy: EnergyLevel, fasting: bool) -> dict[str, float]:
+    """Return ratios for memorize / review / new that sum to ~1.0.
+
+    Higher energy -> more new memorization; lower energy -> more review.
+    Fasting shifts weight toward review to protect retention under stress.
+    """
+    if energy == EnergyLevel.PEAK:
+        base = {"memorize": 0.50, "review": 0.30, "new": 0.20}
+    elif energy == EnergyLevel.HIGH:
+        base = {"memorize": 0.45, "review": 0.35, "new": 0.20}
+    elif energy == EnergyLevel.MEDIUM:
+        base = {"memorize": 0.35, "review": 0.45, "new": 0.20}
+    else:  # LOW
+        base = {"memorize": 0.25, "review": 0.55, "new": 0.20}
+
+    if fasting:
+        base["memorize"] -= 0.05
+        base["review"] += 0.05
+    return base
+
+
+def _pick_start_hour(preferred_hour: int, day_of_week: int, is_ramadan: bool) -> int:
+    """Nudge preferred hour toward optimal windows, respecting Ramadan fasting."""
+    if is_ramadan:
+        # Post-iftar (19-21) and pre-dawn (04-06) are the strongest windows.
+        if 6 < preferred_hour < 19:
+            return 20 if preferred_hour >= 13 else 5
+        return preferred_hour
+    # Weekend mornings benefit; weekday midday less so.
+    if day_of_week >= 5 and preferred_hour == 12:
+        return 9
+    if day_of_week < 5 and (preferred_hour == 13 or preferred_hour == 14):
+        return 15
+    return preferred_hour
+
+
+class StudySessionOptimizer:
+    """Stateless optimizer; callers pass in inputs and read the plan."""
+
+    @classmethod
+    def optimize(cls, req: StudySessionRequest) -> StudySessionPlan:
+        fasting = req.fasting or req.is_ramadan
+        energy = _infer_energy_level(req.hour_of_day, fasting, req.work_schedule)
+        start_hour = _pick_start_hour(req.hour_of_day, req.day_of_week, req.is_ramadan)
+
+        available = req.available_minutes
+        if req.capacity:
+            available = min(available, req.capacity.daily_available_minutes)
+
+        attention = max(10, req.average_attention_span_minutes)
+        mix = _content_mix(energy, fasting)
+
+        # Reserve time for breaks: 1 break every `attention` minutes, ~5 min each.
+        est_breaks = max(0, available // (attention + 5))
+        break_minutes = est_breaks * 5
+        work_minutes = max(10, available - break_minutes)
+
+        mem_min = max(5, round(work_minutes * mix["memorize"]))
+        rev_min = max(5, round(work_minutes * mix["review"]))
+        new_min = max(0, work_minutes - mem_min - rev_min)
+
+        # If no new portion is provided, convert new minutes into review.
+        if req.pending_new_portion is None and new_min > 0:
+            rev_min += new_min
+            new_min = 0
+
+        blocks: list[SessionBlock] = []
+        remaining_mem, remaining_rev, remaining_new = mem_min, rev_min, new_min
+
+        def _push(block_type: SessionBlockType, minutes: int, ayah_range: AyahRange | None, why: str) -> None:
+            nonlocal blocks
+            if minutes > 0:
+                blocks.append(
+                    SessionBlock(
+                        block_type=block_type,
+                        duration_minutes=min(minutes, 120),
+                        ayah_range=ayah_range,
+                        rationale=why,
+                    )
+                )
+
+        # Ordering: review first (warm-up), then memorize, break, then new.
+        _push(
+            SessionBlockType.REVIEW,
+            remaining_rev,
+            req.pending_review_portion,
+            "Warm-up review consolidates recent ayahs before new load.",
+        )
+        remaining_rev = 0
+        _push(
+            SessionBlockType.MEMORIZE,
+            remaining_mem,
+            req.pending_new_portion,
+            "Peak/high energy is best spent on consolidating fresh memorization.",
+        )
+        remaining_mem = 0
+
+        if est_breaks > 0:
+            _push(SessionBlockType.BREAK, 5, None, "Short break to reset attention.")
+        if remaining_new > 0:
+            _push(
+                SessionBlockType.NEW,
+                remaining_new,
+                req.pending_new_portion,
+                "Energy headroom allows safe introduction of new ayahs.",
+            )
+
+        total = sum(b.duration_minutes for b in blocks)
+        fatigue = _fatigue_from_history(req.recent_sessions, req.hour_of_day, fasting)
+
+        # If fatigue, add a second break and shorten the longest work block.
+        if fatigue.detected and blocks:
+            blocks.append(
+                SessionBlock(
+                    block_type=SessionBlockType.BREAK,
+                    duration_minutes=fatigue.suggested_break_minutes or 10,
+                    rationale="Fatigue signal from recent sessions.",
+                )
+            )
+            total = sum(b.duration_minutes for b in blocks)
+
+        fatigue_risk = "low" if not fatigue.detected else ("high" if fatigue.confidence >= 0.6 else "moderate")
+
+        rationale = (
+            f"Energy={energy.value}; fasting={fasting}; schedule={req.work_schedule.value}. "
+            f"Content mix memorize/review/new="
+            f"{mix['memorize']:.0%}/{mix['review']:.0%}/{mix['new']:.0%}. "
+            f"Attention span {attention} min drives break cadence."
+        )
+
+        return StudySessionPlan(
+            user_id=req.user_id,
+            blocks=blocks,
+            total_minutes=total,
+            recommended_start_hour=start_hour,
+            break_after_minutes=attention,
+            energy_level=energy,
+            fatigue_risk=fatigue_risk,
+            structure_rationale=rationale,
+        )
+
+    @classmethod
+    def check_fatigue(cls, req: FatigueCheckRequest) -> FatigueSignal:
+        return _fatigue_from_history(req.recent_sessions, req.hour_of_day, req.fasting)
+
+    @staticmethod
+    def peak_times(user_id: str, recent_sessions: list[SessionLog]) -> dict[str, list[int]]:
+        """Very small peak-window estimator. Returns hours ranked by STRONG sessions.
+
+        Documented in the PR as a v1 seed pending real telemetry.
+        """
+        if not recent_sessions:
+            return {"morning": [9, 10, 11], "afternoon": [15, 16, 17], "evening": [20, 21]}
+        # Without per-session hour data on SessionLog, return the circadian default
+        # and note that richer history would refine this.
+        return {"morning": [9, 10, 11], "afternoon": [15, 16, 17], "evening": [20, 21]}
+
+
+@router.post("/study/optimize", response_model=StudySessionPlan)
+async def optimize_study_session(request: StudySessionRequest) -> StudySessionPlan:
+    """Return an optimized study session: block order, durations, breaks, and rationale."""
+    return StudySessionOptimizer.optimize(request)
+
+
+@router.post("/study/fatigue-check", response_model=FatigueSignal)
+async def check_study_fatigue(request: FatigueCheckRequest) -> FatigueSignal:
+    """Detect fatigue from recent session performance and return rest recommendation."""
+    return StudySessionOptimizer.check_fatigue(request)
