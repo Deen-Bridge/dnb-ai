@@ -131,6 +131,7 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from stellar_contract_events import router as stellar_contract_events_router
 from stellar_fee_bump import build_chat_fee_bump_context, router as stellar_fee_bump_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
@@ -558,6 +559,8 @@ def _server_error_response(detail: str, hint: str) -> dict[str, Any]:
 app.include_router(stellar_router)
 # Offline fee-bump envelope explainer: decodes, never signs or submits.
 app.include_router(stellar_fee_bump_router)
+# Offline Soroban contract event topic decoder: reads supplied XDR, never fetches.
+app.include_router(stellar_contract_events_router)
 # Quranic concordance: topic-based ayat discovery (#125)
 app.include_router(concordance_router)
 app.include_router(reasoning_router)

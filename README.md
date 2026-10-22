@@ -62,6 +62,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/stellar/info` | Stellar network, USDC issuer, and supported AI features |
 | `POST` | `/stellar/usdc/convert` | Convert USDC to stroops or stroops to USDC |
 | `POST` | `/stellar/fee-bump/explain` | Decode and explain a fee-bump transaction envelope (offline; never signs or submits) |
+| `POST` | `/stellar/contract-events/decode` | Decode Soroban contract event topics and value, and check Stellar Asset Contract events (offline) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
@@ -826,6 +827,34 @@ The explainer is fully offline: it never reads Horizon, signs, submits, or pays
 for anything. Input that looks like a secret key is refused and never echoed,
 logged, or decoded, and the assistant is instructed never to ask for a secret
 key or seed phrase. These answers bypass the semantic cache.
+
+### Contract event topic decoder
+
+Soroban contract events carry up to four topics and a value, each a base64
+XDR `SCVal` as Soroban RPC's `getEvents` returns them.
+`POST /stellar/contract-events/decode` decodes them into typed JSON (integers
+as decimal strings, so `i128` amounts stay exact) and reads SEP-41 token
+events — `transfer`, `mint`, `burn`, `clawback`, `approve`, `set_admin`,
+`set_authorized` and `fee` — in both the pre- and post-protocol-23 (CAP-67)
+topic layouts, including transfers to muxed accounts. A `getEvents` entry can
+be posted as-is:
+
+```bash
+curl -sX POST http://localhost:8000/stellar/contract-events/decode \
+  -H 'Content-Type: application/json' \
+  -d '{"topic": ["AAAADwAAAAh0cmFuc2Zlcg==", "..."], "value": "AAAACg...", "contractId": "CCW6...", "network": "public"}'
+```
+
+When a Stellar Asset Contract event names its asset (for example
+`USDC:GA5Z...`), the decoder derives that asset's contract ID for the chosen
+network and compares it with `contractId`. Any contract can emit an event that
+names USDC, so the response marks the emitter `verified`, `other_network`,
+`mismatch` (a lookalike that moved nothing real), or `not_checked` when no
+contract ID was given. The decoder is fully offline: it never reads Soroban
+RPC or Horizon, signs, or submits anything. Input that looks like a secret key
+is refused, and secret-key-shaped strings inside event data are redacted.
+Regression fixtures covering every `SCVal` type and each token event shape
+live in `tests/fixtures/stellar_contract_events.json`.
 
 **Purchase history in chat.** A signed-in frontend can pass a short
 `transactions` summary (hash, amount, status, item title, date, optional memo)

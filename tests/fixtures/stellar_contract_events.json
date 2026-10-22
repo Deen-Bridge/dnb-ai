@@ -1,0 +1,879 @@
+{
+  "_comment": "Soroban contract event decoding fixtures. Each event mirrors a Soroban RPC getEvents entry (topic, value, contractId) and is built from throwaway all-zero/one/three seed keys that control nothing on any network. USDC issuers and Stellar Asset Contract IDs are the real public and testnet ones. Expected values are written by hand, not produced by the decoder.",
+  "scvals": [
+    {
+      "name": "bool",
+      "xdr": "AAAAAAAAAAE=",
+      "expected": {
+        "type": "bool",
+        "value": true
+      }
+    },
+    {
+      "name": "void",
+      "xdr": "AAAAAQ==",
+      "expected": {
+        "type": "void"
+      }
+    },
+    {
+      "name": "u32_max",
+      "xdr": "AAAAA/////8=",
+      "expected": {
+        "type": "u32",
+        "value": "4294967295"
+      }
+    },
+    {
+      "name": "i32_min",
+      "xdr": "AAAABIAAAAA=",
+      "expected": {
+        "type": "i32",
+        "value": "-2147483648"
+      }
+    },
+    {
+      "name": "u64_max",
+      "xdr": "AAAABf//////////",
+      "expected": {
+        "type": "u64",
+        "value": "18446744073709551615"
+      }
+    },
+    {
+      "name": "i64_min",
+      "xdr": "AAAABoAAAAAAAAAA",
+      "expected": {
+        "type": "i64",
+        "value": "-9223372036854775808"
+      }
+    },
+    {
+      "name": "u128_max",
+      "xdr": "AAAACf////////////////////8=",
+      "expected": {
+        "type": "u128",
+        "value": "340282366920938463463374607431768211455"
+      }
+    },
+    {
+      "name": "i128_min",
+      "xdr": "AAAACoAAAAAAAAAAAAAAAAAAAAA=",
+      "expected": {
+        "type": "i128",
+        "value": "-170141183460469231731687303715884105728"
+      }
+    },
+    {
+      "name": "u256_max",
+      "xdr": "AAAAC///////////////////////////////////////////",
+      "expected": {
+        "type": "u256",
+        "value": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+      }
+    },
+    {
+      "name": "i256_min",
+      "xdr": "AAAADIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expected": {
+        "type": "i256",
+        "value": "-57896044618658097711785492504343953926634992332820282019728792003956564819968"
+      }
+    },
+    {
+      "name": "timepoint",
+      "xdr": "AAAABwAAAABo+B6A",
+      "expected": {
+        "type": "timepoint",
+        "value": "1761091200"
+      }
+    },
+    {
+      "name": "duration",
+      "xdr": "AAAACAAAAAAAAVGA",
+      "expected": {
+        "type": "duration",
+        "value": "86400"
+      }
+    },
+    {
+      "name": "bytes",
+      "xdr": "AAAADQAAAAXerb7vAAAAAA==",
+      "expected": {
+        "type": "bytes",
+        "value": "deadbeef00"
+      }
+    },
+    {
+      "name": "arabic_string",
+      "xdr": "AAAADgAAACnYqNiz2YUg2KfZhNmE2Ycg2KfZhNix2K3ZhdmGINin2YTYsdit2YrZhQAAAA==",
+      "expected": {
+        "type": "string",
+        "value": "بسم الله الرحمن الرحيم"
+      }
+    },
+    {
+      "name": "symbol",
+      "xdr": "AAAADwAAAAh0cmFuc2Zlcg==",
+      "expected": {
+        "type": "symbol",
+        "value": "transfer"
+      }
+    },
+    {
+      "name": "account_address",
+      "xdr": "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+      "expected": {
+        "type": "address",
+        "value": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
+      }
+    },
+    {
+      "name": "contract_address",
+      "xdr": "AAAAEgAAAAEHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw==",
+      "expected": {
+        "type": "address",
+        "value": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR"
+      }
+    },
+    {
+      "name": "muxed_address",
+      "xdr": "AAAAEgAAAAIAAAAAAAAAKjtqJ7zOtqQtYqOo0CpvDXNlMhV3HeJDpjrASKGLWdop",
+      "expected": {
+        "type": "address",
+        "value": "MA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSAAAAAAAAAAAFIXKK"
+      }
+    },
+    {
+      "name": "contract_error",
+      "xdr": "AAAAAgAAAAAAAAAH",
+      "expected": {
+        "type": "error",
+        "value": "contract:7"
+      }
+    },
+    {
+      "name": "host_error",
+      "xdr": "AAAAAgAAAAkAAAAG",
+      "expected": {
+        "type": "error",
+        "value": "auth:invalid_action"
+      }
+    },
+    {
+      "name": "empty_vec",
+      "xdr": "AAAAEAAAAAEAAAAA",
+      "expected": {
+        "type": "vec",
+        "items": []
+      }
+    },
+    {
+      "name": "vec",
+      "xdr": "AAAAEAAAAAEAAAACAAAADwAAAAdhcHByb3ZlAAAAAAMACSfA",
+      "expected": {
+        "type": "vec",
+        "items": [
+          {
+            "type": "symbol",
+            "value": "approve"
+          },
+          {
+            "type": "u32",
+            "value": "600000"
+          }
+        ]
+      }
+    },
+    {
+      "name": "map",
+      "xdr": "AAAAEQAAAAEAAAACAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAAATEtAAAAADwAAAAt0b19tdXhlZF9pZAAAAAAFAAAAAAAAACo=",
+      "expected": {
+        "type": "map",
+        "entries": [
+          {
+            "key": {
+              "type": "symbol",
+              "value": "amount"
+            },
+            "value": {
+              "type": "i128",
+              "value": "5000000"
+            }
+          },
+          {
+            "key": {
+              "type": "symbol",
+              "value": "to_muxed_id"
+            },
+            "value": {
+              "type": "u64",
+              "value": "42"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "sac_usdc_transfer_public",
+      "description": "1.25 USDC sent between accounts by the genuine public-network USDC contract.",
+      "network": "public",
+      "contractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAAD1VU0RDOkdBNVpTRUpZQjM3SlJDNUFWQ0lBNU1PUDRSSFRNMzM1WDJLR1gzSUhPSkFQUDVSRTM0SzRLWlZOAAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAC+vCA=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "12500000",
+          "amount_display": "1.2500000",
+          "asset": "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+        },
+        "asset_contract_id": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "sac_usdc_transfer_testnet",
+      "description": "A 25 USDC course purchase on testnet, using the platform's test USDC issuer.",
+      "network": "testnet",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAEHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw==",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAA7msoA=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "to": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR"
+          },
+          "amount": "250000000",
+          "amount_display": "25.0000000",
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "spoofed_usdc_transfer",
+      "description": "Identical topics to a real USDC transfer, emitted by an unrelated contract.",
+      "network": "public",
+      "contractId": "CAEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQTD2L",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAAD1VU0RDOkdBNVpTRUpZQjM3SlJDNUFWQ0lBNU1PUDRSSFRNMzM1WDJLR1gzSUhPSkFQUDVSRTM0SzRLWlZOAAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAC+vCA=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "12500000",
+          "amount_display": "1.2500000",
+          "asset": "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+        },
+        "asset_contract_id": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+        "asset_contract_status": "mismatch",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "public_usdc_event_decoded_for_testnet",
+      "description": "A public-network USDC event checked against testnet: the contract belongs to the other network.",
+      "network": "testnet",
+      "contractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAAD1VU0RDOkdBNVpTRUpZQjM3SlJDNUFWQ0lBNU1PUDRSSFRNMzM1WDJLR1gzSUhPSkFQUDVSRTM0SzRLWlZOAAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAC+vCA=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "12500000",
+          "amount_display": "1.2500000",
+          "asset": "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+        },
+        "asset_contract_id": "CA2E53VHFZ6YSWQIEIPBXJQGT6VW3VKWWZO555XKRQXYJ63GEBJJGHY7",
+        "asset_contract_status": "other_network",
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "sac_transfer_to_muxed_cap67",
+      "description": "Protocol 23 transfer to a muxed account: the muxed ID moves into a map value.",
+      "network": "public",
+      "contractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAADgAAAD1VU0RDOkdBNVpTRUpZQjM3SlJDNUFWQ0lBNU1PUDRSSFRNMzM1WDJLR1gzSUhPSkFQUDVSRTM0SzRLWlZOAAAA"
+      ],
+      "value": "AAAAEQAAAAEAAAACAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAAATEtAAAAADwAAAAt0b19tdXhlZF9pZAAAAAAFAAAAAAAAACo=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR",
+            "to": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
+          },
+          "amount": "5000000",
+          "amount_display": "0.5000000",
+          "asset": "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "to_muxed_id": "42"
+        },
+        "asset_contract_id": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "sac_native_xlm_transfer",
+      "description": "XLM moved through the native asset's contract.",
+      "network": "public",
+      "contractId": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAAAZuYXRpdmUAAA=="
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAACYloA=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "10000000",
+          "amount_display": "1.0000000",
+          "asset": "native"
+        },
+        "asset_contract_id": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "sac_mint_cap67",
+      "description": "Protocol 23 mint: the admin topic is gone.",
+      "network": "testnet",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "topic": [
+        "AAAADwAAAARtaW50",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAADuaygA=",
+      "expected": {
+        "event_name": "mint",
+        "topic_types": [
+          "symbol",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "mint",
+          "addresses": {
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "1000000000",
+          "amount_display": "100.0000000",
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "sac_mint_legacy",
+      "description": "Pre-protocol-23 mint, which still names the admin.",
+      "network": "testnet",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "topic": [
+        "AAAADwAAAARtaW50",
+        "AAAAEgAAAAAAAAAA7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAADuaygA=",
+      "expected": {
+        "event_name": "mint",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "mint",
+          "addresses": {
+            "admin": "GDWUSKGGFDI4FRXK5EBTRECZSVQSSWJHHJOGH6JWG3AUMFFMQ435DIAG",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "1000000000",
+          "amount_display": "100.0000000",
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "custom_token_mint_legacy",
+      "description": "A custom SEP-41 token's mint: no asset topic, so the amount stays in base units.",
+      "network": "testnet",
+      "contractId": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
+      "topic": [
+        "AAAADwAAAARtaW50",
+        "AAAAEgAAAAAAAAAA7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAAAAAM=",
+      "expected": {
+        "event_name": "mint",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address"
+        ],
+        "token_event": {
+          "kind": "mint",
+          "addresses": {
+            "admin": "GDWUSKGGFDI4FRXK5EBTRECZSVQSSWJHHJOGH6JWG3AUMFFMQ435DIAG",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "3"
+        },
+        "asset_contract_id": null,
+        "asset_contract_status": null,
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "custom_token_burn",
+      "description": "A custom SEP-41 token's burn.",
+      "network": "testnet",
+      "contractId": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
+      "topic": [
+        "AAAADwAAAARidXJu",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik="
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAAAA+g=",
+      "expected": {
+        "event_name": "burn",
+        "topic_types": [
+          "symbol",
+          "address"
+        ],
+        "token_event": {
+          "kind": "burn",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
+          },
+          "amount": "1000"
+        },
+        "asset_contract_id": null,
+        "asset_contract_status": null,
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "sac_clawback_legacy",
+      "description": "Pre-protocol-23 clawback with the admin topic.",
+      "network": "testnet",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "topic": [
+        "AAAADwAAAAhjbGF3YmFjaw==",
+        "AAAAEgAAAAAAAAAA7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAExLQA=",
+      "expected": {
+        "event_name": "clawback",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "clawback",
+          "addresses": {
+            "admin": "GDWUSKGGFDI4FRXK5EBTRECZSVQSSWJHHJOGH6JWG3AUMFFMQ435DIAG",
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
+          },
+          "amount": "20000000",
+          "amount_display": "2.0000000",
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "sac_approve",
+      "description": "An allowance for a course contract, expiring at a ledger.",
+      "network": "testnet",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "topic": [
+        "AAAADwAAAAdhcHByb3ZlAA==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAEHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw==",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAAEAAAAAEAAAACAAAACgAAAAAAAAAAAAAAAAX14QAAAAADAAknwA==",
+      "expected": {
+        "event_name": "approve",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "approve",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "spender": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR"
+          },
+          "amount": "100000000",
+          "amount_display": "10.0000000",
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+          "live_until_ledger": 600000
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "sac_set_admin",
+      "description": "Admin rights handed to a new account; the new admin is the value.",
+      "network": "testnet",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "topic": [
+        "AAAADwAAAAlzZXRfYWRtaW4AAAA=",
+        "AAAAEgAAAAAAAAAA7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+      "expected": {
+        "event_name": "set_admin",
+        "topic_types": [
+          "symbol",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "set_admin",
+          "addresses": {
+            "admin": "GDWUSKGGFDI4FRXK5EBTRECZSVQSSWJHHJOGH6JWG3AUMFFMQ435DIAG",
+            "new_admin": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "sac_set_authorized_cap67",
+      "description": "Protocol 23 deauthorization of a holder.",
+      "network": "testnet",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "topic": [
+        "AAAADwAAAA5zZXRfYXV0aG9yaXplZAAA",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAAAAAAAAA=",
+      "expected": {
+        "event_name": "set_authorized",
+        "topic_types": [
+          "symbol",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "set_authorized",
+          "addresses": {
+            "id": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
+          },
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+          "authorized": false
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "verified",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "native_fee_cap67",
+      "description": "Protocol 23 fee event from the native asset contract (no asset topic).",
+      "network": "public",
+      "contractId": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
+      "topic": [
+        "AAAADwAAAANmZWUA",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik="
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAAAAGQ=",
+      "expected": {
+        "event_name": "fee",
+        "topic_types": [
+          "symbol",
+          "address"
+        ],
+        "token_event": {
+          "kind": "fee",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
+          },
+          "amount": "100"
+        },
+        "asset_contract_id": null,
+        "asset_contract_status": null,
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "transfer_topics_only",
+      "description": "Topics without a value still identify the transfer; the amount is unknown.",
+      "network": "testnet",
+      "contractId": null,
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": null,
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        },
+        "asset_contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "asset_contract_status": "not_checked",
+        "is_platform_usdc": true
+      }
+    },
+    {
+      "name": "course_enrollment_custom_event",
+      "description": "An application event that is not a token event; decoded generically.",
+      "network": "testnet",
+      "contractId": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
+      "topic": [
+        "AAAADwAAAAhlbnJvbGxlZA==",
+        "AAAABQAAAAAAAAAH",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik="
+      ],
+      "value": "AAAAEQAAAAEAAAACAAAADwAAAAJhdAAAAAAABwAAAABo+B6AAAAADwAAAARwYWlkAAAACgAAAAAAAAAAAAAAAAL68IA=",
+      "expected": {
+        "event_name": "enrolled",
+        "topic_types": [
+          "symbol",
+          "u64",
+          "address"
+        ],
+        "token_event": null,
+        "asset_contract_id": null,
+        "asset_contract_status": null,
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "transfer_with_unexpected_value",
+      "description": "Named transfer but carries a string value, so it is not read as SEP-41.",
+      "network": "public",
+      "contractId": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+      ],
+      "value": "AAAADgAAAAQxLjI1",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address"
+        ],
+        "token_event": null,
+        "asset_contract_id": null,
+        "asset_contract_status": null,
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "transfer_with_non_address_topic",
+      "description": "Named transfer, but a course ID sits where an address belongs.",
+      "network": "testnet",
+      "contractId": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAABQAAAAAAAAAH",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAL68IA=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "u64",
+          "address"
+        ],
+        "token_event": null,
+        "asset_contract_id": null,
+        "asset_contract_status": null,
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "hash_first_topic",
+      "description": "First topic is a 32-byte hash, not a symbol.",
+      "network": "testnet",
+      "contractId": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
+      "topic": [
+        "AAAADQAAACAAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHw==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik="
+      ],
+      "value": "AAAAAQ==",
+      "expected": {
+        "event_name": null,
+        "topic_types": [
+          "bytes",
+          "address"
+        ],
+        "token_event": null,
+        "asset_contract_id": null,
+        "asset_contract_status": null,
+        "is_platform_usdc": false
+      }
+    },
+    {
+      "name": "invalid_asset_topic",
+      "description": "A transfer naming an asset whose issuer is not a valid account.",
+      "network": "public",
+      "contractId": "CAEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQTD2L",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+        "AAAAEgAAAAAAAAAAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "AAAADgAAABBVU0RDOk5PVEFOSVNTVUVS"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAC+vCA=",
+      "expected": {
+        "event_name": "transfer",
+        "topic_types": [
+          "symbol",
+          "address",
+          "address",
+          "string"
+        ],
+        "token_event": {
+          "kind": "transfer",
+          "addresses": {
+            "from": "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH",
+            "to": "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+          },
+          "amount": "12500000",
+          "asset": "USDC:NOTANISSUER"
+        },
+        "asset_contract_id": null,
+        "asset_contract_status": "invalid_asset",
+        "is_platform_usdc": false
+      }
+    }
+  ]
+}

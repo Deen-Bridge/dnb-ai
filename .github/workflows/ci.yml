@@ -104,6 +104,9 @@ jobs:
       - name: Run Stellar fee-bump explainer tests
         run: pytest -q tests/test_stellar_fee_bump.py
 
+      - name: Run Stellar contract event decoder tests
+        run: pytest -q tests/test_stellar_contract_events.py
+
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
 
