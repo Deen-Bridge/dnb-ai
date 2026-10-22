@@ -1,3 +1,9 @@
+# Render's free-tier web services sleep after a period without traffic. This
+# scheduled workflow intentionally pings the production /ping endpoint to keep
+# the FastAPI instance warm, trading GitHub Actions minutes for lower first-
+# request latency. Remove the workflow if Render no longer sleeps (for example
+# after moving to a paid plan), or adjust the cron interval if the sleep window
+# changes.
 name: Keep Render Awake
 
 on:
