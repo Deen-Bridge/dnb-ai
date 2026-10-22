@@ -4,6 +4,7 @@ Only explicitly published records are exposed; callers cannot retrieve draft or
 private fields through this module. A later indexer can replace the in-memory
 source without changing the filtering contract.
 """
+
 from dataclasses import dataclass
 
 

@@ -101,11 +101,7 @@ class Surah:
     @property
     def words(self) -> list[tuple[int, int, str]]:
         """Flat ``(ayah, word_index, normalized_word)`` list, 1-based ayah."""
-        return [
-            (a, i, w)
-            for a, text in enumerate(self.ayat, start=1)
-            for i, w in enumerate(tokenize(text), start=1)
-        ]
+        return [(a, i, w) for a, text in enumerate(self.ayat, start=1) for i, w in enumerate(tokenize(text), start=1)]
 
 
 _SURAHS: dict[int, Surah] = {
@@ -583,9 +579,7 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
         ayah, widx, expected = words[w]
         t = word_to_token.get(w)
         if t is None:
-            aligned.append(
-                AlignedWord(ayah=ayah, word_index=widx, expected=expected, heard=None, status="missing")
-            )
+            aligned.append(AlignedWord(ayah=ayah, word_index=widx, expected=expected, heard=None, status="missing"))
             continue
         t_time = token_times[t]
         aligned.append(
@@ -610,9 +604,7 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
     for k, a in enumerate(missing):
         if k < len(inside_extra):
             issues.append(
-                RecitationIssue(
-                    type="substitution", ayah=a.ayah, expected=a.expected, heard=tokens[inside_extra[k]]
-                )
+                RecitationIssue(type="substitution", ayah=a.ayah, expected=a.expected, heard=tokens[inside_extra[k]])
             )
         else:
             issues.append(RecitationIssue(type="omission", ayah=a.ayah, expected=a.expected))
