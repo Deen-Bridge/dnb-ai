@@ -61,6 +61,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
 | `GET` | `/stellar/info` | Stellar network, USDC issuer, and supported AI features |
 | `POST` | `/stellar/usdc/convert` | Convert USDC to stroops or stroops to USDC |
+| `POST` | `/stellar/fee-bump/explain` | Decode and explain a fee-bump transaction envelope (offline; never signs or submits) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
@@ -794,6 +795,37 @@ Amounts with more than seven decimal places and fractional stroop values are
 rejected rather than silently rounded. The AI service only provides the
 calculation; Stellar network fees are dynamic and are not estimated by this
 endpoint.
+
+### Fee-bump transaction explainer
+
+A fee bump (CAP-15) wraps an already-signed transaction in an outer envelope
+whose fee is paid by another account — for example a sponsor covering a
+learner's network fee, or a stuck transaction resubmitted with a higher fee.
+`POST /stellar/fee-bump/explain` decodes a fee-bump envelope and explains who
+pays, whose transaction is wrapped, the maximum fee in stroops and XLM, and
+whether the fee meets the protocol's minimum and fee-rate rules:
+
+```bash
+curl -sX POST http://localhost:8000/stellar/fee-bump/explain \
+  -H 'Content-Type: application/json' \
+  -d '{"envelope_xdr": "AAAABQ...", "network": "testnet", "base_fee_stroops": 100}'
+```
+
+`network` defaults to `STELLAR_NETWORK` (`mainnet` is accepted as an alias for
+`public`). Transaction hashes and signatures are bound to the network
+passphrase, so the response reports each hash for the chosen network and
+whether the fee source's and inner source's signatures verify there; an
+envelope signed for the other network is flagged as `other_network`.
+`base_fee_stroops` (default 100) lets the caller check the fee against a surge
+price they observed. Soroban resource fees are carried through and excluded
+from the fee-rate comparison, as the protocol does.
+
+In chat, questions about fee bumps or fee sponsorship get the same grounded
+facts, and a pasted fee-bump envelope is decoded for the service's network.
+The explainer is fully offline: it never reads Horizon, signs, submits, or pays
+for anything. Input that looks like a secret key is refused and never echoed,
+logged, or decoded, and the assistant is instructed never to ask for a secret
+key or seed phrase. These answers bypass the semantic cache.
 
 **Purchase history in chat.** A signed-in frontend can pass a short
 `transactions` summary (hash, amount, status, item title, date, optional memo)

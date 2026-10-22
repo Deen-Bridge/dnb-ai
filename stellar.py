@@ -244,6 +244,8 @@ async def stellar_info():
             "chat-purchases",
             "usdc-stroop-calculator",
             "chat-stellar-calculator",
+            "fee-bump-explainer",
+            "chat-fee-bump-explainer",
         ],
     }
 

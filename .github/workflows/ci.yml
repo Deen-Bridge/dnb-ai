@@ -101,6 +101,9 @@ jobs:
       - name: Run purchase history chat tests
         run: pytest -q tests/test_purchases.py
 
+      - name: Run Stellar fee-bump explainer tests
+        run: pytest -q tests/test_stellar_fee_bump.py
+
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
 
