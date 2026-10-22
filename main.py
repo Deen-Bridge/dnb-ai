@@ -2889,8 +2889,7 @@ class AdhkarRecommendRequest(BaseModel):
 async def recommend_adhkar(body: AdhkarRecommendRequest, request: Request) -> dict[str, Any]:
     matches = adhkar_corpus.search(category=body.category, query=body.query)
     message = (
-        f"Found {len(matches)} authenticated supplication(s) "
-        "matching your request."
+        f"Found {len(matches)} authenticated supplication(s) matching your request."
         if matches
         else "No authenticated supplication found matching your request."
     )
