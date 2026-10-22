@@ -16,7 +16,7 @@ import logging
 import os
 import re
 from decimal import Decimal
-from typing import overload
+from typing import Any, overload
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -29,6 +29,11 @@ from async_runtime import http_client_pool
 from errors import APIException
 from nisab import NisabQuote, get_nisab, override_quote
 from rate_limit import analysis_rate_limit, limiter
+from stellar_error_codes import (
+    build_stellar_tool_error,
+    map_transport_exception_to_error_envelope,
+    to_api_exception,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +237,35 @@ async def stellar_info():
         "usdc_issuer": usdc_issuer(),
         "features": ["zakat", "chat-zakat", "live-nisab", "chat-purchases"],
     }
+
+
+@router.post("/stellar/tool/error-envelope")
+async def handle_tool_error_envelope(request_body: dict[str, Any]) -> dict[str, Any]:
+    """Test and evaluate Stellar network tool errors with normalized error envelopes."""
+    error_class = request_body.get("error_class")
+    network = request_body.get("network", STELLAR_NETWORK)
+    error_code = request_body.get("error_code")
+    message = request_body.get("message")
+    diagnostics = request_body.get("diagnostics")
+
+    if error_class:
+        envelope = build_stellar_tool_error(
+            error_class=error_class,
+            error_code=error_code,
+            message=message,
+            diagnostics=diagnostics,
+        )
+    else:
+        transport_exc = request_body.get("transport_exception", "Unknown transport error")
+        envelope = map_transport_exception_to_error_envelope(
+            transport_exc,
+            network=network,
+            diagnostics=diagnostics,
+        )
+
+    if request_body.get("raise_exception", False):
+        raise to_api_exception(envelope)
+    return envelope.to_dict()
 
 
 # ---------------------------------------------------------------------------
