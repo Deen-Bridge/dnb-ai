@@ -48,7 +48,8 @@ router = APIRouter(tags=["stellar"])
 # passphrases are worth recognising: "your wallet is on futurenet" is a far
 # more useful answer than "unknown network".
 KNOWN_PASSPHRASES: dict[str, str] = {
-    **NETWORK_PASSPHRASES,
+    "testnet": Network.TESTNET_NETWORK_PASSPHRASE,
+    "public": Network.PUBLIC_NETWORK_PASSPHRASE,
     "futurenet": Network.FUTURENET_NETWORK_PASSPHRASE,
     "sandbox": Network.SANDBOX_NETWORK_PASSPHRASE,
     "standalone": Network.STANDALONE_NETWORK_PASSPHRASE,
