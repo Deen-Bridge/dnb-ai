@@ -34,6 +34,7 @@ from errors import APIException
 from stellar import contains_secret_key, usdc_issuer
 from stellar_contract_events import ContractEventDecodeError, ScValue, _ScValDecoder
 from stellar_fee_bump import NETWORK_PASSPHRASES, CanonicalNetwork, canonical_network
+from stellar_network_guard import check_passphrase, describe_reported_network
 
 logger = logging.getLogger(__name__)
 
@@ -428,15 +429,13 @@ class _ConsistencyChecker:
 
     def check_network(self, passphrase: str | None) -> bool:
         """Compare the reported passphrase with the target network; return is-platform-USDC."""
-        if passphrase is not None and passphrase.strip() and passphrase.strip() != NETWORK_PASSPHRASES[self.network]:
-            reported = next((name for name, value in NETWORK_PASSPHRASES.items() if value == passphrase.strip()), None)
-            # An unknown passphrase is caller text and is not echoed back.
-            source = f"the {reported} network" if reported else "a network that is neither testnet nor public"
+        reported = check_passphrase(passphrase, self.network)
+        if reported is not None and reported.status != "match":
             self.flag(
                 "network_mismatch",
                 "error",
-                f"The RPC server reports {source}, but these reads are being checked as {self.network}. "
-                "Its entries describe a different ledger.",
+                f"The RPC server reports {describe_reported_network(reported)}, but these reads are being checked "
+                f"as {self.network}. Its entries describe a different ledger.",
             )
 
         usdc = platform_usdc_contracts()

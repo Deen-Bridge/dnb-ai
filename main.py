@@ -134,6 +134,7 @@ from stellar import (
 from stellar_contract_events import router as stellar_contract_events_router
 from stellar_contract_state import router as stellar_contract_state_router
 from stellar_fee_bump import build_chat_fee_bump_context, router as stellar_fee_bump_router
+from stellar_network_guard import router as stellar_network_guard_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from swahili import (
@@ -564,6 +565,8 @@ app.include_router(stellar_fee_bump_router)
 app.include_router(stellar_contract_events_router)
 # Offline contract state read consistency checks: compares supplied getLedgerEntries results.
 app.include_router(stellar_contract_state_router)
+# Offline network passphrase mismatch guard: checks supplied passphrases and envelopes.
+app.include_router(stellar_network_guard_router)
 # Quranic concordance: topic-based ayat discovery (#125)
 app.include_router(concordance_router)
 app.include_router(reasoning_router)

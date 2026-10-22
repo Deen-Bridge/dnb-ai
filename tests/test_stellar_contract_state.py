@@ -361,6 +361,17 @@ def test_passphrase_from_the_other_network_is_an_error():
     assert report.consistent is False
 
 
+def test_passphrase_differing_only_in_case_is_an_error():
+    report = check(CLEAN_READ, passphrase=Network.TESTNET_NETWORK_PASSPHRASE.lower())
+    assert "only in letter case or spacing" in finding(report, "network_mismatch").message
+    assert report.consistent is False
+
+
+def test_well_known_unsupported_network_is_named():
+    report = check(CLEAN_READ, passphrase=Network.FUTURENET_NETWORK_PASSPHRASE)
+    assert "reports the futurenet network" in finding(report, "network_mismatch").message
+
+
 def test_unknown_passphrase_is_not_echoed():
     passphrase = "Standalone Network ; February 2017 <script>"
     report = check(CLEAN_READ, passphrase=passphrase)

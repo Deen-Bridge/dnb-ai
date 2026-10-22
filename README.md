@@ -59,11 +59,12 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
-| `GET` | `/stellar/info` | Stellar network, USDC issuer, and supported AI features |
+| `GET` | `/stellar/info` | Stellar network and passphrase, USDC issuer, and supported AI features |
 | `POST` | `/stellar/usdc/convert` | Convert USDC to stroops or stroops to USDC |
 | `POST` | `/stellar/fee-bump/explain` | Decode and explain a fee-bump transaction envelope (offline; never signs or submits) |
 | `POST` | `/stellar/contract-events/decode` | Decode Soroban contract event topics and value, and check Stellar Asset Contract events (offline) |
 | `POST` | `/stellar/contract-state/check` | Check Soroban `getLedgerEntries` results for a contract's state for consistency (offline) |
+| `POST` | `/stellar/network/check` | Guard against network passphrase mismatches in a wallet, RPC provider, or signed envelope (offline) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
@@ -893,6 +894,42 @@ Each finding is an `error` (do not trust the read), `warning` or `info`;
 for display. The checker is fully offline: it never reads Soroban RPC or
 Horizon, signs, or submits anything. Input that looks like a secret key is
 refused, and secret-key-shaped strings inside contract state are redacted.
+
+### Network passphrase mismatch guard
+
+Every Stellar network is named by a passphrase, and every signature covers a
+hash computed over it. Nothing in an envelope's bytes says which network it was
+built for, so a wallet left on the wrong network, an RPC provider serving
+testnet, or a passphrase retyped with a stray capital letter all produce
+transactions that look fine and are still rejected. `POST /stellar/network/check`
+catches these before anything is signed or submitted:
+
+- **Passphrase**: the `networkPassphrase` a wallet reports, Horizon's root
+  `network_passphrase`, or Soroban RPC's `getNetwork` `passphrase` is compared
+  byte for byte with the expected network. Another network (including
+  futurenet, sandbox and standalone) is named; a passphrase that differs only
+  in letter case or spacing is flagged as a near miss; an unrecognised one is
+  never echoed back.
+- **Envelope**: every signature in an ordinary or fee-bump envelope (outer and
+  inner transaction) is checked against each well-known network's transaction
+  hash, so the response says which network the envelope was actually signed
+  for. Signatures from keys other than the envelope's own accounts, such as
+  multisig co-signers, are reported as unverifiable rather than wrong.
+
+```bash
+curl -sX POST http://localhost:8000/stellar/network/check \
+  -H 'Content-Type: application/json' \
+  -d '{"network": "testnet", "networkPassphrase": "Public Global Stellar Network ; September 2015",
+       "envelopeXdr": "AAAAAgAAAAA..."}'
+```
+
+`mismatch_detected` is true when any finding is an `error`; `network_confirmed`
+is true when the passphrase matched or a signature verified on the expected
+network. `GET /stellar/info` now also returns the service's
+`network_passphrase`, so the frontend can compare it with the wallet before
+asking a user to sign. The guard is fully offline: it never reads Horizon or
+Soroban RPC, signs, or submits anything, and input that looks like a secret key
+is refused.
 
 **Purchase history in chat.** A signed-in frontend can pass a short
 `transactions` summary (hash, amount, status, item title, date, optional memo)
