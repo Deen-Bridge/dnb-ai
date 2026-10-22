@@ -25,11 +25,12 @@ class AdhkarCorpus:
 
     def search(self, *, category: str | None = None, query: str | None = None) -> list[dict[str, Any]]:
         matches: list[dict[str, Any]] = []
+        normalized_category = (category or "").strip().casefold()
         normalized_query = (query or "").strip().casefold()
         for entry in self.entries:
             category_matches = True
-            if category:
-                category_matches = str(entry.get("category", "")).casefold() == category.casefold()
+            if normalized_category:
+                category_matches = str(entry.get("category", "")).casefold() == normalized_category
             text_matches = True
             if normalized_query:
                 haystack = " ".join(

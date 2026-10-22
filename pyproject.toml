@@ -76,3 +76,8 @@ module = [
     "locust.*",
 ]
 ignore_missing_imports = true
+
+# OCR remains an optional runtime feature; its import is guarded in video_analysis.py.
+[[tool.mypy.overrides]]
+module = "pytesseract"
+ignore_missing_imports = true
