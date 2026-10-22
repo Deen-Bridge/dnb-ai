@@ -63,6 +63,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `POST` | `/stellar/usdc/convert` | Convert USDC to stroops or stroops to USDC |
 | `POST` | `/stellar/fee-bump/explain` | Decode and explain a fee-bump transaction envelope (offline; never signs or submits) |
 | `POST` | `/stellar/contract-events/decode` | Decode Soroban contract event topics and value, and check Stellar Asset Contract events (offline) |
+| `POST` | `/stellar/contract-state/check` | Check Soroban `getLedgerEntries` results for a contract's state for consistency (offline) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
@@ -855,6 +856,43 @@ RPC or Horizon, signs, or submits anything. Input that looks like a secret key
 is refused, and secret-key-shaped strings inside event data are redacted.
 Regression fixtures covering every `SCVal` type and each token event shape
 live in `tests/fixtures/stellar_contract_events.json`.
+
+### Contract state read consistency checks
+
+A contract's state comes back from Soroban RPC's `getLedgerEntries` as base64
+XDR, and nothing in the response proves itself: a faulty node can pair a key
+with another entry's value, return state from a different contract, serve an
+archived entry as live, or answer from a node several ledgers behind.
+`POST /stellar/contract-state/check` takes the contract ID, the keys that were
+requested, and one or more `getLedgerEntries` results (posted as-is, JSON-RPC
+envelope included), and reports what does not add up:
+
+- **Within a read**: values that do not match their key, entries stored by
+  another contract, duplicate or unrequested entries, modification ledgers
+  after the read's `latestLedger`, impossible TTLs, archived or expired
+  entries, a missing contract instance, and code entries the instance does
+  not run.
+- **Across reads** (up to five, for example the same keys from two
+  providers): a `latestLedger` that goes backwards, two values for the same
+  version, a node returning an older version than one already seen, TTLs
+  that shrink, and entries that vanish where they should still exist.
+- **Network**: an optional `networkPassphrase` from `getNetwork` must match
+  the chosen network, and Deen Bridge's USDC contract from the other network
+  is flagged.
+
+```bash
+curl -sX POST http://localhost:8000/stellar/contract-state/check \
+  -H 'Content-Type: application/json' \
+  -d '{"contractId": "CBIE...", "network": "testnet", "keys": ["AAAABg..."],
+       "reads": [{"latestLedger": 1000, "entries": [{"key": "AAAABg...", "xdr": "AAAABg...",
+                  "lastModifiedLedgerSeq": 900, "liveUntilLedgerSeq": 5000}]}]}'
+```
+
+Each finding is an `error` (do not trust the read), `warning` or `info`;
+`consistent` is true when there are no errors. Keys and values are decoded
+for display. The checker is fully offline: it never reads Soroban RPC or
+Horizon, signs, or submits anything. Input that looks like a secret key is
+refused, and secret-key-shaped strings inside contract state are redacted.
 
 **Purchase history in chat.** A signed-in frontend can pass a short
 `transactions` summary (hash, amount, status, item title, date, optional memo)

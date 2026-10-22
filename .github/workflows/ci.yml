@@ -107,6 +107,9 @@ jobs:
       - name: Run Stellar contract event decoder tests
         run: pytest -q tests/test_stellar_contract_events.py
 
+      - name: Run Stellar contract state consistency tests
+        run: pytest -q tests/test_stellar_contract_state.py
+
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
 

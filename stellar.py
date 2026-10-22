@@ -247,6 +247,7 @@ async def stellar_info():
             "fee-bump-explainer",
             "chat-fee-bump-explainer",
             "contract-event-decoder",
+            "contract-state-consistency",
         ],
     }
 
