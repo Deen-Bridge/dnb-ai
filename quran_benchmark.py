@@ -1134,7 +1134,7 @@ def print_transcript_report(result: BenchmarkResult, *, target_pass_rate: float 
     return 0
 
 
-def main() -> int:
+def main_with_transcript_benchmark() -> int:
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
     transcript_mode = "--transcript" in sys.argv
     if transcript_mode:

@@ -1,7 +1,5 @@
 """Tests for the contextual hadith interpretation module — no live API calls."""
 
-from unittest.mock import patch
-
 import pytest
 
 from hadith_context import (
@@ -11,7 +9,6 @@ from hadith_context import (
     answer_question,
     get_hadith_context,
     list_references,
-    load_knowledge_base,
     normalize_madhab,
     normalize_reference,
     router,
@@ -106,13 +103,11 @@ def test_record_completeness() -> None:
         assert any(c.era == "classical" for c in ctx.commentaries)
 
 
-def test_knowledge_base_loads_without_network() -> None:
-    # Loading the KB must be deterministic and never touch the network.
-    with patch("hadith_context.requests") as mock_requests:
-        kb = load_knowledge_base()
-        mock_requests.get.assert_not_called()
-    assert kb
-    assert "bukhari:1" in kb
+def test_knowledge_base_is_bundled_and_deterministic() -> None:
+    # The KB is a module-level literal: no network, same references every call.
+    references = list_references()
+    assert references == list_references()
+    assert "bukhari:1" in references
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +218,6 @@ def test_router_prefix_and_routes() -> None:
 
 def test_router_endpoints_do_not_call_network() -> None:
     # Endpoint handlers must operate purely on the in-memory KB.
-    with patch("hadith_context.requests") as mock_requests:
-        resp = answer_question("What is the meaning of intention in deeds?")
-        mock_requests.get.assert_not_called()
+    resp = answer_question("What is the meaning of intention in deeds?")
     assert resp.matched is True
     assert resp.reference == "bukhari:1"

@@ -63,15 +63,16 @@ VALID_MADHABS: tuple[str, ...] = ("hanafi", "maliki", "shafii", "hanbali")
 def normalize_madhab(raw: str | None) -> str | None:
     """Fold a free-text madhab name to a canonical key, or ``None`` if absent.
 
-    Unknown non-empty values are returned lowercased/trimmed so the caller can
-    still echo them; only the four Sunni schools are treated as canonical.
+    Only the four Sunni schools are treated as canonical: an unrecognized name
+    normalizes to ``None`` so a caller never attributes a reading to a school
+    that does not exist.
     """
     if raw is None:
         return None
     key = raw.strip().lower().replace("’", "'")
     if not key:
         return None
-    return _MADHAB_ALIASES.get(key, key)
+    return _MADHAB_ALIASES.get(key)
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +103,13 @@ def normalize_reference(raw: str) -> str:
     number_match = re.search(r"\d+", text)
     number = number_match.group(0) if number_match else ""
     name_part = re.sub(r"[^a-z]", "", re.sub(r"\d+", "", text))
-    collection = _COLLECTION_ALIASES.get(name_part, name_part)
-    if collection and number:
-        return f"{collection}:{number}"
-    return collection or number
+    if number and name_part in _COLLECTION_ALIASES:
+        return f"{_COLLECTION_ALIASES[name_part]}:{number}"
+    if number and not name_part:
+        return number
+    # Nothing recognizable: pass the reference through unchanged rather than
+    # returning a stripped fragment of it.
+    return raw.strip()
 
 
 # ---------------------------------------------------------------------------

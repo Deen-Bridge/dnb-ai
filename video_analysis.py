@@ -132,6 +132,7 @@ def ocr_frame(frame: Path) -> str:
 def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="dnb-video-") as directory:
         audio, frames = extract_media(video_path, Path(directory))
+        timestamps: list[dict[str, Any]]
         if transcript.strip():
             transcript, timestamps = transcript.strip(), []
         else:

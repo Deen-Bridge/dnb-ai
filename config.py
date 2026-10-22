@@ -160,7 +160,7 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-    @field_validator("transcript_supported_formats", "larnguages", mode="before")
+    @field_validator("transcript_supported_formats", "transcript_languages", mode="before")
     @classmethod
     def parse_string_lists(cls, value):
         if isinstance(value, str):
