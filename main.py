@@ -36,7 +36,6 @@ from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from transcript import router as transcript_router
 
 import telemetry
 from arabic_dialect import router as arabic_dialect_router
@@ -610,9 +609,7 @@ app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
 app.include_router(video_analysis_router)
-# Video lecture transcript extraction: audio extraction, speaker diarization,
-# topic segmentation, timestamping, and Quran/hadith citation detection
-app.include_router(transcript_router)
+# Video lecture transcript extraction lives in video_analysis.py.
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
 # normalization and dialectal terminology lexicon (#136)
 app.include_router(arabic_dialect_router)
