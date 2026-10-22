@@ -209,6 +209,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from tool_reliability import router as tool_reliability_router
 from video_analysis import router as video_analysis_router
 from worship import router as worship_router
 
@@ -398,6 +399,7 @@ app.include_router(context_router)
 # Swahili: language processing and response enhancement
 app.include_router(swahili_router)
 app.include_router(video_analysis_router)
+app.include_router(tool_reliability_router)
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
 # normalization and dialectal terminology lexicon (#136)
 app.include_router(arabic_dialect_router)
