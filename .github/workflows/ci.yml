@@ -160,3 +160,6 @@ jobs:
 
       - name: Run offline citation extraction eval
         run: pytest -q tests/test_page_analysis.py
+
+      - name: Run Muraja''ah revision tests
+        run: pytest -q tests/test_murajaah.py
