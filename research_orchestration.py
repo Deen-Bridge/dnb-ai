@@ -1,4 +1,4 @@
-"""Islamic research agent orchestration framework (#126).
+"""Islamic research agent orchestration framework (#126, #127).
 
 This module wires the generic :mod:`orchestration` engine to a set of offline,
 deterministic research agents for the four classical research domains:
@@ -15,6 +15,11 @@ can be inspected through ``GET /orchestration/traces/{workflow_id}``.
 
 The agents perform real work over the bundled corpora, so the whole framework
 runs without an API key or network access.
+
+The :class:`IntelligentTaskDecomposer` augments the base analyzer with
+complexity scoring, dependency-aware sub-task graphs, agent-task matching,
+parallel-wave scheduling hints and decomposition validation so complex
+multi-domain queries are planned for maximal parallel execution.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from __future__ import annotations
 import re
 from collections import OrderedDict
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -126,6 +132,20 @@ DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+_COMPLEXITY_MARKERS: tuple[str, ...] = (
+    "and",
+    "but",
+    "however",
+    "also",
+    "then",
+    "compare",
+    "contrast",
+    "versus",
+    "vs",
+    "both",
+    "while",
+)
+
 _FIQH_CATEGORIES: dict[str, tuple[str, ...]] = {
     "worship": ("prayer", "salah", "wudu", "fasting", "zakat", "hajj", "worship"),
     "transactions": ("sale", "buy", "sell", "trade", "riba", "interest", "loan", "contract", "money"),
@@ -225,6 +245,206 @@ def _matched_domains(query: str) -> list[str]:
         if any(_keyword_matches(lowered, terms, keyword) for keyword in DOMAIN_KEYWORDS[domain]):
             domains.append(domain)
     return domains
+
+
+def _complexity_score(query: str, facets: tuple[str, ...], domains: list[str]) -> float:
+    """Heuristic complexity score in the range ``[0.0, 1.0]``."""
+    lowered = query.casefold()
+    marker_hits = sum(1 for marker in _COMPLEXITY_MARKERS if re.search(rf"\b{re.escape(marker)}\b", lowered))
+    facet_score = min(len(facets), 4) / 4.0
+    domain_score = min(len(domains), len(RESEARCH_DOMAINS)) / float(len(RESEARCH_DOMAINS))
+    marker_score = min(marker_hits, 4) / 4.0
+    length_score = min(len(_terms(query)), 20) / 20.0
+    return round(0.35 * facet_score + 0.30 * domain_score + 0.20 * marker_score + 0.15 * length_score, 4)
+
+
+@dataclass(frozen=True)
+class SubTask:
+    """A single decomposed unit of research work."""
+
+    id: str
+    domain: str
+    agent: str
+    capability: str
+    query: str
+    dependencies: tuple[str, ...] = ()
+    parallelizable: bool = True
+
+
+@dataclass
+class DecompositionResult:
+    """Outcome of intelligent task decomposition."""
+
+    query: str
+    complexity: float
+    facets: tuple[str, ...]
+    domains: tuple[str, ...]
+    sub_tasks: tuple[SubTask, ...]
+    parallel_waves: tuple[tuple[str, ...], ...]
+    coverage: float
+    valid: bool
+    issues: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_analysis(self) -> QueryAnalysis:
+        """Convert the decomposition into a :class:`QueryAnalysis`."""
+        selected = tuple(task.agent for task in self.sub_tasks)
+        capabilities = tuple(task.capability for task in self.sub_tasks)
+        scores = {task.agent: 1.0 for task in self.sub_tasks}
+        return QueryAnalysis(
+            query=self.query,
+            selected_agents=selected,
+            capabilities=capabilities,
+            sequential=len(self.parallel_waves) <= 1 and len(self.sub_tasks) > 1,
+            scores=scores,
+        )
+
+
+class IntelligentTaskDecomposer:
+    """Decompose complex queries into dependency-aware sub-task graphs.
+
+    The decomposer analyses query complexity, identifies independent facets,
+    assigns each facet to the best-suited agent from the registry, builds a
+    dependency graph (Tafsir depends on Qur'an findings), computes parallel
+    execution waves and validates decomposition coverage.
+    """
+
+    def __init__(self, registry: AgentRegistry, *, max_agents: int = 4) -> None:
+        self._registry = registry
+        self._max_agents = max_agents
+
+    def decompose(self, query: str) -> DecompositionResult:
+        facets = decompose_query(query)
+        domains: list[str] = []
+        for facet in facets:
+            for domain in _matched_domains(facet):
+                if domain not in domains:
+                    domains.append(domain)
+
+        complexity = _complexity_score(query, facets, domains)
+
+        if not domains:
+            fallback = self._fallback_agent()
+            if fallback is None:
+                return DecompositionResult(
+                    query=query,
+                    complexity=complexity,
+                    facets=facets,
+                    domains=(),
+                    sub_tasks=(),
+                    parallel_waves=(),
+                    coverage=0.0,
+                    valid=False,
+                    issues=("no agents registered",),
+                )
+            domain = sorted(fallback.capabilities)[0]
+            domains = [domain]
+
+        if "tafsir" in domains and "quran" not in domains:
+            domains.insert(0, "quran")
+
+        ordered_domains: list[str] = []
+        for domain in _DOMAIN_ORDER:
+            if domain in domains and domain not in ordered_domains:
+                ordered_domains.append(domain)
+        for domain in domains:
+            if domain not in ordered_domains:
+                ordered_domains.append(domain)
+        ordered_domains = ordered_domains[: self._max_agents]
+
+        sub_tasks: list[SubTask] = []
+        domain_task: dict[str, str] = {}
+        for index, domain in enumerate(ordered_domains):
+            agent = self._agent_for_domain(domain)
+            if agent is None:
+                continue
+            capability = domain if domain in agent.capabilities else sorted(agent.capabilities)[0]
+            dependencies: tuple[str, ...] = ()
+            if domain == "tafsir" and "quran" in domain_task:
+                dependencies = (domain_task["quran"],)
+            task_id = f"task-{index + 1}-{domain}"
+            sub_tasks.append(
+                SubTask(
+                    id=task_id,
+                    domain=domain,
+                    agent=agent.name,
+                    capability=capability,
+                    query=query,
+                    dependencies=dependencies,
+                    parallelizable=not dependencies,
+                )
+            )
+            domain_task[domain] = task_id
+
+        waves = _compute_waves(sub_tasks)
+        coverage = _coverage(ordered_domains, sub_tasks)
+        issues = _validate(sub_tasks, ordered_domains, self._registry)
+
+        return DecompositionResult(
+            query=query,
+            complexity=complexity,
+            facets=facets,
+            domains=tuple(ordered_domains),
+            sub_tasks=tuple(sub_tasks),
+            parallel_waves=waves,
+            coverage=coverage,
+            valid=not issues,
+            issues=tuple(issues),
+        )
+
+    def _agent_for_domain(self, domain: str) -> AgentSpec | None:
+        matches = self._registry.for_capability(domain)
+        return matches[0] if matches else None
+
+    def _fallback_agent(self) -> AgentSpec | None:
+        candidates = [agent for agent in self._registry.all() if agent.default] or list(self._registry.all())
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda agent: (-agent.priority, agent.name))[0]
+
+
+def _compute_waves(sub_tasks: list[SubTask]) -> tuple[tuple[str, ...], ...]:
+    """Group sub-tasks into parallel execution waves respecting dependencies."""
+    remaining = {task.id: set(task.dependencies) for task in sub_tasks}
+    waves: list[tuple[str, ...]] = []
+    while remaining:
+        ready = sorted(task_id for task_id, deps in remaining.items() if not deps)
+        if not ready:
+            # Cycle or unresolvable dependency: emit remaining sequentially.
+            waves.append(tuple(sorted(remaining)))
+            break
+        waves.append(tuple(ready))
+        for task_id in ready:
+            remaining.pop(task_id, None)
+        for deps in remaining.values():
+            deps.difference_update(ready)
+    return tuple(waves)
+
+
+def _coverage(domains: list[str], sub_tasks: list[SubTask]) -> float:
+    if not domains:
+        return 0.0
+    covered = {task.domain for task in sub_tasks}
+    return round(len(covered & set(domains)) / float(len(domains)), 4)
+
+
+def _validate(sub_tasks: list[SubTask], domains: list[str], registry: AgentRegistry) -> list[str]:
+    issues: list[str] = []
+    if not sub_tasks:
+        issues.append("no sub-tasks produced")
+    known = {task.id for task in sub_tasks}
+    for task in sub_tasks:
+        for dependency in task.dependencies:
+            if dependency not in known:
+                issues.append(f"task {task.id} depends on unknown task {dependency}")
+        try:
+            registry.get(task.agent)
+        except KeyError:
+            issues.append(f"task {task.id} references unregistered agent {task.agent}")
+    missing = set(domains) - {task.domain for task in sub_tasks}
+    for domain in sorted(missing):
+        issues.append(f"domain {domain} not covered by any sub-task")
+    return issues
+
 
 
 class ResearchQueryAnalyzer(QueryAnalyzer):

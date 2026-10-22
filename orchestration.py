@@ -190,6 +190,7 @@ class QueryAnalysis:
     capabilities: tuple[str, ...]
     sequential: bool
     scores: Mapping[str, float]
+    complexity: float = 0.0
 
 
 _TOKEN_PATTERN = re.compile(r"[^\W_]+(?:[-'][^\W_]+)*", re.UNICODE)
@@ -244,12 +245,14 @@ class QueryAnalyzer:
 
         sequential = len(selected_agents) > 1 and bool(query_tokens.intersection(_SEQUENCE_CUES))
         scores = {item[3].name: item[0] for item in selected}
+        complexity = min(1.0, len(query_tokens) / 40.0 + 0.15 * len(selected_agents))
         return QueryAnalysis(
             query=query,
             selected_agents=selected_agents,
             capabilities=tuple(detected_capabilities),
             sequential=sequential,
             scores=scores,
+            complexity=complexity,
         )
 
 
@@ -306,6 +309,7 @@ class ExecutionPlanBuilder:
 
     def __init__(self, registry: AgentRegistry) -> None:
         self._registry = registry
+        self._granularity_threshold = 0.35
 
     def build(self, analysis: QueryAnalysis) -> ExecutionPlan:
         tasks: list[AgentTask] = []
@@ -314,7 +318,8 @@ class ExecutionPlanBuilder:
             agent = self._registry.get(agent_name)
             capability = self._choose_capability(agent, analysis.capabilities)
             task_id = f"agent-{index + 1}-{agent_name}"
-            dependencies = (previous_id,) if analysis.sequential and previous_id is not None else ()
+            sequential = analysis.sequential or analysis.complexity >= self._granularity_threshold
+            dependencies = (previous_id,) if sequential and previous_id is not None else ()
             tasks.append(
                 AgentTask(
                     id=task_id,
@@ -519,6 +524,7 @@ class MultiAgentOrchestrator:
             agent.name: CircuitBreaker(circuit_failure_threshold, circuit_recovery_seconds) for agent in registry.all()
         }
         self._started = False
+        self._decomposition_attempts = 0
 
     async def start(self) -> None:
         if self._started:
@@ -581,6 +587,7 @@ class MultiAgentOrchestrator:
         analysis = self.analyzer.analyze(query)
         execution_plan = plan or self.plan_builder.build(analysis)
         execution_plan.validate(self.registry)
+        self._decomposition_attempts += 1
         workflow_id = uuid.uuid4().hex
         started_at = time.monotonic()
         traces: list[TraceSpan] = []
@@ -618,6 +625,7 @@ class MultiAgentOrchestrator:
         duration_ms = (time.monotonic() - started_at) * 1000.0
         self.metrics.increment(f"workflows_{workflow_status.value}")
         self.metrics.observe("workflow_duration", duration_ms)
+        self.metrics.increment("decompositions_total")
         await self.broker.clear_workflow(workflow_id)
         return WorkflowResult(
             workflow_id=workflow_id,

@@ -535,6 +535,7 @@ class AgentResponseSynthesizer:
         resolved, resolved_contradictions = self._resolve_contradictions(deduped, contradictions)
 
         # 6. Group into narrative sections (simple: no sections, just a coherent flow).
+        # 6. Group into narrative sections (simple: no sections, just a coherent flow).
         content = self._build_narrative(resolved)
 
         # 7. Build attributions from the kept spans.
