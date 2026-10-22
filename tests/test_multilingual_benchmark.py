@@ -7,7 +7,6 @@ from scripts.eval_multilingual import (
     BenchmarkValidationError,
     HumanEvaluation,
     Prediction,
-    SemanticScorer,
     Translation,
     bleu_score,
     evaluate,
@@ -136,7 +135,7 @@ def test_complete_evaluation_reports_success_and_language_parity() -> None:
         items,
         predictions,
         human_evaluations,
-        semantic_scorer=SemanticScorer(lambda first, second: 1.0 if first and second else 0.0),
+        semantic_scorer=lambda first, second: 1.0 if first and second else 0.0,
         minimum_questions=2,
     )
 
@@ -173,7 +172,7 @@ def test_accuracy_gap_failure_is_reported() -> None:
         items,
         predictions,
         make_human_evaluations(items),
-        semantic_scorer=SemanticScorer(lambda _first, _second: 0.95),
+        semantic_scorer=lambda _first, _second: 0.95,
         minimum_questions=2,
     )
 
