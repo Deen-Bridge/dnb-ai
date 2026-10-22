@@ -106,12 +106,14 @@ def transcribe_audio(audio: Path | None) -> tuple[str, list[dict[str, Any]]]:
         segments, _ = model.transcribe(str(audio), vad_filter=True)
         collected = []
         for segment in segments:
-            collected.append({
-                "start": round(segment.start, 2),
-                "end": round(segment.end, 2),
-                "speaker": getattr(segment, "speaker", None) or "speaker_1",
-                "text": segment.text.strip(),
-            })
+            collected.append(
+                {
+                    "start": round(segment.start, 2),
+                    "end": round(segment.end, 2),
+                    "speaker": getattr(segment, "speaker", None) or "speaker_1",
+                    "text": segment.text.strip(),
+                }
+            )
         return " ".join(item["text"] for item in collected).strip(), collected
     except (ImportError, OSError, RuntimeError):
         return "", []
@@ -140,9 +142,7 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
         combined = " ".join(part for part in (transcript, visual_text) if part)
         topics = segment_topics(combined, timestamps)
         key_points = [
-            {"timestamp_seconds": item["start"], "text": item["text"]}
-            for item in timestamps
-            if item.get("text")
+            {"timestamp_seconds": item["start"], "text": item["text"]} for item in timestamps if item.get("text")
         ][:20]
         return {
             "transcript": transcript,

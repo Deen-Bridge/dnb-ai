@@ -1,6 +1,7 @@
 """Tests for the contextual hadith interpretation module — no live API calls."""
 
 from unittest.mock import patch
+
 import pytest
 
 from hadith_context import (
@@ -16,7 +17,6 @@ from hadith_context import (
     router,
     synthesize_interpretation,
 )
-
 
 # ---------------------------------------------------------------------------
 # Normalization

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    gemini api_key: str = Field(default="test-key")
+    gemini_api_key: str = Field(default="test-key")
 
     model_name: str = "gemini-1.5-flash"
 
@@ -110,21 +110,13 @@ class Settings(BaseSettings):
     transcript_audio_sample_rate: int = Field(
         default=16000, ge=8000, description="Audio sample rate in Hz for extraction"
     )
-    transcript_audio_channels: int = Field(
-        default=1, ge=1, le=2, description="Number of audio channels for extraction"
-    )
-    transcript_audio_bitrate: str = Field(
-        default="192k", description="Audio bitrate for extraction"
-    )
+    transcript_audio_channels: int = Field(default=1, ge=1, le=2, description="Number of audio channels for extraction")
+    transcript_audio_bitrate: str = Field(default="192k", description="Audio bitrate for extraction")
     transcript_max_duration_seconds: int = Field(
         default=14400, ge=1, description="Maximum video duration in seconds (4 by default)"
     )
-    transcript_max_file_size_mb: int = Field(
-        default=512, ge=1, description="Maximum upload file size in MB"
-    )
-    transcript_diarization_enabled: bool = Field(
-        default=True, description="Enable speaker diarization"
-    )
+    transcript_max_file_size_mb: int = Field(default=512, ge=1, description="Maximum upload file size in MB")
+    transcript_diarization_enabled: bool = Field(default=True, description="Enable speaker diarization")
     transcript_min_speakers_expected: int = Field(default=1, ge=1)
     transcript_max_speakers_expected: int = Field(default=10, ge=1)
     transcript_topic_segmentation_enabled: bool = Field(default=True)

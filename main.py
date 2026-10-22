@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from transcript import router as transcript_router
 
 import telemetry
 from arabic_dialect import router as arabic_dialect_router
@@ -49,6 +50,7 @@ from citations import (
     CitationStreamFilter,
     extract_citations,
 )
+from concordance import router as concordance_router
 from confidence import (
     ConfidenceAssessment,
     ConfidenceBand,
@@ -144,7 +146,6 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
-from transcript import router as transcript_router
 from video_analysis import router as video_analysis_router
 from vocabulary import router as vocabulary_router
 
@@ -554,6 +555,8 @@ def _server_error_response(detail: str, hint: str) -> dict[str, Any]:
 # Stellar integration: read-only wallet and payment lookups plus deterministic
 # USDC arithmetic on the network the rest of Deen Bridge settles on.
 app.include_router(stellar_router)
+# Quranic concordance: topic-based ayat discovery (#125)
+app.include_router(concordance_router)
 app.include_router(reasoning_router)
 # Research orchestration: decompose complex scholarly queries across Qur'an,
 # hadith, tafsir and fiqh agents, then synthesise and trace the run (#126)

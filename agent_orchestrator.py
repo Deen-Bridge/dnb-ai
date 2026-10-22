@@ -129,7 +129,7 @@ class SpecializedAgent:
                 return TaskResult(
                     task_id=task.task_id, agent_name=self.name, success=True, data=result_data, latency_ms=latency
                 )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             latency = (time.time() - start_time) * 1000
             self.circuit_breaker.record_failure()
             self.status = AgentStatus.FAILED
