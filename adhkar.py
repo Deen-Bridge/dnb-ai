@@ -30,9 +30,7 @@ class AdhkarCorpus:
         for entry in self.entries:
             category_matches = True
             if normalized_category:
-                category_matches = (
-                    str(entry.get("category", "")).casefold() == normalized_category
-                )
+                category_matches = str(entry.get("category", "")).casefold() == normalized_category
             text_matches = True
             if normalized_query:
                 haystack = " ".join(
