@@ -130,6 +130,10 @@ from stellar import (
     redact_secret_keys,
     router as stellar_router,
 )
+from stellar_contract_events import router as stellar_contract_events_router
+from stellar_contract_state import router as stellar_contract_state_router
+from stellar_fee_bump import build_chat_fee_bump_context, router as stellar_fee_bump_router
+from stellar_network_guard import router as stellar_network_guard_router
 from store import create_session_store, dicts_to_contents, history_to_dicts
 from study import router as study_router
 from swahili import (
@@ -554,6 +558,14 @@ def _server_error_response(detail: str, hint: str) -> dict[str, Any]:
 # Stellar integration: read-only wallet and payment lookups plus deterministic
 # USDC arithmetic on the network the rest of Deen Bridge settles on.
 app.include_router(stellar_router)
+# Offline fee-bump envelope explainer: decodes, never signs or submits.
+app.include_router(stellar_fee_bump_router)
+# Offline Soroban contract event topic decoder: reads supplied XDR, never fetches.
+app.include_router(stellar_contract_events_router)
+# Offline contract state read consistency checks: compares supplied getLedgerEntries results.
+app.include_router(stellar_contract_state_router)
+# Offline network passphrase mismatch guard: checks supplied passphrases and envelopes.
+app.include_router(stellar_network_guard_router)
 # Quranic concordance: topic-based ayat discovery (#125)
 app.include_router(concordance_router)
 app.include_router(reasoning_router)
@@ -1598,6 +1610,9 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
             stellar_calculation_context = build_chat_stellar_calculation_context(prompt)
+            # Unredacted on purpose: the explainer has to see a pasted secret
+            # key to warn about it. It never echoes the key back.
+            fee_bump_context = build_chat_fee_bump_context(body.prompt)
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
@@ -1620,6 +1635,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             and zakat_context is None
             and purchase_context is None
             and stellar_calculation_context is None
+            and fee_bump_context is None
             and SEMANTIC_CACHE_ENABLED
         )
 
@@ -1735,6 +1751,8 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 system_context += purchase_context.prompt_block
             if stellar_calculation_context is not None:
                 system_context += "\n\n" + stellar_calculation_context
+            if fee_bump_context is not None:
+                system_context += "\n\n" + fee_bump_context
             if is_swahili and swahili_analysis:
                 sw_enhancement = swahili_response_enhancer.build_prompt_enhancement(safety_prompt)
                 if sw_enhancement.cultural_notes:
@@ -2180,6 +2198,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             zakat_context = await zakat_retriever(body.prompt, body.context)
             zakat_info = zakat_context.info if zakat_context else None
             stellar_calculation_context = build_chat_stellar_calculation_context(prompt)
+            fee_bump_context = build_chat_fee_bump_context(body.prompt)
 
         combined_text: str = ""  # accumulated full response for post-processing
         chat_session = None
@@ -2259,6 +2278,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     system_context += purchase_context.prompt_block
                 if stellar_calculation_context is not None:
                     system_context += "\n\n" + stellar_calculation_context
+                if fee_bump_context is not None:
+                    system_context += "\n\n" + fee_bump_context
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"

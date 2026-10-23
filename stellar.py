@@ -21,7 +21,7 @@ from typing import Literal, overload
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from stellar_sdk import Server
+from stellar_sdk import Network, Server
 from stellar_sdk.exceptions import NotFoundError
 from stellar_sdk.strkey import StrKey
 
@@ -40,6 +40,14 @@ HORIZON_URLS = {
     "testnet": "https://horizon-testnet.stellar.org",
     "mainnet": "https://horizon.stellar.org",
     "public": "https://horizon.stellar.org",
+}
+
+# Clients compare this with their wallet's passphrase before asking a user to
+# sign: a transaction signed for one network is invalid on the other.
+NETWORK_PASSPHRASES_BY_NAME = {
+    "testnet": Network.TESTNET_NETWORK_PASSPHRASE,
+    "mainnet": Network.PUBLIC_NETWORK_PASSPHRASE,
+    "public": Network.PUBLIC_NETWORK_PASSPHRASE,
 }
 
 USDC_ISSUERS = {
@@ -75,6 +83,10 @@ def horizon_url(network: str | None = None) -> str:
 
 def usdc_issuer(network: str | None = None) -> str:
     return USDC_ISSUERS.get(network or STELLAR_NETWORK, USDC_ISSUERS["testnet"])
+
+
+def network_passphrase(network: str | None = None) -> str:
+    return NETWORK_PASSPHRASES_BY_NAME.get(network or STELLAR_NETWORK, NETWORK_PASSPHRASES_BY_NAME["testnet"])
 
 
 class ZakatRequest(BaseModel):
@@ -236,6 +248,7 @@ async def stellar_info():
     return {
         "network": STELLAR_NETWORK,
         "horizon": horizon_url(),
+        "network_passphrase": network_passphrase(),
         "usdc_issuer": usdc_issuer(),
         "features": [
             "zakat",
@@ -244,6 +257,11 @@ async def stellar_info():
             "chat-purchases",
             "usdc-stroop-calculator",
             "chat-stellar-calculator",
+            "fee-bump-explainer",
+            "chat-fee-bump-explainer",
+            "contract-event-decoder",
+            "contract-state-consistency",
+            "network-passphrase-guard",
         ],
     }
 
@@ -632,7 +650,9 @@ def is_purchase_question(text: str) -> bool:
 
 def explorer_url(tx_hash: str) -> str:
     """Public stellar.expert link for a transaction on this service's network."""
-    network = "public" if STELLAR_NETWORK == "public" else "testnet"
+    # "mainnet" is an alias for "public" everywhere else in this module; it
+    # must not quietly send mainnet users to testnet explorer links.
+    network = "public" if STELLAR_NETWORK in ("public", "mainnet") else "testnet"
     return f"https://stellar.expert/explorer/{network}/tx/{tx_hash}"
 
 

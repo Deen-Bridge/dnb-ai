@@ -104,6 +104,18 @@ jobs:
       - name: Run purchase history chat tests
         run: pytest -q tests/test_purchases.py
 
+      - name: Run Stellar fee-bump explainer tests
+        run: pytest -q tests/test_stellar_fee_bump.py
+
+      - name: Run Stellar contract event decoder tests
+        run: pytest -q tests/test_stellar_contract_events.py
+
+      - name: Run Stellar contract state consistency tests
+        run: pytest -q tests/test_stellar_contract_state.py
+
+      - name: Run Stellar network passphrase guard tests
+        run: pytest -q tests/test_stellar_network_guard.py
+
       - name: Run feedback loop tests
         run: pytest -q tests/test_feedback.py
 
