@@ -59,8 +59,12 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
 | `GET` | `/ping` | Trivial liveness check (always returns 200) |
 | `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
-| `GET` | `/stellar/info` | Stellar network, USDC issuer, and supported AI features |
+| `GET` | `/stellar/info` | Stellar network and passphrase, USDC issuer, and supported AI features |
 | `POST` | `/stellar/usdc/convert` | Convert USDC to stroops or stroops to USDC |
+| `POST` | `/stellar/fee-bump/explain` | Decode and explain a fee-bump transaction envelope (offline; never signs or submits) |
+| `POST` | `/stellar/contract-events/decode` | Decode Soroban contract event topics and value, and check Stellar Asset Contract events (offline) |
+| `POST` | `/stellar/contract-state/check` | Check Soroban `getLedgerEntries` results for a contract's state for consistency (offline) |
+| `POST` | `/stellar/network/check` | Guard against network passphrase mismatches in a wallet, RPC provider, or signed envelope (offline) |
 | `GET` | `/cache/stats` | Semantic cache metrics (hits, misses, hit rate, etc.) |
 | `POST` | `/tafsir` | Ayah explanation from named tafsir works, with attribution |
 | `POST` | `/tafsir/batch` | Concurrent tafsir lookup for multiple references, with partial results |
@@ -794,6 +798,138 @@ Amounts with more than seven decimal places and fractional stroop values are
 rejected rather than silently rounded. The AI service only provides the
 calculation; Stellar network fees are dynamic and are not estimated by this
 endpoint.
+
+### Fee-bump transaction explainer
+
+A fee bump (CAP-15) wraps an already-signed transaction in an outer envelope
+whose fee is paid by another account — for example a sponsor covering a
+learner's network fee, or a stuck transaction resubmitted with a higher fee.
+`POST /stellar/fee-bump/explain` decodes a fee-bump envelope and explains who
+pays, whose transaction is wrapped, the maximum fee in stroops and XLM, and
+whether the fee meets the protocol's minimum and fee-rate rules:
+
+```bash
+curl -sX POST http://localhost:8000/stellar/fee-bump/explain \
+  -H 'Content-Type: application/json' \
+  -d '{"envelope_xdr": "AAAABQ...", "network": "testnet", "base_fee_stroops": 100}'
+```
+
+`network` defaults to `STELLAR_NETWORK` (`mainnet` is accepted as an alias for
+`public`). Transaction hashes and signatures are bound to the network
+passphrase, so the response reports each hash for the chosen network and
+whether the fee source's and inner source's signatures verify there; an
+envelope signed for the other network is flagged as `other_network`.
+`base_fee_stroops` (default 100) lets the caller check the fee against a surge
+price they observed. Soroban resource fees are carried through and excluded
+from the fee-rate comparison, as the protocol does.
+
+In chat, questions about fee bumps or fee sponsorship get the same grounded
+facts, and a pasted fee-bump envelope is decoded for the service's network.
+The explainer is fully offline: it never reads Horizon, signs, submits, or pays
+for anything. Input that looks like a secret key is refused and never echoed,
+logged, or decoded, and the assistant is instructed never to ask for a secret
+key or seed phrase. These answers bypass the semantic cache.
+
+### Contract event topic decoder
+
+Soroban contract events carry up to four topics and a value, each a base64
+XDR `SCVal` as Soroban RPC's `getEvents` returns them.
+`POST /stellar/contract-events/decode` decodes them into typed JSON (integers
+as decimal strings, so `i128` amounts stay exact) and reads SEP-41 token
+events — `transfer`, `mint`, `burn`, `clawback`, `approve`, `set_admin`,
+`set_authorized` and `fee` — in both the pre- and post-protocol-23 (CAP-67)
+topic layouts, including transfers to muxed accounts. A `getEvents` entry can
+be posted as-is:
+
+```bash
+curl -sX POST http://localhost:8000/stellar/contract-events/decode \
+  -H 'Content-Type: application/json' \
+  -d '{"topic": ["AAAADwAAAAh0cmFuc2Zlcg==", "..."], "value": "AAAACg...", "contractId": "CCW6...", "network": "public"}'
+```
+
+When a Stellar Asset Contract event names its asset (for example
+`USDC:GA5Z...`), the decoder derives that asset's contract ID for the chosen
+network and compares it with `contractId`. Any contract can emit an event that
+names USDC, so the response marks the emitter `verified`, `other_network`,
+`mismatch` (a lookalike that moved nothing real), or `not_checked` when no
+contract ID was given. The decoder is fully offline: it never reads Soroban
+RPC or Horizon, signs, or submits anything. Input that looks like a secret key
+is refused, and secret-key-shaped strings inside event data are redacted.
+Regression fixtures covering every `SCVal` type and each token event shape
+live in `tests/fixtures/stellar_contract_events.json`.
+
+### Contract state read consistency checks
+
+A contract's state comes back from Soroban RPC's `getLedgerEntries` as base64
+XDR, and nothing in the response proves itself: a faulty node can pair a key
+with another entry's value, return state from a different contract, serve an
+archived entry as live, or answer from a node several ledgers behind.
+`POST /stellar/contract-state/check` takes the contract ID, the keys that were
+requested, and one or more `getLedgerEntries` results (posted as-is, JSON-RPC
+envelope included), and reports what does not add up:
+
+- **Within a read**: values that do not match their key, entries stored by
+  another contract, duplicate or unrequested entries, modification ledgers
+  after the read's `latestLedger`, impossible TTLs, archived or expired
+  entries, a missing contract instance, and code entries the instance does
+  not run.
+- **Across reads** (up to five, for example the same keys from two
+  providers): a `latestLedger` that goes backwards, two values for the same
+  version, a node returning an older version than one already seen, TTLs
+  that shrink, and entries that vanish where they should still exist.
+- **Network**: an optional `networkPassphrase` from `getNetwork` must match
+  the chosen network, and Deen Bridge's USDC contract from the other network
+  is flagged.
+
+```bash
+curl -sX POST http://localhost:8000/stellar/contract-state/check \
+  -H 'Content-Type: application/json' \
+  -d '{"contractId": "CBIE...", "network": "testnet", "keys": ["AAAABg..."],
+       "reads": [{"latestLedger": 1000, "entries": [{"key": "AAAABg...", "xdr": "AAAABg...",
+                  "lastModifiedLedgerSeq": 900, "liveUntilLedgerSeq": 5000}]}]}'
+```
+
+Each finding is an `error` (do not trust the read), `warning` or `info`;
+`consistent` is true when there are no errors. Keys and values are decoded
+for display. The checker is fully offline: it never reads Soroban RPC or
+Horizon, signs, or submits anything. Input that looks like a secret key is
+refused, and secret-key-shaped strings inside contract state are redacted.
+
+### Network passphrase mismatch guard
+
+Every Stellar network is named by a passphrase, and every signature covers a
+hash computed over it. Nothing in an envelope's bytes says which network it was
+built for, so a wallet left on the wrong network, an RPC provider serving
+testnet, or a passphrase retyped with a stray capital letter all produce
+transactions that look fine and are still rejected. `POST /stellar/network/check`
+catches these before anything is signed or submitted:
+
+- **Passphrase**: the `networkPassphrase` a wallet reports, Horizon's root
+  `network_passphrase`, or Soroban RPC's `getNetwork` `passphrase` is compared
+  byte for byte with the expected network. Another network (including
+  futurenet, sandbox and standalone) is named; a passphrase that differs only
+  in letter case or spacing is flagged as a near miss; an unrecognised one is
+  never echoed back.
+- **Envelope**: every signature in an ordinary or fee-bump envelope (outer and
+  inner transaction) is checked against each well-known network's transaction
+  hash, so the response says which network the envelope was actually signed
+  for. Signatures from keys other than the envelope's own accounts, such as
+  multisig co-signers, are reported as unverifiable rather than wrong.
+
+```bash
+curl -sX POST http://localhost:8000/stellar/network/check \
+  -H 'Content-Type: application/json' \
+  -d '{"network": "testnet", "networkPassphrase": "Public Global Stellar Network ; September 2015",
+       "envelopeXdr": "AAAAAgAAAAA..."}'
+```
+
+`mismatch_detected` is true when any finding is an `error`; `network_confirmed`
+is true when the passphrase matched or a signature verified on the expected
+network. `GET /stellar/info` now also returns the service's
+`network_passphrase`, so the frontend can compare it with the wallet before
+asking a user to sign. The guard is fully offline: it never reads Horizon or
+Soroban RPC, signs, or submits anything, and input that looks like a secret key
+is refused.
 
 **Purchase history in chat.** A signed-in frontend can pass a short
 `transactions` summary (hash, amount, status, item title, date, optional memo)
