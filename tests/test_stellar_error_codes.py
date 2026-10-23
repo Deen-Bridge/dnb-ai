@@ -125,6 +125,7 @@ def test_transport_exception_mapping_and_diagnostics_redaction() -> None:
         diagnostics=diag,
     )
     assert secret_key not in str(env_diag.diagnostics)
+    assert env_diag.diagnostics is not None
     assert env_diag.diagnostics["secret"] == "[REDACTED]"
     assert env_diag.diagnostics["memo"] == "[REDACTED]"
     assert public_key not in str(env_diag.diagnostics)

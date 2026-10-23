@@ -57,6 +57,12 @@ try:
 except ImportError:
     _firebase_available = False
 
+    class FieldFilter:  # type: ignore[no-redef]
+        def __init__(self, field_path: str, op_string: str, value: Any) -> None:
+            self.field_path = field_path
+            self.op_string = op_string
+            self.value = value
+
 
 def firebase_credentials_configured() -> bool:
     """True when the process has any Firebase service-account configuration."""
