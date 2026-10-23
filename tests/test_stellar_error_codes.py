@@ -124,6 +124,7 @@ def test_transport_exception_mapping_and_diagnostics_redaction() -> None:
         error_code=CODE_INVALID_PARAMETER,
         diagnostics=diag,
     )
+    assert env_diag.diagnostics is not None
     assert secret_key not in str(env_diag.diagnostics)
     assert env_diag.diagnostics is not None
     assert env_diag.diagnostics["secret"] == "[REDACTED]"
