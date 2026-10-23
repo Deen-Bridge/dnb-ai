@@ -70,12 +70,17 @@ module = [
     "google", # Untyped namespace root imported by the legacy SDK.
     "google.generativeai",
     "google.generativeai.*",
+    "google.cloud",
+    "google.cloud.*",
+    "google.cloud.firestore",
+    "google.cloud.firestore.*",
     "firebase_admin",
     "firebase_admin.*",
     "locust",
     "locust.*",
 ]
 ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
 
 # OCR remains an optional runtime feature; its import is guarded in video_analysis.py.
 [[tool.mypy.overrides]]

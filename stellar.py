@@ -29,6 +29,23 @@ from async_runtime import http_client_pool
 from errors import APIException
 from nisab import NisabQuote, get_nisab, override_quote
 from rate_limit import analysis_rate_limit, limiter
+from soroban import (
+    AllowanceDetail,
+    InvocationDetail,
+    RiskLevel,
+    SorobanAuthContext,
+    SorobanAuthExplainRequest,
+    SorobanAuthExplanation,
+    SorobanAuthInfo,
+    TransferDetail,
+    build_chat_soroban_auth_context,
+    build_soroban_auth_prompt_block,
+    contains_seed_phrase,
+    contains_sensitive_key_material,
+    explain_soroban_authorization,
+    is_soroban_auth_question,
+    router as soroban_router,
+)
 from stellar_error_codes import (
     build_stellar_tool_error,
     map_transport_exception_to_error_envelope,
@@ -38,6 +55,65 @@ from stellar_error_codes import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["stellar"])
+router.include_router(soroban_router)
+
+__all__ = [
+    "DISCLAIMER",
+    "DNB_BACKEND_URL",
+    "HORIZON_URLS",
+    "PURCHASE_FETCH_TIMEOUT",
+    "PURCHASE_GUARDRAILS",
+    "PURCHASE_KEYWORDS",
+    "SECRET_KEY_PATTERN",
+    "SECRET_KEY_WARNING",
+    "STELLAR_NETWORK",
+    "USDC_ISSUERS",
+    "USDC_PRECISION",
+    "ZAKAT_KEYWORDS",
+    "ZAKAT_RATE",
+    "AllowanceDetail",
+    "InvocationDetail",
+    "PurchaseContext",
+    "PurchaseInfo",
+    "PurchaseTransaction",
+    "RiskLevel",
+    "SorobanAuthContext",
+    "SorobanAuthExplainRequest",
+    "SorobanAuthExplanation",
+    "SorobanAuthInfo",
+    "TransferDetail",
+    "ZakatContext",
+    "ZakatInfo",
+    "ZakatRequest",
+    "ZakatResponse",
+    "build_chat_purchase_context",
+    "build_chat_soroban_auth_context",
+    "build_chat_zakat_context",
+    "build_purchase_prompt_block",
+    "build_soroban_auth_prompt_block",
+    "build_zakat_prompt_block",
+    "build_zakat_response",
+    "compute_zakat",
+    "contains_secret_key",
+    "contains_seed_phrase",
+    "contains_sensitive_key_material",
+    "explain_soroban_authorization",
+    "explorer_url",
+    "fetch_user_transactions",
+    "fetch_usdc_balance",
+    "horizon_url",
+    "is_purchase_question",
+    "is_soroban_auth_question",
+    "is_zakat_question",
+    "normalize_transaction",
+    "redact_secret_keys",
+    "router",
+    "sanitize_memo",
+    "soroban_router",
+    "usdc_issuer",
+    "validate_public_key",
+    "zakat_for_account",
+]
 
 # Network configuration — must match the rest of the platform
 # (dnb-backend uses the same issuers in src/services/stellar/stellarService.js)
@@ -235,7 +311,14 @@ async def stellar_info():
         "network": STELLAR_NETWORK,
         "horizon": horizon_url(),
         "usdc_issuer": usdc_issuer(),
-        "features": ["zakat", "chat-zakat", "live-nisab", "chat-purchases"],
+        "features": [
+            "zakat",
+            "chat-zakat",
+            "live-nisab",
+            "chat-purchases",
+            "soroban-auth-explainer",
+            "chat-soroban-auth",
+        ],
     }
 
 
@@ -350,13 +433,13 @@ class ZakatInfo(BaseModel):
     """What the zakat integration contributed to a chat answer."""
 
     calculated: bool = Field(..., description="True when an on-chain balance was actually read")
-    public_key: str | None = Field(None, description="The wallet the figures describe")
+    public_key: str | None = Field(default=None, description="The wallet the figures describe")
     usdc_balance: str | None = None
     nisab_usd: str | None = None
     zakat_due: str | None = None
-    nisab_source: str | None = Field(None, description="Where the nisab threshold came from")
+    nisab_source: str | None = Field(default=None, description="Where the nisab threshold came from")
     secret_key_detected: bool = Field(
-        False,
+        default=False,
         description=("The message appeared to contain a secret key; the answer warns the user instead of using it."),
     )
 
@@ -519,13 +602,13 @@ class PurchaseInfo(BaseModel):
         ...,
         description="True when transaction metadata was available for this user",
     )
-    count: int = Field(0, description="How many transactions were provided")
+    count: int = Field(default=0, description="How many transactions were provided")
     source: str | None = Field(
-        None,
+        default=None,
         description="'inline' when the client sent a summary, 'backend' when fetched",
     )
     secret_key_detected: bool = Field(
-        False,
+        default=False,
         description="A secret key was detected; history was refused",
     )
 

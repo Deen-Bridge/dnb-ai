@@ -735,6 +735,27 @@ memos are treated as untrusted data so injection text cannot change behavior.
 Purchase answers are never written to the semantic cache and include a
 `purchases` block on the response.
 
+**Soroban authorization entry safety explainer.** When signing smart contract
+transactions in wallets such as Freighter, users often encounter complex
+`SorobanAuthorizationEntry` XDR structures. This service provides a plain-language
+safety analysis:
+- **Credentials analysis**: Checks authorizing address, source account, nonce replay
+  protection, and signature expiration ledger.
+- **Invocation tree inspection**: Recursively decodes contract calls, identifying
+  token transfers, unlimited allowance approvals (`approve`), and administrative
+  privilege escalations (`set_admin`, `upgrade`, `transfer_ownership`).
+- **Risk classification**: Categorizes entries into `safe`, `caution`, `warning`,
+  or `critical`, with targeted warnings and recommendations.
+- **Strictly non-custodial**: Secret keys (`S...`) and seed phrases are never
+  requested or stored. Volunteered sensitive key material is immediately refused,
+  flagged as critical, and redacted.
+- **API & Chat integration**: Direct explanations are available at
+  `POST /stellar/soroban/auth/explain` (or `POST /stellar/soroban-auth-explain`).
+  Frontend chat turns can supply `soroban_auth_entry` on `POST /chat` and
+  `POST /chat/stream` for immediate safety grounding with network-aware
+  [stellar.expert](https://stellar.expert) contract explorer links.
+Offline test demo: `pytest -q tests/test_soroban_auth.py`.
+
 ### Voice-note transcription & audio analysis
 
 Voice notes and short audio clips can be transcribed and analyzed with a

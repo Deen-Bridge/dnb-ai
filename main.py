@@ -189,9 +189,12 @@ from stellar import (
     PurchaseContext,
     PurchaseInfo,
     PurchaseTransaction,
+    SorobanAuthContext,
+    SorobanAuthInfo,
     ZakatContext,
     ZakatInfo,
     build_chat_purchase_context,
+    build_chat_soroban_auth_context,
     build_chat_zakat_context,
     redact_secret_keys,
     router as stellar_router,
@@ -490,6 +493,8 @@ class ChatRequest(BaseModel):
     # Use the stored learning profile to pick depth, style, and pacing (#251).
     # Ignored when ``depth`` is given explicitly.
     adaptive: bool = False
+    # Optional Soroban authorization entry (base64 XDR or JSON) for smart contract safety explanation.
+    soroban_auth_entry: str | None = None
 
     @field_validator("prompt", mode="before")
     @classmethod
@@ -521,6 +526,7 @@ class ChatResponse(BaseModel):
     confidence: ConfidenceAssessment | None = None
     zakat: ZakatInfo | None = None
     purchases: PurchaseInfo | None = None
+    soroban_auth: SorobanAuthInfo | None = None
     language: str | None = None
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
@@ -662,6 +668,19 @@ async def purchase_retriever(
         return None
 
 
+async def soroban_auth_retriever(
+    prompt: str,
+    entry_xdr: str | None,
+    context: str | None,
+) -> SorobanAuthContext | None:
+    """Explain Soroban smart contract authorization for a chat turn; best-effort."""
+    try:
+        return await build_chat_soroban_auth_context(prompt, entry_xdr=entry_xdr, context=context)
+    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
+        logger.warning("Soroban auth lookup failed; answering without it: %s", exc)
+        return None
+
+
 async def personal_context_retriever(
     prompt: str,
     user_id: str | None,
@@ -688,7 +707,13 @@ async def personal_context_retriever(
 async def retrieve_chat_contexts(
     request: ChatRequest,
     prompt: str,
-) -> tuple[TafsirContext | None, ZakatContext | None, PurchaseContext | None, PersonalContext | None]:
+) -> tuple[
+    TafsirContext | None,
+    ZakatContext | None,
+    PurchaseContext | None,
+    PersonalContext | None,
+    SorobanAuthContext | None,
+]:
     """Run independent best-effort enrichments concurrently."""
 
     async def best_effort(name: str, operation: Awaitable[Any]) -> Any:
@@ -698,7 +723,7 @@ async def retrieve_chat_contexts(
             logger.warning("%s retrieval failed; answering without it: %s", name, exc)
             return None
 
-    tafsir_context, zakat_context, purchase_context, personal_context = await asyncio.gather(
+    tafsir_context, zakat_context, purchase_context, personal_context, soroban_auth_context = await asyncio.gather(
         best_effort("tafsir", tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)),
         best_effort("zakat", zakat_retriever(request.prompt, request.context)),
         best_effort(
@@ -709,8 +734,12 @@ async def retrieve_chat_contexts(
             "personal context",
             personal_context_retriever(request.prompt, request.user_id, request.auth_token),
         ),
+        best_effort(
+            "soroban auth",
+            soroban_auth_retriever(request.prompt, request.soroban_auth_entry, request.context),
+        ),
     )
-    return tafsir_context, zakat_context, purchase_context, personal_context
+    return tafsir_context, zakat_context, purchase_context, personal_context, soroban_auth_context
 
 
 def get_safety_settings() -> list[dict[str, str]]:
@@ -1170,6 +1199,7 @@ def cache_eligible(
     zakat_context: Any,
     purchase_context: Any,
     personal_context: Any,
+    soroban_auth_context: Any = None,
 ) -> bool:
     """Decide whether this turn may be served from / written to the response cache.
 
@@ -1177,8 +1207,9 @@ def cache_eligible(
     drift into caching different things. A follow-up turn depends on
     conversation history and must not be replayed to anyone else, and neither
     may an answer built from this asker's tafsir passages, wallet balance,
-    purchase history, or personal memory. (One user's answers are kept from
-    another by ``cache_scope``, which the caller supplies at lookup time.)
+    purchase history, personal memory, or Soroban smart contract authorization.
+    (One user's answers are kept from another by ``cache_scope``, which the caller
+    supplies at lookup time.)
 
     ``language`` and ``madhhab`` reshape the answer while leaving the prompt
     untouched, so they cannot ride on a key derived from the prompt alone: an
@@ -1199,6 +1230,7 @@ def cache_eligible(
         and zakat_context is None
         and purchase_context is None
         and personal_context is None
+        and soroban_auth_context is None
         and language is None
         and madhhab is None
         and safety_action in (None, "allow")
@@ -1308,13 +1340,20 @@ async def _chat(
 
         # --- Independent retrieval fan-out (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
-            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+            (
+                tafsir_context,
+                zakat_context,
+                purchase_context,
+                personal_context,
+                soroban_auth_context,
+            ) = await retrieve_chat_contexts(
                 body,
                 prompt,
             )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
             zakat_info = zakat_context.info if zakat_context else None
             purchase_info = purchase_context.info if purchase_context else None
+            soroban_auth_info = soroban_auth_context.info if soroban_auth_context else None
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
@@ -1332,7 +1371,7 @@ async def _chat(
         if depth_level is not DepthLevel.INTERMEDIATE:
             cache_scope = f"{cache_scope}:depth={depth_level.value}"
 
-        # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
+        # Neither a tafsir-grounded answer nor a zakat/purchase/soroban-auth answer goes
         # through the semantic response cache: the first is built from retrieved
         # passages (already cached by ayah key), and the others contain one
         # user's real financial data, which must never be replayed to anyone else.
@@ -1349,6 +1388,7 @@ async def _chat(
             zakat_context=zakat_context,
             purchase_context=purchase_context,
             personal_context=personal_context,
+            soroban_auth_context=soroban_auth_context,
         )
 
         # --- Two-tier cache lookup: exact-match first, then semantic ---
@@ -1476,6 +1516,8 @@ async def _chat(
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
+            if soroban_auth_context is not None:
+                system_context += soroban_auth_context.prompt_block
             if personal_context is not None:
                 system_context += personal_context.prompt_block
             memory_block = render_user_context(profile, summary)
@@ -1707,6 +1749,7 @@ async def _chat(
             confidence=assessment,
             zakat=zakat_info,
             purchases=purchase_info,
+            soroban_auth=soroban_auth_info,
             language=effective_language,
             citations=citation_extraction.citations,
             depth=depth_payload,
@@ -1963,13 +2006,20 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
         # --- Independent retrieval fan-out ---
         with trace.span("retrieval"):
-            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+            (
+                tafsir_context,
+                zakat_context,
+                purchase_context,
+                personal_context,
+                soroban_auth_context,
+            ) = await retrieve_chat_contexts(
                 body,
                 prompt,
             )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
             zakat_info = zakat_context.info if zakat_context else None
             purchase_info = purchase_context.info if purchase_context else None
+            soroban_auth_info = soroban_auth_context.info if soroban_auth_context else None
 
         combined_text: str = ""  # accumulated full response for post-processing
         chat_session = None
@@ -2020,6 +2070,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             zakat_context=zakat_context,
             purchase_context=purchase_context,
             personal_context=personal_context,
+            soroban_auth_context=soroban_auth_context,
         )
 
         exact_cache = get_chat_exact_cache()
@@ -2220,6 +2271,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     system_context += zakat_context.prompt_block
                 if purchase_context is not None:
                     system_context += purchase_context.prompt_block
+                if soroban_auth_context is not None:
+                    system_context += soroban_auth_context.prompt_block
                 if personal_context is not None:
                     system_context += personal_context.prompt_block
                 system_context += depth_prompt_block
@@ -2406,6 +2459,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
                         "purchases": purchase_info.model_dump() if purchase_info else None,
+                        "soroban_auth": soroban_auth_info.model_dump() if soroban_auth_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
                     },
                     ensure_ascii=False,
