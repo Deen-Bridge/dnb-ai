@@ -791,7 +791,9 @@ async def get_recommendations(goal_id: str, user_id: str, as_of: date | None = N
     return recommend(_find(goal_id, user_id), _today(as_of))
 
 
-@router.delete("/{goal_id}", status_code=204)
+# A 204 response must not carry a body, so no response model is declared explicitly. Letting FastAPI
+# infer one from the return annotation made it reject this route at import time (see CI on #743).
+@router.delete("/{goal_id}", status_code=204, response_model=None)
 async def delete_goal(goal_id: str, user_id: str) -> None:
     """Delete a goal and its history."""
     _find(goal_id, user_id)
