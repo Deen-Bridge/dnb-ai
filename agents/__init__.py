@@ -17,11 +17,10 @@ from .decomposition import (
     ExecutionStep,
     QueryComplexity,
     SubTask,
-    TaskDependencyGraph,
     TaskDecomposer,
+    TaskDependencyGraph,
     TaskStatus,
 )
-
 from .decomposition_metrics import DecompositionMetrics, MetricsTracker
 
 __all__ = [
