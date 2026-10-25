@@ -152,7 +152,9 @@ class AgentRegistry:
             return AgentHealth.UNHEALTHY
         fails = self._failure_counts.get(name, 0)
         succs = self._success_counts.get(name, 1)
-        if fails / (fails + succs) > 0.3 and fails >= 2:
+        # Check `fails >= 2` first: a freshly registered agent has 0 failures and 0 successes,
+        # and dividing 0 / (0 + 0) would raise ZeroDivisionError.
+        if fails >= 2 and fails / (fails + succs) > 0.3:
             return AgentHealth.DEGRADED
         return AgentHealth.HEALTHY
 
