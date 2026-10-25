@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import re
 from dataclasses import asdict, dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 PUBLIC_PASSPHRASE = "Public Global Stellar Network ; September 2015"
 TESTNET_PASSPHRASE = "Test SDF Network ; September 2015"
 STROOPS_PER_UNIT = Decimal("10000000")
+MAX_INT64_STROOPS = (1 << 63) - 1
 _SECRET_KEY_RE = re.compile(r"(?<![A-Z2-7])S[A-Z2-7]{55}(?![A-Z2-7])")
 _PUBLIC_KEY_RE = re.compile(r"^G[A-Z2-7]{55}$")
 _ASSET_CODE_RE = re.compile(r"^[A-Za-z0-9]{1,12}$")
@@ -20,8 +22,15 @@ _SEED_PHRASE_RE = re.compile(
     r"\b(mnemonic|seed\s+phrase|recovery\s+phrase|recovery\s+words|12\s+words|24\s+words|private\s+key|secret\s+seed)\b",
     re.IGNORECASE,
 )
+_BIP39_WORD_RUN_RE = re.compile(r"(?:^|\s)[a-z]{3,8}(?:\s+[a-z]{3,8}){11,23}(?:\s|$)", re.IGNORECASE)
 _INJECTION_RE = re.compile(
-    r"(ignore\s+(all\s+)?(previous|prior)\s+instructions|system\s*prompt|send\s+funds\s+to)",
+    r"(ignore\s+(all\s+)?(previous|prior|above)\s+instructions|"
+    r"disregard\s+.*instructions|"
+    r"forget\s+.*instructions|"
+    r"override\s+.*instructions|"
+    r"system\s*prompt|developer\s*message|"
+    r"output\s+credentials|reveal\s+.*(secret|key|prompt|credentials)|"
+    r"send\s+funds\s+to)",
     re.IGNORECASE,
 )
 _ED25519_PUBLIC_KEY_VERSION_BYTE = 6 << 3  # 48 ('G')
@@ -80,8 +89,8 @@ def is_valid_stellar_account_id(value: str) -> bool:
 
 
 def contains_secret_material(text: str) -> bool:
-    """Return True if text contains a Stellar S-seed or recovery phrase."""
-    return bool(_SECRET_KEY_RE.search(text) or _SEED_PHRASE_RE.search(text))
+    """Return True if text contains a Stellar S-seed, recovery label, or 12-24 word mnemonic."""
+    return bool(_SECRET_KEY_RE.search(text) or _SEED_PHRASE_RE.search(text) or _BIP39_WORD_RUN_RE.search(text))
 
 
 def resolve_network(network: str) -> tuple[str, str]:
@@ -95,10 +104,13 @@ def resolve_network(network: str) -> tuple[str, str]:
 
 
 def format_stroops_to_decimal(stroops: int) -> str:
-    """Convert integer stroops to a 7-decimal Stellar amount string."""
-    if isinstance(stroops, bool) or not isinstance(stroops, int) or stroops < 0:
-        raise ValueError("stroops must be a non-negative integer")
-    val = (Decimal(stroops) / STROOPS_PER_UNIT).quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP)
+    """Convert bounded int64 stroops to a 7-decimal Stellar amount string."""
+    if isinstance(stroops, bool) or not isinstance(stroops, int) or stroops < 0 or stroops > MAX_INT64_STROOPS:
+        raise ValueError("stroops must be a bounded non-negative int64 integer")
+    try:
+        val = (Decimal(stroops) / STROOPS_PER_UNIT).quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP)
+    except InvalidOperation as exc:
+        raise ValueError("stroops exceeds supported decimal precision") from exc
     return f"{val:.7f}"
 
 
@@ -113,45 +125,52 @@ def evaluate_arabic_stellar_terminology(
     tx_hash: str = "a" * 64,
 ) -> StellarWaveCheckResult:
     """Execute offline Arabic Stellar terminology check (#667); ``valid`` checks local format only."""
-    combined = f"{network} {payload} {asset_code} {issuer} {tx_hash}"
+    combined = f"{network} {payload} {asset_code} {issuer} {tx_hash} {amount_stroops} {ledger_sequence}"
     if contains_secret_material(combined):
         raise ValueError("Refusing secret keys or seed phrases in non-custodial Stellar tool")
 
     net_name, passphrase = resolve_network(network)
     warnings: list[str] = []
 
-    if _INJECTION_RE.search(payload) or _INJECTION_RE.search(asset_code):
+    printable_payload = "".join(ch for ch in str(payload) if ch.isprintable()).strip()[:240]
+    if _INJECTION_RE.search(printable_payload) or _INJECTION_RE.search(str(asset_code)):
         warnings.append("untrusted_metadata_injection_blocked")
         clean_payload = "[REDACTED_UNTRUSTED_STELLAR_CONTENT]"
+    elif printable_payload:
+        digest = hashlib.sha256(printable_payload.encode("utf-8")).hexdigest()[:16]
+        clean_payload = f"[UNTRUSTED_INPUT_SHA256:{digest}]"
     else:
-        clean_payload = "".join(ch for ch in payload if ch.isprintable()).strip()[:240]
+        clean_payload = ""
 
-    raw_code = asset_code.strip()
+    raw_code = str(asset_code).strip()
     code_ok = bool(_ASSET_CODE_RE.match(raw_code))
-    norm_code = raw_code.upper() if code_ok else "INVALID"
+    norm_code = raw_code if code_ok else "INVALID"
     if not code_ok:
         warnings.append("invalid_asset_code")
 
     is_native = code_ok and norm_code == "XLM"
-    issuer_ok = True if is_native else is_valid_stellar_account_id(issuer)
+    issuer_ok = True if is_native else is_valid_stellar_account_id(str(issuer))
     if not issuer_ok:
         warnings.append("invalid_issuer_public_key")
 
-    norm_hash = tx_hash.strip().lower()
+    norm_hash = str(tx_hash).strip().lower()
     hash_ok = bool(_TX_HASH_RE.match(norm_hash))
     if not hash_ok:
         warnings.append("invalid_transaction_hash")
 
     ledger_ok = isinstance(ledger_sequence, int) and not isinstance(ledger_sequence, bool) and ledger_sequence > 0
+    safe_ledger_sequence = ledger_sequence if ledger_ok else 0
     if not ledger_ok:
         warnings.append("invalid_ledger_sequence")
 
     try:
         formatted_amount = format_stroops_to_decimal(amount_stroops)
         amount_ok = True
+        safe_amount_stroops = amount_stroops
     except ValueError:
         formatted_amount = "0.0000000"
         amount_ok = False
+        safe_amount_stroops = 0
         warnings.append("invalid_amount_stroops")
 
     if net_name == "testnet":
@@ -170,8 +189,8 @@ def evaluate_arabic_stellar_terminology(
         "asset_code": norm_code if code_ok else "",
         "issuer": None if is_native else (issuer.strip() if issuer_ok else ""),
         "formatted_amount": f"{formatted_amount} {norm_code} ({net_name})",
-        "amount_stroops": amount_stroops,
-        "ledger_sequence": ledger_sequence,
+        "amount_stroops": safe_amount_stroops,
+        "ledger_sequence": safe_ledger_sequence,
         "tx_hash": norm_hash if hash_ok else "",
         "sanitized_payload": clean_payload,
         "explorer_url": (
@@ -190,7 +209,10 @@ def evaluate_arabic_stellar_terminology(
         network_passphrase=passphrase,
         valid=valid,
         non_custodial=True,
-        summary=f"[{net_name.upper()}] Arabic Stellar terminology evaluator checking non-custodial and network-explicit translations: {formatted_amount} {norm_code}",
+        summary=(
+            f"[{net_name.upper()}] Arabic Stellar terminology evaluator checking non-custodial "
+            f"and network-explicit translations: {formatted_amount} {norm_code}"
+        ),
         details=details,
         warnings=tuple(warnings),
     )
