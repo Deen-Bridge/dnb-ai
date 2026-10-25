@@ -122,6 +122,7 @@ from history import router as history_router
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from image_analysis import router as image_analysis_router
 from learning import router as learning_router
+from learning_goals import router as learning_goals_router
 from manuscript_ocr import (
     ManuscriptAnalysis,
     PoorQualityError,
@@ -390,6 +391,8 @@ app.include_router(audio_analysis_router)
 app.include_router(query_optimizer_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
 app.include_router(history_router)
+# Learning goals: goal setting, progress tracking, milestones and pace-adjusted recommendations
+app.include_router(learning_goals_router)
 # Model routing: pick the optimal model per query by complexity, latency and cost
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
