@@ -194,6 +194,23 @@ def test_mnemonic_detection_requires_bip39_words() -> None:
     assert contains_secret_material(same_shape) is False
 
 
+def test_mnemonic_is_found_inside_a_longer_word_run() -> None:
+    """A phrase must not hide in padding.
+
+    Scoring a whole run in one go lets "stellar wallet <12-word phrase>" match as a
+    single 14-word run whose two leading words are not in the wordlist, so the
+    phrase slipped through. The window has to slide.
+    """
+    phrase = "valley orchard anxiety curtain damage bean furnace basket anchor release ripple lonely"
+    for padded in (
+        "stellar wallet " + phrase,
+        phrase + " for the wallet",
+        "hey there " + phrase + " ok thanks",
+        "my backup: " + phrase + ". keep it safe",
+    ):
+        assert contains_secret_material(padded) is True, padded
+
+
 def test_fields_are_scanned_separately_not_joined() -> None:
     """Field defaults must not contribute words to the mnemonic run."""
     ten_words = "one two three four five six seven eight nine ten"

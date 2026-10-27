@@ -286,21 +286,33 @@ def is_valid_stellar_account_id(value: str) -> bool:
     return raw[33:] == expected_crc
 
 
+# BIP-39 defines phrases of exactly these many words.
+MNEMONIC_LENGTHS = (12, 15, 18, 21, 24)
+
+
 def _looks_like_mnemonic(text: str) -> bool:
-    """True when a 12-24 word run is mostly real BIP-39 words.
+    """True when any 12/15/18/21/24-word window is almost entirely BIP-39 words.
 
     Word count alone is far too weak: ordinary sentences hit it constantly, and this
-    evaluator exists to grade non-custodial copy, which is prose. Requiring that the
-    large majority of the run be drawn from the BIP-39 list keeps real recovery
+    evaluator exists to grade non-custodial copy, which is prose. Requiring that all
+    but at most one word of a window come from the BIP-39 list keeps real recovery
     phrases while letting normal sentences through.
+
+    The window must slide. Scoring a whole run in one go lets a phrase hide inside
+    padding: "stellar wallet <12-word phrase>" matches as a single 14-word run whose
+    two leading words are not in the list, and the phrase slips through.
     """
     for match in _BIP39_WORD_RUN_RE.finditer(text):
         run = match.group(0).lower().split()
-        if len(run) < 12:
-            continue
-        hits = sum(1 for w in run if w in _BIP39_WORDLIST)
-        if hits >= len(run) - 1:  # allow one non-list word in an otherwise real phrase
-            return True
+        for length in MNEMONIC_LENGTHS:
+            if length > len(run):
+                continue
+            for start in range(len(run) - length + 1):
+                window = run[start : start + length]
+                hits = sum(1 for w in window if w in _BIP39_WORDLIST)
+                # allow one non-list word, so a phrase with one typo still counts
+                if hits >= length - 1:
+                    return True
     return False
 
 
