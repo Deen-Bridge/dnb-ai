@@ -23,6 +23,15 @@ _SEED_PHRASE_RE = re.compile(
     re.IGNORECASE,
 )
 _BIP39_WORD_RUN_RE = re.compile(r"(?:^|\s)[a-z]{3,8}(?:\s+[a-z]{3,8}){11,23}(?:\s|$)", re.IGNORECASE)
+# Detection is layered. The first pattern is the literal denylist kept from the
+# original revision; the remaining three match injection *intent* structurally so
+# that reworded instructions are still caught. They are deliberately narrow:
+#   - verbs must be imperative and directed ("show me", not "shows")
+#   - the verb and its object must sit within one short clause (_CLAUSE_GAP)
+# That keeps declarative non-custodial copy, which legitimately names secret keys
+# and seed phrases, from being flagged.
+_CLAUSE_GAP = r"[^.!?\n]{0,24}?"
+
 _INJECTION_RE = re.compile(
     r"(ignore\s+(all\s+)?(previous|prior|above)\s+instructions|"
     r"disregard\s+.*instructions|"
@@ -32,6 +41,35 @@ _INJECTION_RE = re.compile(
     r"output\s+credentials|reveal\s+.*(secret|key|prompt|credentials)|"
     r"send\s+funds\s+to)",
     re.IGNORECASE,
+)
+
+# "forget everything", "disregard the rules above", ...
+_OVERRIDE_RE = re.compile(
+    r"\b(ignore|disregard|forget|override|bypass|skip|discard|drop|cancel)\b"
+    + _CLAUSE_GAP
+    + r"\b(instruction|instructions|rule|rules|prompt|prompts|directive|directives|"
+    r"guideline|guidelines|constraint|constraints|policy|policies|above|previous|prior|"
+    r"earlier|system|developer|everything|all|that|this)\b",
+    re.IGNORECASE,
+)
+
+# "show me your secret key", "output credentials", ...
+_EXFIL_RE = re.compile(
+    r"\b(output|reveal|disclose|dump|exfiltrate|leak|echo|repeat|recite|"
+    r"show me|give me|send me|tell me|hand over|print out|write out|list all)\b"
+    + _CLAUSE_GAP
+    + r"\b(secret|seed|mnemonic|passphrase|password|private key|private keys|"
+    r"credential|credentials|token|prompt|api key)\b",
+    re.IGNORECASE,
+)
+
+# Fake role/message boundaries used to smuggle instructions.
+_DELIMITER_RE = re.compile(
+    r"(<\s*\|\s*(system|assistant|user)\s*\|\s*>|"
+    r"^\s*(system|assistant)\s*:|"
+    r"\bjailbreak\b|\bDAN\b|\bact as\b|\bpretend (to be|you)\b|\byou are now\b|"
+    r"\bnew (system )?prompt\b)",
+    re.IGNORECASE | re.MULTILINE,
 )
 _ED25519_PUBLIC_KEY_VERSION_BYTE = 6 << 3  # 48 ('G')
 
@@ -93,6 +131,21 @@ def contains_secret_material(text: str) -> bool:
     return bool(_SECRET_KEY_RE.search(text) or _SEED_PHRASE_RE.search(text) or _BIP39_WORD_RUN_RE.search(text))
 
 
+def looks_like_injection(text: str) -> bool:
+    """Return True if untrusted text reads as an attempt to steer the consumer.
+
+    Heuristic by nature: it is a guard rail, not a proof of safety. The security
+    property does not rest on it, because no untrusted text is ever echoed back --
+    see ``evaluate_arabic_stellar_terminology``.
+    """
+    return bool(
+        _INJECTION_RE.search(text)
+        or _OVERRIDE_RE.search(text)
+        or _EXFIL_RE.search(text)
+        or _DELIMITER_RE.search(text)
+    )
+
+
 def resolve_network(network: str) -> tuple[str, str]:
     """Normalize network identifier and return (network_name, canonical_passphrase)."""
     cleaned = network.strip().lower()
@@ -133,14 +186,18 @@ def evaluate_arabic_stellar_terminology(
     warnings: list[str] = []
 
     printable_payload = "".join(ch for ch in str(payload) if ch.isprintable()).strip()[:240]
-    if _INJECTION_RE.search(printable_payload) or _INJECTION_RE.search(str(asset_code)):
-        warnings.append("untrusted_metadata_injection_blocked")
-        clean_payload = "[REDACTED_UNTRUSTED_STELLAR_CONTENT]"
-    elif printable_payload:
+
+    # Untrusted text is never echoed. Any payload collapses to a one-way digest that
+    # still supports correlation but cannot carry attacker-chosen wording, so the
+    # sanitisation guarantee does not depend on the detector above being complete.
+    if printable_payload:
         digest = hashlib.sha256(printable_payload.encode("utf-8")).hexdigest()[:16]
-        clean_payload = f"[UNTRUSTED_INPUT_SHA256:{digest}]"
+        clean_payload = f"[UNTRUSTED_INPUT_REDACTED sha256:{digest}]"
     else:
         clean_payload = ""
+
+    if looks_like_injection(printable_payload) or looks_like_injection(str(asset_code)):
+        warnings.append("untrusted_metadata_injection_blocked")
 
     raw_code = str(asset_code).strip()
     code_ok = bool(_ASSET_CODE_RE.match(raw_code))
@@ -193,6 +250,8 @@ def evaluate_arabic_stellar_terminology(
         "ledger_sequence": safe_ledger_sequence,
         "tx_hash": norm_hash if hash_ok else "",
         "sanitized_payload": clean_payload,
+        # False on every path: untrusted text is never returned, only a digest.
+        "payload_echoed": False,
         "explorer_url": (
             f"https://stellar.expert/explorer/{'public' if net_name == 'public' else 'testnet'}/tx/{norm_hash}"
             if hash_ok
