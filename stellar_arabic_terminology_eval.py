@@ -139,10 +139,7 @@ def looks_like_injection(text: str) -> bool:
     see ``evaluate_arabic_stellar_terminology``.
     """
     return bool(
-        _INJECTION_RE.search(text)
-        or _OVERRIDE_RE.search(text)
-        or _EXFIL_RE.search(text)
-        or _DELIMITER_RE.search(text)
+        _INJECTION_RE.search(text) or _OVERRIDE_RE.search(text) or _EXFIL_RE.search(text) or _DELIMITER_RE.search(text)
     )
 
 
