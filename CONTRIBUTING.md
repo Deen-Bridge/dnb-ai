@@ -25,6 +25,10 @@ Points are assigned per issue by the maintainer in the Drips Wave dashboard usin
 
 Issues carry `complexity:trivial`, `complexity:medium`, or `complexity:high` labels that mirror these tiers.
 
+## Error Handling
+
+Raise `DomainError` from `errors.py` for expected application failures, with an HTTP status, stable machine-readable `code`, safe client-facing `detail`, and optional actionable `hint`. Use `APIException` for compatibility with existing API code. FastAPI serializes domain errors, ordinary `HTTPException`s, request validation failures, and rate limits with the shared JSON fields `code`, `detail`, and optional `hint`; validation errors keep their structured list in `detail`. Unexpected failures should be logged and mapped to a generic response so internal exception messages and secrets are not exposed.
+
 ## Getting Started
 
 ### Prerequisites

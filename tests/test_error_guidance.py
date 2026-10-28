@@ -36,6 +36,8 @@ async def test_tafsir_invalid_reference_includes_hint_and_examples(client):
         resp = await client.post("/tafsir", json={"reference": "999:1"})
         assert resp.status_code == 400
         data = resp.json()
+        assert {"code", "detail", "hint"}.issubset(data)
+        assert data["code"] == "api_error"
         assert "detail" in data
         assert "hint" in data
         hint = data["hint"]
@@ -210,6 +212,8 @@ async def test_pydantic_request_validation_error_includes_hint(client):
         resp = await client.post("/tafsir", json={})
         assert resp.status_code == 422
         data = resp.json()
+        assert {"code", "detail", "hint"}.issubset(data)
+        assert data["code"] == "validation_error"
         assert "detail" in data
         assert "hint" in data
         assert "Validation failed" in data["hint"]
