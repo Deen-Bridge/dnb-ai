@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -189,7 +190,10 @@ class CrossReferenceDatabase:
             self._by_attribute.setdefault(attribute, []).append(idx)
 
     def query(
-        self, surah: int | None = None, reference_type: ReferenceType | None = None, attributes: list[str] | None = None
+        self,
+        surah: int | None = None,
+        reference_type: ReferenceType | None = None,
+        attributes: list[str] | None = None,
     ) -> list[CrossReferenceRecord]:
         candidates = set(range(len(self._records)))
         if surah is not None:
@@ -1023,3 +1027,412 @@ def _classify_relationship(a: AyahText, b: AyahText, jaccard: float, topic_overl
     if jaccard >= 0.15:
         return "elaboration"
     return "complement"
+
+
+# ---------------------------------------------------------------------------
+# Intelligent agent task decomposition
+# ---------------------------------------------------------------------------
+
+
+class TaskComplexity(str, Enum):
+    """Coarse bucket for how hard a query is to decompose."""
+
+    TRIVIAL = "trivial"
+    SIMPLE = "simple"
+    MODERATE = "moderate"
+    COMPLEX = "complex"
+    VERY_COMPLEX = "very_complex"
+
+
+class AgentCapability(str, Enum):
+    """Capabilities an agent may advertise for task matching."""
+
+    RETRIEVAL = "retrieval"
+    REASONING = "reasoning"
+    SUMMARIZATION = "summarization"
+    TRANSLATION = "translation"
+    CODE = "code"
+    MATH = "math"
+    SQL = "sql"
+    VERIFICATION = "verification"
+    GENERAL = "general"
+
+
+class SubTaskStatus(str, Enum):
+    """Lifecycle states for a decomposed sub-task."""
+
+    PENDING = "pending"
+    READY = "ready"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class SubTask(BaseModel):
+    """One unit of work produced by decomposition."""
+
+    id: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    required_capabilities: list[AgentCapability] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+    estimated_cost: int = Field(default=1, ge=0, description="Relative effort units")
+    status: SubTaskStatus = SubTaskStatus.PENDING
+    assigned_agent: str | None = None
+    result: str | None = None
+
+
+class AgentProfile(BaseModel):
+    """An agent that can be assigned sub-tasks."""
+
+    id: str = Field(..., min_length=1)
+    capabilities: list[AgentCapability] = Field(default_factory=list)
+    capacity: int = Field(default=1, ge=1, description="Max concurrent sub-tasks")
+    reliability: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class QueryComplexityAssessment(BaseModel):
+    """Result of analyzing a query's complexity before decomposition."""
+
+    complexity: TaskComplexity
+    score: int = Field(..., ge=0, le=100)
+    signals: list[str] = Field(default_factory=list)
+    estimated_sub_tasks: int = Field(..., ge=1)
+
+
+class DecompositionPlan(BaseModel):
+    """A full plan: sub-tasks, dependency graph, and an execution schedule."""
+
+    query: str
+    assessment: QueryComplexityAssessment
+    sub_tasks: list[SubTask]
+    execution_batches: list[list[str]] = Field(default_factory=list)
+    parallelizable: bool = False
+    completeness: float = Field(default=0.0, ge=0.0, le=1.0)
+    warnings: list[str] = Field(default_factory=list)
+
+
+_COMPLEXITY_SIGNALS: tuple[tuple[str, int, str], ...] = (
+    ("compare", 15, "comparison"),
+    ("contrast", 15, "comparison"),
+    ("analyze", 12, "analysis"),
+    ("explain", 10, "explanation"),
+    ("summarize", 10, "summarization"),
+    ("translate", 12, "translation"),
+    ("calculate", 12, "computation"),
+    ("prove", 18, "proof"),
+    ("derive", 18, "derivation"),
+    ("list", 6, "enumeration"),
+    ("find", 6, "retrieval"),
+    ("retrieve", 6, "retrieval"),
+    ("verify", 10, "verification"),
+    ("validate", 10, "verification"),
+    ("then", 8, "sequence"),
+    ("after", 6, "sequence"),
+    ("before", 6, "sequence"),
+    ("and", 4, "conjunction"),
+)
+
+_CAPABILITY_KEYWORDS: dict[AgentCapability, tuple[str, ...]] = {
+    AgentCapability.RETRIEVAL: ("find", "retrieve", "search", "lookup", "fetch"),
+    AgentCapability.REASONING: ("analyze", "reason", "infer", "deduce", "explain"),
+    AgentCapability.SUMMARIZATION: ("summarize", "summary", "condense", "abstract"),
+    AgentCapability.TRANSLATION: ("translate", "translation", "render"),
+    AgentCapability.CODE: ("code", "implement", "program", "function"),
+    AgentCapability.MATH: ("calculate", "compute", "solve", "derive", "prove"),
+    AgentCapability.SQL: ("sql", "query", "select", "join", "index"),
+    AgentCapability.VERIFICATION: ("verify", "validate", "check", "confirm"),
+}
+
+
+def assess_query_complexity(query: str) -> QueryComplexityAssessment:
+    """Score a natural-language query's complexity from keyword signals.
+
+    Deterministic: the same query always yields the same assessment.
+    """
+    lowered = turkish_lower(query)
+    tokens = set(re.findall(r"[a-z0-9çğıöşü']+", lowered))
+    score = 0
+    signals: list[str] = []
+    for keyword, weight, label in _COMPLEXITY_SIGNALS:
+        if keyword in tokens:
+            score += weight
+            if label not in signals:
+                signals.append(label)
+    # Length is a weak signal: longer queries tend to have more parts.
+    score += min(20, len(tokens) // 4)
+    score = max(0, min(100, score))
+
+    if score < 10:
+        complexity = TaskComplexity.TRIVIAL
+    elif score < 25:
+        complexity = TaskComplexity.SIMPLE
+    elif score < 45:
+        complexity = TaskComplexity.MODERATE
+    elif score < 70:
+        complexity = TaskComplexity.COMPLEX
+    else:
+        complexity = TaskComplexity.VERY_COMPLEX
+
+    estimated = max(1, min(8, 1 + score // 15))
+    return QueryComplexityAssessment(
+        complexity=complexity,
+        score=score,
+        signals=signals,
+        estimated_sub_tasks=estimated,
+    )
+
+
+def _capabilities_for(text: str) -> list[AgentCapability]:
+    lowered = turkish_lower(text)
+    found: list[AgentCapability] = []
+    for capability, keywords in _CAPABILITY_KEYWORDS.items():
+        if any(keyword in lowered for keyword in keywords):
+            found.append(capability)
+    if not found:
+        found.append(AgentCapability.GENERAL)
+    return found
+
+
+def _split_query(query: str) -> list[str]:
+    """Split a query into candidate sub-task fragments on conjunctions/sequences."""
+    parts = re.split(r"\b(?:and then|then|after that|afterwards|;|,\s*and)\b", query, flags=re.IGNORECASE)
+    fragments = [p.strip(" ,.;") for p in parts if p.strip(" ,.;")]
+    return fragments or [query.strip()]
+
+
+def decompose_query(query: str, max_sub_tasks: int = 8) -> DecompositionPlan:
+    """Break ``query`` into sub-tasks with a dependency graph and schedule.
+
+    The decomposition is heuristic but deterministic: fragments are produced by
+    splitting on sequence conjunctions, each fragment becomes a sub-task with
+    inferred capabilities, and fragments after the first depend on the previous
+    one (a linear chain) unless they are independent retrieval steps.
+    """
+    assessment = assess_query_complexity(query)
+    fragments = _split_query(query)[:max_sub_tasks]
+    warnings: list[str] = []
+    if len(fragments) < assessment.estimated_sub_tasks:
+        warnings.append(
+            f"Query suggests ~{assessment.estimated_sub_tasks} sub-tasks but only {len(fragments)} were identified."
+        )
+
+    sub_tasks: list[SubTask] = []
+    previous_id: str | None = None
+    for index, fragment in enumerate(fragments):
+        task_id = f"task-{index + 1}"
+        capabilities = _capabilities_for(fragment)
+        # Retrieval-only fragments are independent; anything else chains.
+        independent = capabilities == [AgentCapability.RETRIEVAL]
+        depends_on = [] if independent or previous_id is None else [previous_id]
+        sub_tasks.append(
+            SubTask(
+                id=task_id,
+                description=fragment,
+                required_capabilities=capabilities,
+                depends_on=depends_on,
+                estimated_cost=max(1, len(fragment) // 40 + 1),
+            )
+        )
+        previous_id = task_id
+
+    batches = execution_batches(sub_tasks)
+    parallelizable = any(len(batch) > 1 for batch in batches)
+    completeness = _decomposition_completeness(query, sub_tasks)
+    return DecompositionPlan(
+        query=query,
+        assessment=assessment,
+        sub_tasks=sub_tasks,
+        execution_batches=batches,
+        parallelizable=parallelizable,
+        completeness=completeness,
+        warnings=warnings,
+    )
+
+
+def _decomposition_completeness(query: str, sub_tasks: list[SubTask]) -> float:
+    """Fraction of the query's content tokens covered by sub-task descriptions."""
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return 1.0
+    covered: set[str] = set()
+    for task in sub_tasks:
+        covered |= _tokenize(task.description)
+    return len(query_tokens & covered) / len(query_tokens)
+
+
+def execution_batches(sub_tasks: list[SubTask]) -> list[list[str]]:
+    """Topologically layer sub-tasks into parallel execution batches.
+
+    Each batch contains tasks whose dependencies are all satisfied by earlier
+    batches. Tasks in the same batch can run concurrently. Raises ``ValueError``
+    on a dependency cycle or a reference to an unknown task.
+    """
+    by_id = {task.id: task for task in sub_tasks}
+    for task in sub_tasks:
+        for dep in task.depends_on:
+            if dep not in by_id:
+                raise ValueError(f"Task {task.id} depends on unknown task {dep}")
+
+    remaining = {task.id: set(task.depends_on) for task in sub_tasks}
+    batches: list[list[str]] = []
+    while remaining:
+        ready = sorted(task_id for task_id, deps in remaining.items() if not deps)
+        if not ready:
+            raise ValueError("Dependency cycle detected in sub-tasks")
+        batches.append(ready)
+        for task_id in ready:
+            del remaining[task_id]
+        for deps in remaining.values():
+            deps.difference_update(ready)
+    return batches
+
+
+def match_agents(sub_tasks: list[SubTask], agents: list[AgentProfile]) -> dict[str, str]:
+    """Assign each sub-task to the best-suited agent.
+
+    Scoring prefers agents whose capabilities cover the task's requirements,
+    then higher reliability. Returns a mapping of task id -> agent id. Tasks
+    with no capable agent are left unassigned (absent from the mapping).
+    """
+    assignment: dict[str, str] = {}
+    load: dict[str, int] = {agent.id: 0 for agent in agents}
+    for task in sub_tasks:
+        required = set(task.required_capabilities)
+        best: tuple[float, str] | None = None
+        for agent in agents:
+            if load[agent.id] >= agent.capacity:
+                continue
+            covered = required & set(agent.capabilities)
+            if required and not covered:
+                continue
+            coverage = len(covered) / len(required) if required else 1.0
+            score = coverage * 100 + agent.reliability * 10 - load[agent.id]
+            if best is None or score > best[0]:
+                best = (score, agent.id)
+        if best is not None:
+            assignment[task.id] = best[1]
+            load[best[1]] += 1
+    return assignment
+
+
+def validate_decomposition(plan: DecompositionPlan) -> list[str]:
+    """Return a list of problems with ``plan``; empty means it is valid."""
+    problems: list[str] = []
+    if not plan.sub_tasks:
+        problems.append("Plan has no sub-tasks")
+        return problems
+    ids = {task.id for task in plan.sub_tasks}
+    if len(ids) != len(plan.sub_tasks):
+        problems.append("Duplicate sub-task ids")
+    for task in plan.sub_tasks:
+        for dep in task.depends_on:
+            if dep not in ids:
+                problems.append(f"Task {task.id} depends on unknown task {dep}")
+    try:
+        execution_batches(plan.sub_tasks)
+    except ValueError as exc:
+        problems.append(str(exc))
+    if plan.completeness < 0.9:
+        problems.append(f"Decomposition completeness {plan.completeness:.2f} is below the 0.90 target")
+    return problems
+
+
+def replan(plan: DecompositionPlan, failed_task_id: str, replacement: SubTask | None = None) -> DecompositionPlan:
+    """Produce a new plan after ``failed_task_id`` fails.
+
+    The failed task is removed; dependent tasks are re-pointed to the failed
+    task's own dependencies (or made independent if it had none). If
+    ``replacement`` is supplied it takes the failed task's place.
+    """
+    failed = next((t for t in plan.sub_tasks if t.id == failed_task_id), None)
+    if failed is None:
+        raise ValueError(f"Unknown task {failed_task_id}")
+    new_tasks: list[SubTask] = []
+    for task in plan.sub_tasks:
+        if task.id == failed_task_id:
+            if replacement is not None:
+                new_tasks.append(replacement)
+            continue
+        if failed_task_id in task.depends_on:
+            new_deps = [d for d in task.depends_on if d != failed_task_id]
+            new_deps.extend(d for d in failed.depends_on if d not in new_deps)
+            task = task.model_copy(update={"depends_on": new_deps})
+        new_tasks.append(task)
+    batches = execution_batches(new_tasks)
+    return plan.model_copy(
+        update={
+            "sub_tasks": new_tasks,
+            "execution_batches": batches,
+            "parallelizable": any(len(batch) > 1 for batch in batches),
+            "completeness": _decomposition_completeness(plan.query, new_tasks),
+        }
+    )
+
+
+@dataclass
+class DecompositionMetrics:
+    """Running counters for decomposition quality."""
+
+    plans_built: int = 0
+    parallelizable_plans: int = 0
+    total_sub_tasks: int = 0
+    completeness_sum: float = 0.0
+    assignments_made: int = 0
+    assignments_optimal: int = 0
+
+    def record_plan(self, plan: DecompositionPlan) -> None:
+        self.plans_built += 1
+        self.total_sub_tasks += len(plan.sub_tasks)
+        self.completeness_sum += plan.completeness
+        if plan.parallelizable:
+            self.parallelizable_plans += 1
+
+    def record_assignment(self, optimal: bool) -> None:
+        self.assignments_made += 1
+        if optimal:
+            self.assignments_optimal += 1
+
+    def summary(self) -> dict[str, Any]:
+        avg_completeness = self.completeness_sum / self.plans_built if self.plans_built else 0.0
+        parallel_rate = self.parallelizable_plans / self.plans_built if self.plans_built else 0.0
+        accuracy = self.assignments_optimal / self.assignments_made if self.assignments_made else 0.0
+        return {
+            "plans_built": self.plans_built,
+            "avg_completeness": avg_completeness,
+            "parallelizable_rate": parallel_rate,
+            "avg_sub_tasks": self.total_sub_tasks / self.plans_built if self.plans_built else 0.0,
+            "assignment_accuracy": accuracy,
+        }
+
+
+class DecomposeRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    max_sub_tasks: int = Field(default=8, ge=1, le=32)
+
+
+class DecomposeResponse(BaseModel):
+    plan: DecompositionPlan
+    problems: list[str] = Field(default_factory=list)
+
+
+class MatchRequest(BaseModel):
+    sub_tasks: list[SubTask]
+    agents: list[AgentProfile]
+
+
+class MatchResponse(BaseModel):
+    assignment: dict[str, str]
+
+
+@router.post("/decompose", response_model=DecomposeResponse)
+async def decompose_endpoint(request: DecomposeRequest) -> DecomposeResponse:
+    """Decompose a complex query into sub-tasks with a dependency schedule."""
+    plan = decompose_query(request.query, max_sub_tasks=request.max_sub_tasks)
+    return DecomposeResponse(plan=plan, problems=validate_decomposition(plan))
+
+
+@router.post("/match-agents", response_model=MatchResponse)
+async def match_agents_endpoint(request: MatchRequest) -> MatchResponse:
+    """Assign sub-tasks to the best-suited agents by capability and reliability."""
+    return MatchResponse(assignment=match_agents(request.sub_tasks, request.agents))
