@@ -190,7 +190,10 @@ class CrossReferenceDatabase:
             self._by_attribute.setdefault(attribute, []).append(idx)
 
     def query(
-        self, surah: int | None = None, reference_type: ReferenceType | None = None, attributes: list[str] | None = None
+        self,
+        surah: int | None = None,
+        reference_type: ReferenceType | None = None,
+        attributes: list[str] | None = None,
     ) -> list[CrossReferenceRecord]:
         candidates = set(range(len(self._records)))
         if surah is not None:

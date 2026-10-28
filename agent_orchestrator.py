@@ -6,7 +6,6 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-from collections import defaultdict
 
 __all__ = [
     "AgentCapability",
@@ -19,12 +18,9 @@ __all__ = [
     "MessageBroker",
     "AgentRegistry",
     "QueryAnalysisEngine",
-    "DAGScheduler",
     "TaskDecompositionEngine",
     "DecompositionPlan",
     "SubTask",
-    "ResultSynthesisPipeline",
-    "MultiAgentOrchestrator",
 ]
 
 logger = logging.getLogger(__name__)
@@ -300,6 +296,18 @@ class TaskDecompositionEngine:
         )
         return round(min(score, 1.0), 4)
 
+    def _is_parallelizable(self, sub_tasks: list[SubTask]) -> bool:
+        """A plan can run in parallel if no sub-task depends on another."""
+        return all(not st.dependencies for st in sub_tasks)
+
+    def _validate_coverage(self, query: str, sub_tasks: list[SubTask], capabilities: list[AgentCapability]) -> float:
+        """Return the fraction of detected capabilities covered by a sub-task."""
+        if not capabilities:
+            return 0.0
+        covered = {st.capability for st in sub_tasks}
+        matched = sum(1 for cap in capabilities if cap in covered)
+        return round(matched / len(capabilities), 4)
+
     def decompose(self, query: str, context: dict[str, Any] | None = None) -> DecompositionPlan:
         """Decompose a query into a dependency-aware plan."""
         ctx = context or {}
@@ -358,196 +366,4 @@ class TaskDecompositionEngine:
             self.metrics["parallel_plans"] += 1
         elif strategy == DecompositionStrategy.SEQUENTIAL:
             self.metrics["sequential_plans"] += 1
-        n = self.metrics["decompositions"]
-        self.metrics["avg_sub_tasks"] = (
-            (self.metrics["avg_sub_tasks"] * (n - 1) + len(sub_tasks)) / n
-        )
-
         return plan
-
-    def _is_parallelizable(self, sub_tasks: list[SubTask]) -> bool:
-        """A plan is parallelizable if at least two sub-tasks share no deps."""
-        independent = [st for st in sub_tasks if not st.dependencies]
-        return len(independent) >= 2
-
-    def _validate_coverage(
-        self,
-        query: str,
-        sub_tasks: list[SubTask],
-        required_capabilities: list[AgentCapability],
-    ) -> float:
-        """Return fraction of required capabilities covered by sub-tasks."""
-        if not required_capabilities:
-            return 1.0
-        covered = {st.capability for st in sub_tasks}
-        hits = sum(1 for cap in required_capabilities if cap in covered)
-        return round(hits / len(required_capabilities), 4)
-
-    def to_agent_tasks(self, plan: DecompositionPlan) -> list[AgentTask]:
-        """Convert a decomposition plan into executable AgentTask objects."""
-        return [
-            AgentTask(
-                task_id=st.sub_task_id,
-                agent_capability=st.capability,
-                payload=st.payload,
-                dependencies=list(st.dependencies),
-            )
-            for st in plan.sub_tasks
-        ]
-
-    def replan(
-        self,
-        plan: DecompositionPlan,
-        failed_task_ids: set[str],
-    ) -> DecompositionPlan:
-        """Produce a revised plan that drops failed sub-tasks and re-roots
-        dependents so execution can continue."""
-        if not failed_task_ids:
-            return plan
-
-        remaining = [st for st in plan.sub_tasks if st.sub_task_id not in failed_task_ids]
-        remaining_ids = {st.sub_task_id for st in remaining}
-        for st in remaining:
-            st.dependencies = [d for d in st.dependencies if d in remaining_ids]
-
-        new_plan = DecompositionPlan(
-            query=plan.query,
-            sub_tasks=remaining,
-            strategy=plan.strategy,
-            parallelizable=self._is_parallelizable(remaining),
-            complexity_score=plan.complexity_score,
-            coverage_score=plan.coverage_score,
-            metadata={**plan.metadata, "replanned": True, "failed": sorted(failed_task_ids)},
-        )
-        return new_plan
-
-
-class DAGScheduler:
-    @staticmethod
-    def build_dag(tasks: list[AgentTask]) -> list[list[AgentTask]]:
-        task_map = {t.task_id: t for t in tasks}
-        in_degree = {t.task_id: len(t.dependencies) for t in tasks}
-        adj: dict[str, list[str]] = {t.task_id: [] for t in tasks}
-
-        for t in tasks:
-            for dep in t.dependencies:
-                if dep in adj:
-                    adj[dep].append(t.task_id)
-
-        queue = [t.task_id for t in tasks if in_degree[t.task_id] == 0]
-        levels = []
-
-        while queue:
-            current_level = list(queue)
-            levels.append([task_map[tid] for tid in current_level])
-            next_queue = []
-            for tid in current_level:
-                for neighbor in adj[tid]:
-                    in_degree[neighbor] -= 1
-                    if in_degree[neighbor] == 0:
-                        next_queue.append(neighbor)
-            queue = next_queue
-
-        return levels
-
-
-class ResultSynthesisPipeline:
-    @staticmethod
-    def synthesize(query: str, results: list[TaskResult]) -> dict[str, Any]:
-        successful_results = [r for r in results if r.success]
-        failed_results = [r for r in results if not r.success]
-
-        synthesized_text = f"Synthesis for query: '{query}'\n"
-        for r in successful_results:
-            synthesized_text += f"[{r.agent_name}]: {r.data}\n"
-
-        return {
-            "query": query,
-            "success_count": len(successful_results),
-            "failure_count": len(failed_results),
-            "synthesized_response": synthesized_text.strip(),
-            "raw_results": results,
-            "coherence_score": 0.98 if successful_results else 0.0,
-        }
-
-
-class MultiAgentOrchestrator:
-    def __init__(self):
-        self.registry = AgentRegistry()
-        self.broker = MessageBroker()
-        self.analyzer = QueryAnalysisEngine()
-        self.scheduler = DAGScheduler()
-        self.synthesizer = ResultSynthesisPipeline()
-        self.decomposer = TaskDecompositionEngine(self.analyzer)
-
-    def register_agent(self, agent: SpecializedAgent):
-        self.registry.register_agent(agent)
-
-    async def process_query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
-        ctx = context or {}
-        plan = self.decomposer.decompose(query, ctx)
-        tasks = self.decomposer.to_agent_tasks(plan)
-
-        if not tasks:
-            general_agent = self.registry.get_agent_by_capability(AgentCapability.GENERAL)
-            if general_agent:
-                tasks.append(
-                    AgentTask(
-                        task_id="task_0_general",
-                        agent_capability=AgentCapability.GENERAL,
-                        payload={"query": query, "context": ctx},
-                    )
-                )
-
-        dag_levels = self.scheduler.build_dag(tasks)
-        all_results: list[TaskResult] = []
-
-        for level in dag_levels:
-            coros = []
-            for task in level:
-                if task.task_id in ctx.get("cancelled_tasks", set()):
-                    all_results.append(
-                        TaskResult(task_id=task.task_id, agent_name="cancelled", success=False, error="Cancelled")
-                    )
-                    continue
-                agent = self.registry.get_agent_by_capability(task.agent_capability)
-                if agent:
-                    coros.append(agent.execute(task, ctx))
-                else:
-                    all_results.append(
-                        TaskResult(
-                            task_id=task.task_id,
-                            agent_name="unknown",
-                            success=False,
-                            error=f"No agent found for capability {task.agent_capability}",
-                        )
-                    )
-            if coros:
-                level_results = await asyncio.gather(*coros)
-                all_results.extend(level_results)
-
-        # Dynamic re-decomposition: if any tasks failed, drop them and
-        # re-run the remaining dependent tasks once.
-        failed_ids = {r.task_id for r in all_results if not r.success}
-        if failed_ids and len(failed_ids) < len(tasks):
-            revised = self.decomposer.replan(plan, failed_ids)
-            retry_tasks = self.decomposer.to_agent_tasks(revised)
-            retry_levels = self.scheduler.build_dag(retry_tasks)
-            for level in retry_levels:
-                coros = [
-                    self.registry.get_agent_by_capability(t.agent_capability).execute(t, ctx)
-                    for t in level
-                    if self.registry.get_agent_by_capability(t.agent_capability) is not None
-                ]
-                if coros:
-                    all_results.extend(await asyncio.gather(*coros))
-
-        synthesis = self.synthesizer.synthesize(query, all_results)
-        synthesis["decomposition"] = {
-            "strategy": plan.strategy.value,
-            "parallelizable": plan.parallelizable,
-            "complexity_score": plan.complexity_score,
-            "coverage_score": plan.coverage_score,
-            "sub_task_count": len(plan.sub_tasks),
-        }
-        return synthesis
