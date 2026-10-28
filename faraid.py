@@ -25,8 +25,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from fractions import Fraction
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
+from errors import DomainError
 
 logger = logging.getLogger(__name__)
 
@@ -537,17 +539,19 @@ async def calculate_faraid(request: FaraidRequest) -> FaraidResponse:
         try:
             ht = HeirType(h.heir_type)
         except ValueError:
-            raise HTTPException(
+            raise DomainError(
                 status_code=400,
                 detail=f"Unknown heir type: {h.heir_type!r}",
+                code="invalid_faraid_request",
             ) from None
         for i in range(h.count):
             heirs.append(HeirEntry(heir_type=ht, index=i))
 
     if not heirs:
-        raise HTTPException(
+        raise DomainError(
             status_code=400,
             detail="At least one heir is required.",
+            code="invalid_faraid_request",
         )
 
     estate_int = int(request.estate)
