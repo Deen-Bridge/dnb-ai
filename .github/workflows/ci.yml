@@ -20,6 +20,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: '**/requirements*.txt'
 
       - name: Install dependencies
         run: |
@@ -36,20 +37,8 @@ jobs:
       - name: Type check (mypy)
         run: mypy .
 
-      - name: Run offline safety and red-team tests
-        run: pytest -q tests/redteam
-
-      - name: Run study generator tests
-        run: pytest -q tests/test_study.py
-
-      - name: Run learning-path recommendation tests
-        run: pytest -q tests/test_learning.py
-
-      - name: Run semantic cache tests
-        run: pytest -q tests/test_semantic_cache.py
-
-      - name: Run retrieval infrastructure tests
-        run: pytest -q tests/test_retrieval_chunking.py tests/test_retrieval_index.py tests/test_build_index.py
+      - name: Run full test suite
+        run: pytest -q tests/
 
       - name: Verify retrieval backfill is idempotent (offline demo)
         run: |
@@ -57,102 +46,15 @@ jobs:
           python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings | tee /tmp/ci-backfill-2.log
           grep -q "0 added, 0 updated" /tmp/ci-backfill-2.log
 
-      - name: Run hybrid search tests
-        run: pytest -q tests/test_hybrid_search.py
-
-      - name: Run fiqh tests
-        run: pytest -q tests/test_fiqh.py
-
-      - name: Run hadith grading tests
-        run: pytest -q tests/test_hadith.py
-
-      - name: Run structured citation tests
-        run: pytest -q tests/test_citations.py tests/test_citations_integration.py
-
-      - name: Run confidence, uncertainty, and abstention tests
-        run: pytest -q tests/test_confidence.py tests/test_uncertainty.py
-
-      - name: Run scholar-review queue tests
-        run: pytest -q tests/test_review_queue.py
-
-      - name: Run tafsir tests
-        run: pytest -q tests/test_tafsir.py
-
-      - name: Run zakat and nisab tests
-        run: pytest -q tests/test_zakat.py
-
-      - name: Run purchase history chat tests
-        run: pytest -q tests/test_purchases.py
-
-      - name: Run feedback loop tests
-        run: pytest -q tests/test_feedback.py
-
-      - name: Run LLM telemetry tests
-        run: pytest -q tests/test_telemetry.py
-
-      - name: Run structured logging tests
-        run: pytest -q tests/test_structured_logging.py
-
-      - name: Run multilingual support tests
-        run: pytest -q tests/test_multilingual.py
-
-      - name: Run memory profile tests
-        run: pytest -q tests/test_memory_profile.py
-
-      - name: Run memory extraction tests
-        run: pytest -q tests/test_memory_extraction.py
-
-      - name: Run memory integration tests
-        run: pytest -q tests/test_memory_integration.py
-
-      - name: Run per-user personal context tests
-        run: pytest -q tests/test_personal_context.py
-
-      - name: Run prompt registry and A/B experiment tests
-        run: pytest -q tests/test_prompt_registry.py
-
-      - name: Run Islamic answer evaluation harness tests
-        run: pytest -q tests/test_evals.py
-
-      - name: Run streaming cache tests
-        run: pytest -q tests/test_stream_cache.py
-
       - name: Verify the streaming cache measurably cuts latency (offline)
         timeout-minutes: 5
         run: python -m scripts.bench_stream_cache --rounds 3 --chunk-delay 0.2
 
-      - name: Run chat endpoint tests
-        run: pytest -q tests/test_chat_api.py
-
-      - name: Run chat request validation tests
-        run: pytest -q tests/test_chat_validation.py
-
-      - name: Run async runtime tests
-        run: pytest -q tests/test_async_runtime.py
-
-      - name: Run factual consistency tests
-        run: pytest -q tests/test_factual_consistency.py
-
-      - name: Run Swahili language processing tests
-        run: pytest -q tests/test_swahili.py
-
-      - name: Run audio analysis tests
-        run: pytest -q tests/test_audio_analysis.py
-
-      - name: Run thematic Quran retrieval tests
-        run: pytest -q tests/test_thematic_quran.py
-
-      - name: Run Quranic concordance tests
-        run: pytest -q tests/test_concordance.py
+      - name: Benchmark Quran phoneme alignment
+        run: python -m scripts.bench_phoneme_alignment
 
       - name: Validate theme-verse concordance dataset
         run: python scripts/build_theme_mappings.py --check
-
-      - name: Run manuscript upload tests
-        run: pytest -q tests/test_manuscript_upload.py
-
-      - name: Run image content analysis tests
-        run: pytest -q tests/test_image_analysis.py
 
       - name: Run offline citation extraction eval
         run: python scripts/eval_citations.py
@@ -185,6 +87,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

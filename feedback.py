@@ -531,7 +531,7 @@ def _build_redis_store() -> RedisFeedbackStore | None:
     if not redis_url:
         return None
     try:
-        import redis as _redis  # type: ignore
+        import redis as _redis
 
         client = _redis.from_url(redis_url, decode_responses=True)
         client.ping()

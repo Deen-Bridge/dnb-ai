@@ -236,6 +236,12 @@ services:
 | `FEEDBACK_DB_PATH` | SQLite path for the feedback store (when Redis is not used) | `feedback.db` |
 | `FEEDBACK_RATE_LIMIT_MAX` | Max feedback submissions per IP per window | `20` |
 | `FEEDBACK_RATE_LIMIT_WINDOW` | Feedback rate-limit window in seconds | `60` |
+| `RATE_LIMIT_ENABLED` | Master switch for the slowapi request-rate limits | `true` |
+| `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-For` (set `true` behind Render); the rightmost hop is used | `false` |
+| `CHAT_RATE_LIMIT_MAX` / `CHAT_RATE_LIMIT_WINDOW_SECONDS` | Chat request rate per client | `60` / `60` |
+| `LLM_RATE_LIMIT_MAX` / `LLM_RATE_LIMIT_WINDOW_SECONDS` | LLM-generation rate per client | `10` / `60` |
+| `ANALYSIS_RATE_LIMIT_MAX` / `ANALYSIS_RATE_LIMIT_WINDOW_SECONDS` | Analysis rate per client | `30` / `60` |
+| `MEDIA_RATE_LIMIT_MAX` / `MEDIA_RATE_LIMIT_WINDOW_SECONDS` | Upload/media-processing rate per client | `10` / `60` |
 | `QURAN_API_BASE` | Base URL for tafsir/ayah retrieval | `https://api.quran.com/api/v4` |
 | `QURAN_API_TIMEOUT` | Tafsir request timeout in seconds | `15` |
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
@@ -244,6 +250,28 @@ services:
 | `METRICS_TOKEN` | Bearer token / secret header for `/metrics` endpoint protection | — (unprotected) |
 | `METRICS_IP_ALLOWLIST` | Comma-separated allowed IPs/CIDRs for `/metrics` | — (unprotected) |
 | `ENABLE_METRICS` | Toggle HTTP metrics instrumentation | `true` |
+
+### Rate limiting
+
+Slowapi covers the expensive endpoints, not only `/chat`:
+
+| Tier | Endpoints | Default |
+| --- | --- | --- |
+| Chat | `POST /chat`, `POST /chat/stream` | 60 / 60s per client |
+| LLM generation | `POST /study/generate`, `POST /audio/generate` | 10 / 60s per client |
+| Analysis | `POST /adhkar/recommend`, `POST /page-analysis/analyze`, `POST /audio-hadith/verify`, `POST /tafsir`, `POST /tafsir/compare`, `POST /tafsir/batch`, `POST /image-analysis/analyze-extracted`, `POST /zakat` | 30 / 60s per client |
+| Media | `POST /audio/transcribe`, `POST /audio/analyze`, `POST /image-analysis/batch` | 10 / 60s per client |
+
+The client key is the `X-API-Key` when present, otherwise the rightmost
+`X-Forwarded-For` hop **only when `TRUST_PROXY_HEADERS=true`**, otherwise the
+direct peer address. Set `TRUST_PROXY_HEADERS=true` on Render so limits follow
+the real caller; leaving it `false` makes every proxied request share the proxy
+address, while trusting the leftmost hop would let a client rotate buckets.
+
+Every slowapi limit returns HTTP `429` with `detail`, `hint`, and a
+`Retry-After` header (60 seconds for the windows above). Limits are in-process
+and per instance; a shared backend such as Redis is required before running
+multiple replicas.
 
 ### Multilingual support (language field)
 
@@ -707,6 +735,27 @@ memos are treated as untrusted data so injection text cannot change behavior.
 Purchase answers are never written to the semantic cache and include a
 `purchases` block on the response.
 
+**Soroban authorization entry safety explainer.** When signing smart contract
+transactions in wallets such as Freighter, users often encounter complex
+`SorobanAuthorizationEntry` XDR structures. This service provides a plain-language
+safety analysis:
+- **Credentials analysis**: Checks authorizing address, source account, nonce replay
+  protection, and signature expiration ledger.
+- **Invocation tree inspection**: Recursively decodes contract calls, identifying
+  token transfers, unlimited allowance approvals (`approve`), and administrative
+  privilege escalations (`set_admin`, `upgrade`, `transfer_ownership`).
+- **Risk classification**: Categorizes entries into `safe`, `caution`, `warning`,
+  or `critical`, with targeted warnings and recommendations.
+- **Strictly non-custodial**: Secret keys (`S...`) and seed phrases are never
+  requested or stored. Volunteered sensitive key material is immediately refused,
+  flagged as critical, and redacted.
+- **API & Chat integration**: Direct explanations are available at
+  `POST /stellar/soroban/auth/explain` (or `POST /stellar/soroban-auth-explain`).
+  Frontend chat turns can supply `soroban_auth_entry` on `POST /chat` and
+  `POST /chat/stream` for immediate safety grounding with network-aware
+  [stellar.expert](https://stellar.expert) contract explorer links.
+Offline test demo: `pytest -q tests/test_soroban_auth.py`.
+
 ### Voice-note transcription & audio analysis
 
 Voice notes and short audio clips can be transcribed and analyzed with a
@@ -733,6 +782,12 @@ any OpenAI-compatible Whisper endpoint, and with neither key set the endpoints
 behave read-only (formats + terminology) or answer with the built-in template
 responder. WAV uploads also get a noise/SNR assessment that recommends a
 denoising profile.
+
+### Quran phoneme alignment
+
+Align reading-specific Quran phoneme references to acoustic frames, stream live
+model frames, or use an optional pinned CTC audio model through the authenticated
+`/quran/alignment` API. See [model setup, API examples, and accuracy limits](docs/phoneme-alignment.md).
 
 ### Answer feedback & the quality loop
 
@@ -826,6 +881,13 @@ python scripts/build_index.py --index-path /tmp/idx.db --fake-embeddings
 
 The full schema and design notes live in [`docs/retrieval.md`](docs/retrieval.md).
 
+### Experiment rollout and rollback
+
+Experiments can gradually route chat traffic to versioned models, prompts, and
+generation settings, with stable fallback and automatic error/latency rollback.
+See [Experiment rollout and rollback](docs/experiments.md) for activation,
+thresholds, configuration history, metrics, and state-storage requirements.
+
 ### Structured logging & request correlation
 
 Logs are **newline-delimited JSON on stdout** ([`logging_config.py`](logging_config.py)),
@@ -898,3 +960,9 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 # Provider routing
 
 Gemini remains the default provider. To enable fallback routing, set `LLM_FALLBACKS=openai-compatible` together with `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`, and `OPENAI_COMPATIBLE_MODEL`. The router opens a provider circuit after three consecutive failures and probes it again after 60 seconds. `GET /providers/status` reports provider health without exposing credentials.
+
+### Spaced repetition
+
+Create and import Islamic flashcards, review due cards with SM-2 scheduling, and
+track measured recall retention through the authenticated `/study/repetition`
+API. See [API usage and persistence](docs/spaced-repetition.md).

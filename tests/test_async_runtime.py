@@ -220,11 +220,12 @@ async def test_retrieval_fanout_does_not_wait_for_siblings_serially(monkeypatch)
     monkeypatch.setattr(main, "zakat_retriever", lambda *args: retrieve("zakat"))
     monkeypatch.setattr(main, "purchase_retriever", lambda *args: retrieve("purchase"))
     monkeypatch.setattr(main, "personal_context_retriever", lambda *args: retrieve("personal"))
+    monkeypatch.setattr(main, "soroban_auth_retriever", lambda *args: retrieve("soroban_auth"))
 
     started_at = asyncio.get_running_loop().time()
     result = await main.retrieve_chat_contexts(request, request.prompt)
     elapsed = asyncio.get_running_loop().time() - started_at
 
-    assert result == (None, None, None, None)
-    assert set(started) == {"tafsir", "zakat", "purchase", "personal"}
+    assert result == (None, None, None, None, None)
+    assert set(started) == {"tafsir", "zakat", "purchase", "personal", "soroban_auth"}
     assert elapsed < 0.08

@@ -1,16 +1,18 @@
 # ruff: noqa: E402
 import asyncio
+import copy
 import json
 import logging
 import os
 import secrets
+import sqlite3
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import AsyncGenerator, Awaitable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypeVar
 
 from dotenv import load_dotenv
 
@@ -24,7 +26,7 @@ from logging_config import RequestContextMiddleware, configure_logging, prompt_d
 configure_logging()
 
 import google.generativeai as genai
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -38,13 +40,25 @@ from google.api_core.exceptions import (
     ServiceUnavailable,
 )
 from pydantic import BaseModel, Field, field_validator
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 import metrics
 import telemetry
+from adaptive_teaching import (
+    get_profile_store as get_learning_profile_store,
+    get_teaching_engine,
+    router as adaptive_teaching_router,
+)
 from adhkar import corpus as adhkar_corpus
+from answer_depth import (
+    DepthLevel,
+    build_depth_indicator,
+    build_depth_prompt_block,
+    get_answer_config,
+    get_depth_session_store,
+    normalize_depth,
+    router as depth_router,
+)
 from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from async_runtime import (
@@ -84,6 +98,8 @@ from consistency import consistency_router, get_consistency_enforcer
 from context_manager import router as context_router
 from crosslingual import CrosslingualSearchRequest, CrosslingualSearchResponse, crosslingual_search
 from errors import APIException, error_payload
+from errors import APIException
+from experiments import ExperimentDecision, ExperimentManager, GenerationOverrides, RollbackPolicy
 from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
@@ -107,6 +123,7 @@ from history import router as history_router
 from hybrid_search import HybridSearchRequest, HybridSearchResponse, handle_hybrid_search
 from image_analysis import router as image_analysis_router
 from learning import router as learning_router
+from learning_goals import router as learning_goals_router
 from manuscript_ocr import (
     ManuscriptAnalysis,
     PoorQualityError,
@@ -130,17 +147,25 @@ from memory.extraction import (
     merge_summaries,
     summarize_conversation_turns,
 )
+from misinformation_api import router as misinformation_router
 from model_router import router as model_routing_router
 from orchestration import router as orchestration_router
 from page_analysis import router as page_analysis_router
+from phoneme_alignment import alignment_stream, router as alignment_router
 from prompts import (
     ExperimentConfig,
-    ExperimentHarness,
     Variant,
     get_registry,
     register_defaults,
 )
 from query_optimizer import router as query_optimizer_router
+from rate_limit import (
+    RATE_LIMIT_ENABLED,
+    TRUST_PROXY_HEADERS,
+    analysis_rate_limit,
+    client_key,
+    limiter,
+)
 from reasoning_chains import router as reasoning_router
 from recitation_quality import router as recitation_router
 from reformulation import router as reformulation_router
@@ -161,13 +186,17 @@ from semantic_cache import (
     normalize_text,
 )
 from sentiment import router as sentiment_router
+from spaced_repetition import router as repetition_router
 from stellar import (
     PurchaseContext,
     PurchaseInfo,
     PurchaseTransaction,
+    SorobanAuthContext,
+    SorobanAuthInfo,
     ZakatContext,
     ZakatInfo,
     build_chat_purchase_context,
+    build_chat_soroban_auth_context,
     build_chat_zakat_context,
     redact_secret_keys,
     router as stellar_router,
@@ -185,6 +214,8 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from tool_reliability import router as tool_reliability_router
+from video_analysis import router as video_analysis_router
 from worship import router as worship_router
 
 logger = logging.getLogger(__name__)
@@ -213,7 +244,6 @@ metrics.setup_metrics(app)
 
 prompt_registry = get_registry()
 register_defaults()
-experiment_harness = ExperimentHarness(prompt_registry)
 
 # --- Service API-key authentication ---
 # A shared secret between the DeenBridge backend/frontend and this service.
@@ -254,25 +284,10 @@ async def verify_api_key(
 
 
 # --- Per-client rate limiting ---
-# Default: 20 requests/minute per API key (falls back to client IP).
-# Render sits behind a proxy; use X-Forwarded-For for IP-based limiting.
-# NOTE: in-memory storage is fine for single-instance Render.  A shared Redis
-# backend is needed if multi-instance support is added (see session-persistence
-# issue).
-
-
-def _rate_limit_key(request: Request) -> str:
-    api_key = request.headers.get("X-API-Key")
-    if api_key:
-        return f"key:{api_key}"
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return get_remote_address(request)
-
-
-RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() not in {"0", "false", "off"}
-limiter = Limiter(key_func=_rate_limit_key, enabled=RATE_LIMIT_ENABLED)
+# The shared limiter and key function live in rate_limit.py so router modules
+# can import them without a circular dependency on this module.
+# NOTE: in-memory storage is fine for a single instance. A shared Redis backend
+# is needed if multi-instance support is added (see session-persistence issue).
 app.state.limiter = limiter
 
 
@@ -348,6 +363,7 @@ app.include_router(orchestration_router)
 
 app.include_router(reasoning_router)
 app.include_router(study_router)
+app.include_router(repetition_router, dependencies=[Depends(verify_api_key)])
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
@@ -360,6 +376,10 @@ app.include_router(calligraphy_router)
 app.include_router(review_router)
 # Question reformulation: deterministic quality assessment + rewrite suggestions
 app.include_router(reformulation_router)
+# Answer depth: five-level response controls with Explain Simpler / Go Deeper (#263)
+app.include_router(depth_router)
+# Adaptive teaching: comprehension monitoring and per-learner pacing (#251)
+app.include_router(adaptive_teaching_router)
 # Hadith search: topic and keyword search with authenticity grading
 app.include_router(hadith_search_router)
 # Contextual hadith interpretation: sharh, asbab al-wurud, and synthesis
@@ -372,6 +392,8 @@ app.include_router(audio_analysis_router)
 app.include_router(query_optimizer_router)
 # Historical context: asbab al-nuzul, hadith circumstances, and fiqh development
 app.include_router(history_router)
+# Learning goals: goal setting, progress tracking, milestones and pace-adjusted recommendations
+app.include_router(learning_goals_router)
 # Model routing: pick the optimal model per query by complexity, latency and cost
 app.include_router(model_routing_router)
 # Arabic OCR: manuscript digitization with calligraphy detection and diacritic preservation
@@ -383,13 +405,29 @@ app.include_router(image_analysis_router)
 app.include_router(context_router)
 # Swahili: language processing and response enhancement
 app.include_router(swahili_router)
+app.include_router(video_analysis_router)
+app.include_router(tool_reliability_router)
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
 # normalization and dialectal terminology lexicon (#136)
 app.include_router(arabic_dialect_router)
+# Religious misinformation flagging: detection, correction, and blocking of misinformation
+app.include_router(misinformation_router)
 # Factual consistency: cross-session contradiction prevention and reconciliation
 app.include_router(consistency_router)
 # Recitation quality: pronunciation, tajweed, rhythm analysis and feedback
 app.include_router(recitation_router)
+app.include_router(alignment_router, dependencies=[Depends(verify_api_key)])
+
+
+@app.websocket("/quran/alignment/stream")
+async def stream_phoneme_alignment(socket: WebSocket) -> None:
+    key = socket.headers.get("X-API-Key", "")
+    if not AUTH_DISABLED and (not SERVICE_API_KEY or not secrets.compare_digest(key, SERVICE_API_KEY)):
+        await socket.close(code=1008)
+        return
+    await alignment_stream(socket)
+
+
 # Scholarly attribution validation: prevent fabricated/misattributed scholarly opinions
 app.include_router(scholarly_attribution_router)
 
@@ -448,6 +486,19 @@ class ChatRequest(BaseModel):
     # pass the user's JWT so this service can fetch history from dnb-backend.
     transactions: list[PurchaseTransaction] | None = None
     auth_token: str | None = None
+    # Response depth (#263): eli5, beginner, intermediate, advanced, scholarly.
+    # Omitted, the user's stored preference applies, then the system default.
+    depth: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Answer depth: eli5, beginner, intermediate, advanced, or scholarly.",
+        examples=["beginner"],
+    )
+    # Use the stored learning profile to pick depth, style, and pacing (#251).
+    # Ignored when ``depth`` is given explicitly.
+    adaptive: bool = False
+    # Optional Soroban authorization entry (base64 XDR or JSON) for smart contract safety explanation.
+    soroban_auth_entry: str | None = None
 
     @field_validator("prompt", mode="before")
     @classmethod
@@ -479,10 +530,15 @@ class ChatResponse(BaseModel):
     confidence: ConfidenceAssessment | None = None
     zakat: ZakatInfo | None = None
     purchases: PurchaseInfo | None = None
+    soroban_auth: SorobanAuthInfo | None = None
     language: str | None = None
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
+    # Current answer depth and the controls available for it (#263). Includes
+    # the badge/icon/colour for the visual indicator and whether
+    # Explain Simpler / Go Deeper are available.
+    depth: dict[str, Any] | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -616,6 +672,19 @@ async def purchase_retriever(
         return None
 
 
+async def soroban_auth_retriever(
+    prompt: str,
+    entry_xdr: str | None,
+    context: str | None,
+) -> SorobanAuthContext | None:
+    """Explain Soroban smart contract authorization for a chat turn; best-effort."""
+    try:
+        return await build_chat_soroban_auth_context(prompt, entry_xdr=entry_xdr, context=context)
+    except Exception as exc:  # noqa: BLE001 - retrieval is best-effort
+        logger.warning("Soroban auth lookup failed; answering without it: %s", exc)
+        return None
+
+
 async def personal_context_retriever(
     prompt: str,
     user_id: str | None,
@@ -642,7 +711,13 @@ async def personal_context_retriever(
 async def retrieve_chat_contexts(
     request: ChatRequest,
     prompt: str,
-) -> tuple[TafsirContext | None, ZakatContext | None, PurchaseContext | None, PersonalContext | None]:
+) -> tuple[
+    TafsirContext | None,
+    ZakatContext | None,
+    PurchaseContext | None,
+    PersonalContext | None,
+    SorobanAuthContext | None,
+]:
     """Run independent best-effort enrichments concurrently."""
 
     async def best_effort(name: str, operation: Awaitable[Any]) -> Any:
@@ -652,7 +727,7 @@ async def retrieve_chat_contexts(
             logger.warning("%s retrieval failed; answering without it: %s", name, exc)
             return None
 
-    tafsir_context, zakat_context, purchase_context, personal_context = await asyncio.gather(
+    tafsir_context, zakat_context, purchase_context, personal_context, soroban_auth_context = await asyncio.gather(
         best_effort("tafsir", tafsir_retriever(prompt, request.language or DEFAULT_TAFSIR_LANGUAGE)),
         best_effort("zakat", zakat_retriever(request.prompt, request.context)),
         best_effort(
@@ -663,8 +738,12 @@ async def retrieve_chat_contexts(
             "personal context",
             personal_context_retriever(request.prompt, request.user_id, request.auth_token),
         ),
+        best_effort(
+            "soroban auth",
+            soroban_auth_retriever(request.prompt, request.soroban_auth_entry, request.context),
+        ),
     )
-    return tafsir_context, zakat_context, purchase_context, personal_context
+    return tafsir_context, zakat_context, purchase_context, personal_context, soroban_auth_context
 
 
 def get_safety_settings() -> list[dict[str, str]]:
@@ -679,6 +758,7 @@ def get_safety_settings() -> list[dict[str, str]]:
 # In-memory session store for demo purposes
 sessions: dict[str, Any] = {}
 active_chats: dict[str, Any] = {}
+experimental_chats: set[str] = set()
 
 # --- Feedback support ------------------------------------------------------
 # The generation config captured into a feedback record so a flagged answer is
@@ -689,6 +769,12 @@ GENERATION_CONFIG: dict[str, Any] = {
     "top_k": 40,
     "max_output_tokens": 2048,
 }
+experiment_harness = ExperimentManager(
+    prompt_registry,
+    settings.model_name,
+    os.getenv("EXPERIMENT_DB_PATH", "data/experiments.sqlite3"),
+    default_generation_config=GENERATION_CONFIG,
+)
 
 # Stable ids for model answers, so the frontend can address one turn and the
 # feedback endpoint can locate what was said. Kept parallel to active_chats
@@ -703,10 +789,9 @@ chat_message_ids: dict[str, list[str]] = {}
 FEEDBACK_SNAPSHOT_MAX = env_int("FEEDBACK_SNAPSHOT_MAX", 5000)
 answer_snapshots: "OrderedDict[tuple, dict[str, str]]" = OrderedDict()
 
-# Only honor X-Forwarded-For when the deployment actually sits behind a proxy we
-# control; otherwise any client can rotate the header to mint a fresh rate-limit
-# bucket on every request and defeat the only control on the write endpoint.
-TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
+# TRUST_PROXY_HEADERS is defined in rate_limit.py and imported above; the
+# feedback limiter and the slowapi key function therefore agree on when
+# X-Forwarded-For may be trusted.
 
 
 def _record_answer(chat_id: str, prompt: str, answer: str) -> str:
@@ -845,12 +930,91 @@ class _MockModel:
 
 def get_model() -> genai.GenerativeModel:
     if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
-        return _MockModel()  # type: ignore[return-value]
+        return _MockModel()
     return genai.GenerativeModel(
         model_name=settings.model_name,
         system_instruction=ISLAMIC_CONTEXT,
         safety_settings=get_safety_settings(),
     )
+
+
+def choose_experiment(session_id: str) -> ExperimentDecision | None:
+    """A failed control-plane read disables experimentation for this request."""
+    try:
+        return experiment_harness.choose(session_id)
+    except sqlite3.Error:
+        logger.exception("Experiment control plane unavailable; using default configuration")
+        return None
+
+
+def restore_default_chat(chat_id: str) -> None:
+    """Migrate an experimental session back to the default model without losing turns."""
+    if chat_id in experimental_chats:
+        if chat_id in active_chats:
+            active_chats[chat_id] = get_model().start_chat(history=copy.deepcopy(active_chats[chat_id].history))
+        experimental_chats.discard(chat_id)
+
+
+async def generate_experiment_response(
+    decision: ExperimentDecision,
+    chat_id: str,
+    history: list[Any],
+    full_prompt: str,
+    variables: dict[str, str],
+) -> tuple[Any, ExperimentDecision]:
+    """Try the pinned variant, retry failures on stable control, and commit only successful history."""
+
+    def record(choice: ExperimentDecision, started: float, error: bool) -> None:
+        try:
+            experiment_harness.record(choice, (time.perf_counter() - started) * 1000, error)
+        except sqlite3.Error:
+            logger.exception("Could not record experiment observation")
+
+    async def attempt(choice: ExperimentDecision) -> Any:
+        started = time.perf_counter()
+        try:
+            instruction = choice.template.render(**variables)
+            model = (
+                _MockModel()
+                if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}
+                else genai.GenerativeModel(
+                    model_name=choice.variant.model_name,
+                    system_instruction=instruction,
+                    safety_settings=get_safety_settings(),
+                )
+            )
+            session = model.start_chat(history=copy.deepcopy(history))
+            response = await send_message_with_retry(
+                session,
+                full_prompt.replace(ISLAMIC_CONTEXT, instruction, 1),
+                generation_config={**GENERATION_CONFIG, **choice.variant.generation_config},
+                max_retries=2 if choice.is_control else 0,
+            )
+            if not extract_text_safely(response):
+                raise ValueError("Empty experiment response")
+        except Exception:
+            record(choice, started, True)
+            raise
+        record(choice, started, False)
+        telemetry.record_model_call(
+            response, choice.variant.model_name or settings.model_name, (time.perf_counter() - started) * 1000
+        )
+        active_chats[chat_id] = session
+        experimental_chats.add(chat_id)
+        return response
+
+    try:
+        return await attempt(decision), decision
+    except Exception:
+        if decision.is_control or decision.stable is None:
+            raise
+        logger.warning(
+            "Experiment attempt failed; retrying stable control",
+            extra={"experiment_id": decision.experiment_id, "version": decision.version},
+        )
+        # The stable target was captured in the same transaction as assignment:
+        # deleting/updating an experiment cannot strand an in-flight request.
+        return await attempt(decision.stable), decision.stable
 
 
 GEMINI_TIMEOUT = settings.gemini_timeout
@@ -994,6 +1158,40 @@ def session_history_messages(chat_session: Any) -> list[Message]:
     return history
 
 
+def resolve_answer_depth(
+    user_id: str | None,
+    requested_depth: str | None,
+    adaptive: bool = False,
+) -> tuple[DepthLevel, dict[str, Any], str]:
+    """Resolve a turn's answer depth and render its prompt block.
+
+    An explicit ``depth`` wins. Otherwise, when ``adaptive`` is set and the
+    caller is identified, the stored learning profile recommends a level,
+    style, and pace (#251). Finally the user's saved preference and the system
+    default (intermediate) apply. The returned indicator is what the client
+    renders as the depth badge and control state (#263).
+    """
+    try:
+        requested = normalize_depth(requested_depth)
+    except ValueError as exc:
+        raise APIException(status_code=400, detail="Invalid answer depth.", hint=str(exc)) from exc
+
+    adaptive_applied = requested is None and adaptive and bool(user_id)
+    if adaptive_applied and user_id is not None:
+        profile = get_learning_profile_store().get(user_id)
+        recommendation = get_teaching_engine().recommend(profile)
+        config = get_answer_config(user_id=user_id, requested_level=recommendation.level)
+        prompt_block = "\n\n" + recommendation.prompt_block
+    else:
+        config = get_answer_config(user_id=user_id, requested_level=requested)
+        prompt_block = build_depth_prompt_block(config)
+
+    indicator = build_depth_indicator(config.level).to_dict()
+    indicator["explicit"] = requested is not None
+    indicator["adaptive"] = adaptive_applied
+    return config.level, indicator, prompt_block
+
+
 def cache_eligible(
     *,
     is_new_chat: bool,
@@ -1005,6 +1203,7 @@ def cache_eligible(
     zakat_context: Any,
     purchase_context: Any,
     personal_context: Any,
+    soroban_auth_context: Any = None,
 ) -> bool:
     """Decide whether this turn may be served from / written to the response cache.
 
@@ -1012,8 +1211,9 @@ def cache_eligible(
     drift into caching different things. A follow-up turn depends on
     conversation history and must not be replayed to anyone else, and neither
     may an answer built from this asker's tafsir passages, wallet balance,
-    purchase history, or personal memory. (One user's answers are kept from
-    another by ``cache_scope``, which the caller supplies at lookup time.)
+    purchase history, personal memory, or Soroban smart contract authorization.
+    (One user's answers are kept from another by ``cache_scope``, which the caller
+    supplies at lookup time.)
 
     ``language`` and ``madhhab`` reshape the answer while leaving the prompt
     untouched, so they cannot ride on a key derived from the prompt alone: an
@@ -1034,6 +1234,7 @@ def cache_eligible(
         and zakat_context is None
         and purchase_context is None
         and personal_context is None
+        and soroban_auth_context is None
         and language is None
         and madhhab is None
         and safety_action in (None, "allow")
@@ -1099,13 +1300,16 @@ async def _chat(
         # new and let the cache replay a standalone answer over a follow-up, so
         # the session store decides. What it returns is reused when the session
         # is seeded rather than being loaded a second time.
+        experiment_decision = choose_experiment(body.user_id or chat_id)
+        if experiment_decision is None:
+            restore_default_chat(chat_id)
         persisted_history: list[dict[str, str]] = []
         if chat_id in active_chats:
             is_new_chat = False
         else:
             persisted_history = await session_store.load_history(chat_id)
             is_new_chat = not persisted_history
-        is_bypass = request.headers.get("X-Cache-Bypass") == "1"
+        is_bypass = request.headers.get("X-Cache-Bypass") == "1" or experiment_decision is not None
 
         # A user who pastes a Stellar secret key must not have it forwarded to
         # the model provider or written into stored history. Everything
@@ -1133,15 +1337,27 @@ async def _chat(
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
+        # --- Answer depth (#263) / adaptive teaching (#251) ---
+        depth_level, depth_payload, depth_prompt_block = resolve_answer_depth(
+            body.user_id, body.depth, adaptive=body.adaptive
+        )
+
         # --- Independent retrieval fan-out (grouped as one telemetry stage) ---
         with trace.span("retrieval"):
-            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+            (
+                tafsir_context,
+                zakat_context,
+                purchase_context,
+                personal_context,
+                soroban_auth_context,
+            ) = await retrieve_chat_contexts(
                 body,
                 prompt,
             )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
             zakat_info = zakat_context.info if zakat_context else None
             purchase_info = purchase_context.info if purchase_context else None
+            soroban_auth_info = soroban_auth_context.info if soroban_auth_context else None
 
         # --- Memory lookup ---
         profile: UserProfile | None = None
@@ -1152,14 +1368,18 @@ async def _chat(
                 memory_store.get_chat_summary(f"{body.user_id}:{chat_id}"),
             )
 
-        # Determine cache scope: public for anonymous, user:{user_id} for authenticated
+        # Determine cache scope: public for anonymous, user:{user_id} for authenticated.
+        # Depth changes the answer, so non-default depths get their own scope and
+        # can never replay an answer written at another depth.
         cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
+        if depth_level is not DepthLevel.INTERMEDIATE:
+            cache_scope = f"{cache_scope}:depth={depth_level.value}"
 
-        # Neither a tafsir-grounded answer nor a zakat/purchase answer goes
+        # Neither a tafsir-grounded answer nor a zakat/purchase/soroban-auth answer goes
         # through the semantic response cache: the first is built from retrieved
         # passages (already cached by ayah key), and the others contain one
         # user's real financial data, which must never be replayed to anyone else.
-        is_cacheable = cache_eligible(
+        is_cacheable = experiment_decision is None and cache_eligible(
             is_new_chat=is_new_chat,
             context=body.context,
             language=effective_language,
@@ -1172,6 +1392,7 @@ async def _chat(
             zakat_context=zakat_context,
             purchase_context=purchase_context,
             personal_context=personal_context,
+            soroban_auth_context=soroban_auth_context,
         )
 
         # --- Two-tier cache lookup: exact-match first, then semantic ---
@@ -1199,6 +1420,9 @@ async def _chat(
                 active_chats[chat_id] = chat_session
                 logger.info("Exact cache HIT for prompt: %s", prompt[:80])
                 cached_message_id = _record_answer(chat_id, prompt, exact_cached["response"])
+                get_depth_session_store().record_original(
+                    chat_id, cached_message_id, exact_cached["response"], depth_level
+                )
                 _finalize()
                 _succeeded = True
                 return ChatResponse(
@@ -1216,6 +1440,7 @@ async def _chat(
                         ConfidenceAssessment(**exact_cached["confidence"]) if exact_cached.get("confidence") else None
                     ),
                     language=effective_language,
+                    depth=depth_payload,
                 )
 
             # Semantic cache lookup (tier 2)
@@ -1238,6 +1463,7 @@ async def _chat(
                 active_chats[chat_id] = chat_session
                 logger.info("Semantic cache HIT for prompt: %s", prompt[:80])
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
+                get_depth_session_store().record_original(chat_id, cached_message_id, cached.response, depth_level)
                 _finalize()
                 _succeeded = True
                 return ChatResponse(
@@ -1249,13 +1475,14 @@ async def _chat(
                     hadith_references=annotate_hadith(cached.response),
                     confidence=(ConfidenceAssessment(**cached.confidence) if cached.confidence else None),
                     language=effective_language,
+                    depth=depth_payload,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
 
         # --- Token quota enforcement ---
         # Check quota before making any LLM call (cache miss path)
-        quota_key = body.user_id if body.user_id else _rate_limit_key(request)
+        quota_key = body.user_id if body.user_id else client_key(request)
         # Estimate token count for quota check (conservative estimate)
         estimated_tokens = len(prompt.split()) + len(body.context.split()) if body.context else len(prompt.split())
         # Use a conservative multiplier for system context and response
@@ -1274,7 +1501,7 @@ async def _chat(
 
         # --- Normal flow (cache miss / bypass / not cacheable) ---
         async def generate(safety_prompt: str) -> str:
-            if chat_id not in active_chats:
+            if experiment_decision is None and chat_id not in active_chats:
                 logger.info(f"Creating new chat session: {chat_id}")
                 model = get_model()
                 # Load persisted history if available
@@ -1293,13 +1520,45 @@ async def _chat(
                 system_context += zakat_context.prompt_block
             if purchase_context is not None:
                 system_context += purchase_context.prompt_block
+            if soroban_auth_context is not None:
+                system_context += soroban_auth_context.prompt_block
             if personal_context is not None:
                 system_context += personal_context.prompt_block
             memory_block = render_user_context(profile, summary)
             if memory_block:
                 system_context += f"\n\n{memory_block}"
+            system_context += depth_prompt_block
             context = f"Additional context: {extra_context}\n\n" if extra_context else ""
             full_prompt = f"{system_context}\n{context}User question: {safety_prompt}"
+            if experiment_decision is not None:
+                history = (
+                    list(active_chats[chat_id].history)
+                    if chat_id in active_chats
+                    else dicts_to_contents(persisted_history)
+                )
+                response, actual = await generate_experiment_response(
+                    experiment_decision,
+                    chat_id,
+                    history,
+                    full_prompt,
+                    {
+                        "response_language": effective_language or "auto",
+                        "language": effective_language or "auto",
+                        "madhhab": madhhab or "unspecified",
+                        "knowledge_level": "unspecified",
+                        "intent": "fiqh" if is_fiqh else "general",
+                        "retrieved_context": system_context[
+                            len(ISLAMIC_CONTEXT + HADITH_ADAB_CONTEXT + CITATION_BLOCK_CONTEXT) :
+                        ]
+                        + (extra_context or ""),
+                        "user_question": safety_prompt,
+                    },
+                )
+                fastapi_response.headers["X-Experiment-Id"] = actual.experiment_id
+                fastapi_response.headers["X-Experiment-Version"] = str(actual.version)
+                fastapi_response.headers["X-Experiment-Variant"] = actual.variant.name
+                fastapi_response.headers["X-Experiment-Rolled-Back"] = str(actual.rolled_back).lower()
+                return extract_text_safely(response) or ""
             logger.info("Sending message to chat...")
             _t0 = time.perf_counter()
             response = await send_message_with_retry(
@@ -1469,6 +1728,7 @@ async def _chat(
         # later /feedback call can reference exactly this turn and store what
         # the user actually saw (post safety/hadith/abstention shaping).
         message_id = _record_answer(chat_id, prompt, response_text)
+        get_depth_session_store().record_original(chat_id, message_id, response_text, depth_level)
         _tag_history_with_message_ids(chat_id, history)
 
         trace.add_span("post_processing", (time.perf_counter() - _pp_start) * 1000.0)
@@ -1493,8 +1753,10 @@ async def _chat(
             confidence=assessment,
             zakat=zakat_info,
             purchases=purchase_info,
+            soroban_auth=soroban_auth_info,
             language=effective_language,
             citations=citation_extraction.citations,
+            depth=depth_payload,
         )
         _finalize()
         _succeeded = True
@@ -1652,6 +1914,45 @@ async def _summarize_history(
         logger.warning("History summarization failed for %s", chat_id[:8], exc_info=True)
 
 
+def experiment_stream(body: ChatRequest, request: Request, chat_id: str) -> StreamingResponse:
+    """Buffer opted-in experimental answers so rollback cannot leak partial variants."""
+
+    async def events() -> AsyncGenerator[str, None]:
+        async with chat_locks.hold(chat_id):
+            yield f"data: {json.dumps({'type': 'metadata', 'chat_id': chat_id, 'language': normalize_language(body.language)})}\n\n"
+            response_headers = Response()
+            try:
+                answer = await _chat(body, request, response_headers, chat_id)
+                if answer.moderation is not None and answer.moderation.action == "refuse":
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'Your message was not processed due to content policy.'})}\n\n"
+                    return
+                text = answer.response or answer.text or ""
+                for piece in replay_chunks(text):
+                    yield f"data: {json.dumps({'type': 'content', 'delta': piece}, ensure_ascii=False)}\n\n"
+                done = answer.model_dump(mode="json")
+                done.update(
+                    {"type": "done", "text": text, "cached": response_headers.headers.get("X-Semantic-Cache") == "hit"}
+                )
+                done.pop("response", None)
+                if "X-Experiment-Id" in response_headers.headers:
+                    done["experiment"] = {
+                        "experiment_id": response_headers.headers["X-Experiment-Id"],
+                        "version": int(response_headers.headers["X-Experiment-Version"]),
+                        "variant": response_headers.headers["X-Experiment-Variant"],
+                        "rolled_back": response_headers.headers["X-Experiment-Rolled-Back"] == "true",
+                    }
+                yield f"data: {json.dumps(done, ensure_ascii=False)}\n\n"
+            except Exception:
+                logger.exception("Experimental streaming generation failed", extra={"chat_id": chat_id})
+                yield f"data: {json.dumps({'type': 'error', 'message': 'An error occurred during response generation.'})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Semantic-Cache": "bypass"},
+    )
+
+
 @app.post("/chat/stream")
 @limiter.limit(f"{CHAT_RATE_LIMIT_MAX}/{CHAT_RATE_LIMIT_WINDOW_SECONDS} seconds")
 async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
@@ -1670,6 +1971,9 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
     Accepts the same request schema as ``POST /chat``.
     """
+    experiment_chat_id = str(body.chat_id) if body.chat_id is not None else str(uuid.uuid4())
+    if choose_experiment(body.user_id or experiment_chat_id) is not None:
+        return experiment_stream(body, request, experiment_chat_id)
     trace = telemetry.Trace()
     _ctx_token = telemetry.current_trace.set(trace)
     _handler_start = time.perf_counter()
@@ -1699,15 +2003,27 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
 
+        # --- Answer depth (#263) / adaptive teaching (#251) ---
+        depth_level, depth_payload, depth_prompt_block = resolve_answer_depth(
+            body.user_id, body.depth, adaptive=body.adaptive
+        )
+
         # --- Independent retrieval fan-out ---
         with trace.span("retrieval"):
-            tafsir_context, zakat_context, purchase_context, personal_context = await retrieve_chat_contexts(
+            (
+                tafsir_context,
+                zakat_context,
+                purchase_context,
+                personal_context,
+                soroban_auth_context,
+            ) = await retrieve_chat_contexts(
                 body,
                 prompt,
             )
             tafsir_info = summarize_tafsir_context(tafsir_context) if tafsir_context else None
             zakat_info = zakat_context.info if zakat_context else None
             purchase_info = purchase_context.info if purchase_context else None
+            soroban_auth_info = soroban_auth_context.info if soroban_auth_context else None
 
         combined_text: str = ""  # accumulated full response for post-processing
         chat_session = None
@@ -1726,7 +2042,11 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             persisted_history = await session_store.load_history(chat_id)
             is_new_chat = not persisted_history
         is_bypass = request.headers.get("X-Cache-Bypass") == "1"
+        # Depth changes the answer, so non-default depths get their own cache
+        # scope rather than replaying an answer written at another depth.
         cache_scope = "public" if body.user_id is None else f"user:{body.user_id}"
+        if depth_level is not DepthLevel.INTERMEDIATE:
+            cache_scope = f"{cache_scope}:depth={depth_level.value}"
 
         # --- Safety input gate ---
         # Evaluated here rather than inside the generator so its verdict can
@@ -1754,6 +2074,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             zakat_context=zakat_context,
             purchase_context=purchase_context,
             personal_context=personal_context,
+            soroban_auth_context=soroban_auth_context,
         )
 
         exact_cache = get_chat_exact_cache()
@@ -1826,6 +2147,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         # earlier asker's, and the transcript must show the
                         # question this user actually asked.
                         history = session_history_messages(session)
+                        get_depth_session_store().record_original(chat_id, None, answer, depth_level)
 
                         done = json.dumps(
                             {
@@ -1834,6 +2156,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                                 "history": [m.model_dump() for m in history],
                                 "text": answer,
                                 "cached": True,
+                                "depth": depth_payload,
                                 # Replayed from the write, not recomputed, so
                                 # the done event has the same shape whichever
                                 # branch served the turn. An entry written
@@ -1922,6 +2245,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     generation_prompt = prompt
 
                 # --- Create or get chat session ---
+                restore_default_chat(chat_id)
                 if chat_id not in active_chats:
                     logger.info("Creating new streaming chat session: %s", chat_id)
                     # Resume from persisted history so a returning user (or a
@@ -1951,8 +2275,11 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                     system_context += zakat_context.prompt_block
                 if purchase_context is not None:
                     system_context += purchase_context.prompt_block
+                if soroban_auth_context is not None:
+                    system_context += soroban_auth_context.prompt_block
                 if personal_context is not None:
                     system_context += personal_context.prompt_block
+                system_context += depth_prompt_block
 
                 ctx = f"Additional context: {extra_context}\n\n" if extra_context else ""
                 full_prompt = f"{system_context}\n{ctx}User question: {generation_prompt}"
@@ -2120,6 +2447,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 )
 
                 # --- Terminal done event ---
+                if combined_text:
+                    get_depth_session_store().record_original(chat_id, None, combined_text, depth_level)
                 done = json.dumps(
                     {
                         "type": "done",
@@ -2127,12 +2456,14 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "history": [m.model_dump() for m in history],
                         "text": combined_text,
                         "cached": False,
+                        "depth": depth_payload,
                         "confidence": assessment.model_dump() if assessment else None,
                         "hadith_references": ([r.model_dump() for r in hadith_refs] if hadith_refs else None),
                         "fiqh": fiqh_info.model_dump() if fiqh_info else None,
                         "tafsir": tafsir_info.model_dump() if tafsir_info else None,
                         "zakat": zakat_info.model_dump() if zakat_info else None,
                         "purchases": purchase_info.model_dump() if purchase_info else None,
+                        "soroban_auth": soroban_auth_info.model_dump() if soroban_auth_info else None,
                         "citations": [c.model_dump() for c in citation_extraction.citations],
                     },
                     ensure_ascii=False,
@@ -2315,6 +2646,7 @@ async def delete_chat(chat_id: uuid.UUID, user_id: str | None = None) -> dict[st
         try:
             existed = chat_id_str in active_chats
             active_chats.pop(chat_id_str, None)
+            experimental_chats.discard(chat_id_str)
             # Drop this session's feedback bookkeeping too, so the message-id list
             # and answer snapshots do not outlive the conversation they describe.
             for message_id in chat_message_ids.pop(chat_id_str, []):
@@ -2613,12 +2945,13 @@ class AdhkarRecommendRequest(BaseModel):
 
 
 @app.post("/adhkar/recommend")
-async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
+@limiter.limit(analysis_rate_limit)
+async def recommend_adhkar(body: AdhkarRecommendRequest, request: Request) -> dict[str, Any]:
     matches = adhkar_corpus.search(category=body.category, query=body.query)
     message = (
-        "Found authenticated supplications."
+        f"Found {len(matches)} authenticated supplication(s) matching your request."
         if matches
-        else "No authenticated supplication found for the given criteria."
+        else "No authenticated supplication found matching your request."
     )
     return {"matches": matches, "message": message}
 
@@ -2742,23 +3075,44 @@ async def get_prompt_template(name: str, version: str | None = None) -> dict[str
 
 @app.get("/experiments")
 async def list_experiments() -> dict[str, Any]:
-    experiments = {}
-    for eid, cfg in experiment_harness._experiments.items():
-        all_variants = [cfg.control] + cfg.variants
-        experiments[eid] = {
-            "experiment_id": cfg.experiment_id,
-            "kill_switch": cfg.kill_switch,
-            "variants": [{"name": v.name, "template_name": v.template_name, "weight": v.weight} for v in all_variants],
-        }
-    return {"experiments": experiments}
+    return {"experiments": experiment_operation(experiment_harness.list_experiments)}
+
+
+class ExperimentVariantRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    template_name: str = Field(..., min_length=1, max_length=128)
+    template_version: str | None = None
+    weight: float = Field(1, gt=0, allow_inf_nan=False)
+    model_name: str | None = Field(None, min_length=1, max_length=128)
+    generation_config: GenerationOverrides = Field(default_factory=GenerationOverrides)
 
 
 class ExperimentCreateRequest(BaseModel):
-    experiment_id: str = Field(..., max_length=128)
-    control_template: str = Field(..., max_length=128)
+    experiment_id: str = Field(..., min_length=1, max_length=128)
+    control_template: str = Field(..., min_length=1, max_length=128)
     control_version: str | None = None
-    variants: list[dict[str, Any]] = Field(default_factory=list)
+    control_model_name: str | None = Field(None, min_length=1, max_length=128)
+    control_generation_config: GenerationOverrides = Field(default_factory=GenerationOverrides)
+    variants: list[ExperimentVariantRequest] = Field(default_factory=list)
     kill_switch: bool = False
+    traffic_percent: float | None = Field(None, ge=0, le=100, allow_inf_nan=False)
+    rollback_policy: RollbackPolicy = Field(default_factory=RollbackPolicy)
+    activate: bool = False
+
+
+_ExperimentResult = TypeVar("_ExperimentResult")
+
+
+def experiment_operation(operation: Callable[[], _ExperimentResult], invalid_status: int = 409) -> _ExperimentResult:
+    """Translate experiment control-plane errors without affecting other routes."""
+    try:
+        return operation()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=invalid_status, detail=str(exc)) from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=503, detail="Experiment control plane unavailable") from exc
 
 
 @app.post("/experiments", dependencies=[Depends(require_admin)])
@@ -2768,13 +3122,17 @@ async def create_experiment(body: ExperimentCreateRequest) -> dict[str, Any]:
         template_name=body.control_template,
         template_version=body.control_version,
         weight=1.0,
+        model_name=body.control_model_name,
+        generation_config=body.control_generation_config.model_dump(exclude_none=True),
     )
     variant_list = [
         Variant(
-            name=v["name"],
-            template_name=v["template_name"],
-            template_version=v.get("template_version"),
-            weight=v.get("weight", 1.0),
+            name=v.name,
+            template_name=v.template_name,
+            template_version=v.template_version,
+            weight=v.weight,
+            model_name=v.model_name,
+            generation_config=v.generation_config.model_dump(exclude_none=True),
         )
         for v in body.variants
     ]
@@ -2783,33 +3141,73 @@ async def create_experiment(body: ExperimentCreateRequest) -> dict[str, Any]:
         control=control,
         variants=variant_list,
         kill_switch=body.kill_switch,
+        traffic_percent=body.traffic_percent,
     )
-    experiment_harness.register_experiment(config)
-    return {"status": "ok", "experiment_id": body.experiment_id}
+    version = experiment_operation(lambda: experiment_harness.register_experiment(config, body.rollback_policy), 422)
+    if body.activate:
+        experiment_operation(lambda: experiment_harness.activate(body.experiment_id))
+    return {"status": "ok", "experiment_id": body.experiment_id, "version": version}
 
 
 @app.post("/experiments/{experiment_id}/kill", dependencies=[Depends(require_admin)])
 async def kill_experiment(experiment_id: str) -> dict[str, Any]:
-    cfg = experiment_harness._experiments.get(experiment_id)
-    if cfg is None:
-        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
-    cfg.kill_switch = True
+    experiment_operation(lambda: experiment_harness.set_killed(experiment_id, True))
     return {"status": "ok", "experiment_id": experiment_id, "kill_switch": True}
 
 
 @app.post("/experiments/{experiment_id}/resume", dependencies=[Depends(require_admin)])
 async def resume_experiment(experiment_id: str) -> dict[str, Any]:
-    cfg = experiment_harness._experiments.get(experiment_id)
-    if cfg is None:
-        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
-    cfg.kill_switch = False
+    experiment_operation(lambda: experiment_harness.set_killed(experiment_id, False))
     return {"status": "ok", "experiment_id": experiment_id, "kill_switch": False}
 
 
 @app.delete("/experiments/{experiment_id}", dependencies=[Depends(require_admin)])
 async def delete_experiment(experiment_id: str) -> dict[str, str]:
-    experiment_harness.unregister_experiment(experiment_id)
+    experiment_operation(lambda: experiment_harness.unregister_experiment(experiment_id))
     return {"status": "ok", "experiment_id": experiment_id}
+
+
+@app.post("/experiments/{experiment_id}/activate", dependencies=[Depends(require_admin)])
+async def activate_experiment(experiment_id: str) -> dict[str, str]:
+    experiment_operation(lambda: experiment_harness.activate(experiment_id))
+    return {"status": "ok", "experiment_id": experiment_id}
+
+
+@app.post("/experiments/{experiment_id}/deactivate", dependencies=[Depends(require_admin)])
+async def deactivate_experiment(experiment_id: str) -> dict[str, str]:
+    experiment_operation(lambda: experiment_harness.deactivate(experiment_id))
+    return {"status": "ok", "experiment_id": experiment_id}
+
+
+@app.post("/experiments/{experiment_id}/rollback", dependencies=[Depends(require_admin)])
+async def rollback_experiment(experiment_id: str) -> dict[str, str]:
+    experiment_operation(lambda: experiment_harness.rollback(experiment_id))
+    return {"status": "ok", "experiment_id": experiment_id}
+
+
+class StableExperimentVersion(BaseModel):
+    version: int = Field(..., ge=1)
+
+
+@app.post("/experiments/{experiment_id}/stable", dependencies=[Depends(require_admin)])
+async def mark_experiment_stable(experiment_id: str, body: StableExperimentVersion) -> dict[str, str]:
+    experiment_operation(lambda: experiment_harness.mark_stable(experiment_id, body.version))
+    return {"status": "ok", "experiment_id": experiment_id}
+
+
+@app.get("/experiments/{experiment_id}/versions", dependencies=[Depends(require_admin)])
+async def experiment_versions(experiment_id: str) -> dict[str, object]:
+    return {"versions": experiment_operation(lambda: experiment_harness.versions(experiment_id))}
+
+
+@app.get("/experiments/{experiment_id}/metrics", dependencies=[Depends(require_admin)])
+async def experiment_metrics(experiment_id: str) -> dict[str, object]:
+    return {"metrics": experiment_operation(lambda: experiment_harness.metrics(experiment_id))}
+
+
+@app.get("/experiments/{experiment_id}/events", dependencies=[Depends(require_admin)])
+async def experiment_events(experiment_id: str) -> dict[str, object]:
+    return {"events": experiment_operation(lambda: experiment_harness.events(experiment_id))}
 
 
 if __name__ == "__main__":

@@ -81,6 +81,8 @@ class Variant:
     template_name: str
     template_version: str | None = None  # None → latest
     weight: float = 1.0
+    model_name: str | None = None
+    generation_config: dict[str, float | int] = field(default_factory=dict)
 
 
 @dataclass
@@ -96,6 +98,7 @@ class ExperimentConfig:
     control: Variant
     variants: list[Variant] = field(default_factory=list)
     kill_switch: bool = False
+    traffic_percent: float | None = None
 
 
 class ExperimentHarness:
@@ -141,6 +144,11 @@ class ExperimentHarness:
 
         # Weighted sticky assignment using a deterministic hash.
         all_variants = [config.control] + config.variants
+        if config.traffic_percent is not None:
+            # An explicit canary percentage controls total treatment traffic;
+            # omitted percentages preserve the original weighted A/B split.
+            in_canary = _stable_hash(f"{experiment_id}:{session_id}:rollout") * 100 < config.traffic_percent
+            all_variants = config.variants if in_canary and config.variants else [config.control]
         total_weight = sum(v.weight for v in all_variants)
         raw = _stable_hash(f"{experiment_id}:{session_id}")
         pick = raw * total_weight

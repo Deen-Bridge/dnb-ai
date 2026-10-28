@@ -47,6 +47,7 @@ mypy_path = "."
 explicit_package_bases = true
 namespace_packages = true
 warn_unused_configs = true
+warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
 exclude = [
@@ -61,22 +62,27 @@ exclude = [
 module = "main"
 disallow_untyped_defs = true
 
-# google-generativeai and its api_core siblings ship incomplete stubs.
+# Only untyped runtime dependencies are exempt from missing-stub diagnostics.
+# Keep application modules checked; typed SDKs (Redis, Stellar, Prometheus and
+# Pillow) no longer need the historical wildcard exemptions.
 [[tool.mypy.overrides]]
 module = [
-    "google.*",
-    "stellar_sdk.*",
-    "redis.*",
-    "yaml.*",
+    "google", # Untyped namespace root imported by the legacy SDK.
+    "google.generativeai",
+    "google.generativeai.*",
+    "google.cloud",
+    "google.cloud.*",
+    "google.cloud.firestore",
+    "google.cloud.firestore.*",
     "firebase_admin",
     "firebase_admin.*",
     "locust",
     "locust.*",
-    "prometheus_fastapi_instrumentator",
-    "prometheus_fastapi_instrumentator.*",
-    "prometheus_client",
-    "prometheus_client.*",
-    "PIL",
-    "PIL.*",
 ]
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
+
+# OCR remains an optional runtime feature; its import is guarded in video_analysis.py.
+[[tool.mypy.overrides]]
+module = "pytesseract"
 ignore_missing_imports = true
