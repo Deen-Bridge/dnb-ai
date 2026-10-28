@@ -41,6 +41,10 @@ import telemetry
 from arabic_dialect import router as arabic_dialect_router
 from arabic_ocr import router as arabic_ocr_router
 from audio_hadith import router as audio_hadith_router
+from book_moderation.api import (
+    admin_router as book_moderation_admin_router,
+    public_router as book_moderation_public_router,
+)
 from calligraphy import router as calligraphy_router
 from citations import (
     CITATION_BLOCK_CONTEXT,
@@ -615,6 +619,11 @@ app.include_router(video_analysis_router)
 app.include_router(arabic_dialect_router)
 # Religious misinformation flagging: detection, correction, and blocking of misinformation
 app.include_router(misinformation_router)
+# Book take-down and restore controls (#314). The admin router comes first:
+# it owns "/books/moderation", which the public router would otherwise match
+# as a book id.
+app.include_router(book_moderation_admin_router)
+app.include_router(book_moderation_public_router)
 
 from adhkar import corpus as adhkar_corpus
 
