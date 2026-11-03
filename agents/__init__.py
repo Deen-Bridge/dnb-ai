@@ -3,38 +3,26 @@
 Groups agent orchestration, reasoning, synthesis, routing, and
 reliability modules under a single package.
 
-This package also exposes the intelligent task decomposition system,
-which breaks complex queries into sub-tasks, builds dependency graphs,
-assigns tasks to agents, and generates parallel execution plans.
+Re-export implemented decomposition APIs from their canonical modules. The
+former sibling-module imports referred to files that were never committed.
 """
 
-from .decomposition import (
+from agent_orchestrator import (
     AgentCapability,
     AgentRegistry,
-    DecompositionError,
-    DecompositionResult,
-    ExecutionPlan,
-    ExecutionStep,
-    QueryComplexity,
+    DecompositionPlan,
+    DecompositionStrategy,
     SubTask,
-    TaskDecomposer,
-    TaskDependencyGraph,
-    TaskStatus,
+    TaskDecompositionEngine,
 )
-from .decomposition_metrics import DecompositionMetrics, MetricsTracker
+from query_optimizer import DecompositionMetrics
 
 __all__ = [
     "AgentCapability",
     "AgentRegistry",
-    "DecompositionError",
     "DecompositionMetrics",
-    "DecompositionResult",
-    "ExecutionPlan",
-    "ExecutionStep",
-    "MetricsTracker",
-    "QueryComplexity",
+    "DecompositionPlan",
+    "DecompositionStrategy",
     "SubTask",
-    "TaskDependencyGraph",
-    "TaskDecomposer",
-    "TaskStatus",
+    "TaskDecompositionEngine",
 ]
