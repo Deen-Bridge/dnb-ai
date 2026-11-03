@@ -446,7 +446,6 @@ def _validate(sub_tasks: list[SubTask], domains: list[str], registry: AgentRegis
     return issues
 
 
-
 class ResearchQueryAnalyzer(QueryAnalyzer):
     """Select research agents by decomposing a query into domain facets."""
 
