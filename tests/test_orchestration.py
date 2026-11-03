@@ -7,6 +7,7 @@ from orchestration import (
     AgentRegistry,
     AgentSpec,
     AgentTask,
+    CircuitBreaker,
     CircuitState,
     ExecutionPlan,
     MultiAgentOrchestrator,
@@ -171,6 +172,41 @@ def test_failure_uses_fallback_and_opens_circuit() -> None:
         assert calls == 1
         assert orchestrator.circuit_state("primary") is CircuitState.OPEN
         assert orchestrator.metrics.snapshot()["fallbacks_succeeded"] == 2
+
+    asyncio.run(run())
+
+
+def test_cancelled_half_open_probe_can_be_retried() -> None:
+    async def run() -> None:
+        breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=0)
+        cancelled = asyncio.Event()
+        probe_started = asyncio.Event()
+        probe_release = asyncio.Event()
+
+        async def earlier_call() -> None:
+            assert await breaker.allow() is True
+            try:
+                await cancelled.wait()
+            except asyncio.CancelledError:
+                await breaker.release_probe()
+                raise
+
+        async def half_open_probe() -> None:
+            assert await breaker.allow() is True
+            probe_started.set()
+            await probe_release.wait()
+
+        earlier = asyncio.create_task(earlier_call())
+        await asyncio.sleep(0)
+        await breaker.record_failure()
+        probe = asyncio.create_task(half_open_probe())
+        await probe_started.wait()
+        earlier.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await earlier
+        assert await breaker.allow() is False
+        probe_release.set()
+        await probe
 
     asyncio.run(run())
 

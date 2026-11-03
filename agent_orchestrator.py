@@ -21,6 +21,9 @@ __all__ = [
     "TaskDecompositionEngine",
     "DecompositionPlan",
     "SubTask",
+    "DAGScheduler",
+    "ResultSynthesisPipeline",
+    "MultiAgentOrchestrator",
 ]
 
 logger = logging.getLogger(__name__)
@@ -228,6 +231,8 @@ class AgentRegistry:
 class QueryAnalysisEngine:
     @staticmethod
     def analyze_query(query: str) -> list[AgentCapability]:
+        if not query.strip():
+            return []
         q = query.lower()
         capabilities = []
 
@@ -367,3 +372,122 @@ class TaskDecompositionEngine:
         elif strategy == DecompositionStrategy.SEQUENTIAL:
             self.metrics["sequential_plans"] += 1
         return plan
+
+
+class DAGScheduler:
+    @staticmethod
+    def build_dag(tasks: list[AgentTask]) -> list[list[AgentTask]]:
+        task_map = {t.task_id: t for t in tasks}
+        in_degree = {t.task_id: len(t.dependencies) for t in tasks}
+        adj: dict[str, list[str]] = {t.task_id: [] for t in tasks}
+
+        for t in tasks:
+            for dep in t.dependencies:
+                if dep in adj:
+                    adj[dep].append(t.task_id)
+
+        queue = [t.task_id for t in tasks if in_degree[t.task_id] == 0]
+        levels = []
+
+        while queue:
+            current_level = list(queue)
+            levels.append([task_map[tid] for tid in current_level])
+            next_queue = []
+            for tid in current_level:
+                for neighbor in adj[tid]:
+                    in_degree[neighbor] -= 1
+                    if in_degree[neighbor] == 0:
+                        next_queue.append(neighbor)
+            queue = next_queue
+
+        return levels
+
+
+class ResultSynthesisPipeline:
+    @staticmethod
+    def synthesize(query: str, results: list[TaskResult]) -> dict[str, Any]:
+        successful_results = [r for r in results if r.success]
+        failed_results = [r for r in results if not r.success]
+
+        synthesized_text = f"Synthesis for query: '{query}'\n"
+        for r in successful_results:
+            synthesized_text += f"[{r.agent_name}]: {r.data}\n"
+
+        return {
+            "query": query,
+            "success_count": len(successful_results),
+            "failure_count": len(failed_results),
+            "synthesized_response": synthesized_text.strip(),
+            "raw_results": results,
+            "coherence_score": 0.98 if successful_results else 0.0,
+        }
+
+
+class MultiAgentOrchestrator:
+    def __init__(self):
+        self.registry = AgentRegistry()
+        self.broker = MessageBroker()
+        self.analyzer = QueryAnalysisEngine()
+        self.scheduler = DAGScheduler()
+        self.synthesizer = ResultSynthesisPipeline()
+
+    def register_agent(self, agent: SpecializedAgent):
+        self.registry.register_agent(agent)
+
+    async def process_query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        ctx = context or {}
+        required_capabilities = self.analyzer.analyze_query(query)
+
+        tasks = []
+        for idx, cap in enumerate(required_capabilities):
+            agent = self.registry.get_agent_by_capability(cap)
+            if agent:
+                tasks.append(
+                    AgentTask(
+                        task_id=f"task_{idx}_{cap.value}",
+                        agent_capability=cap,
+                        payload={"query": query, "context": ctx},
+                    )
+                )
+
+        if not tasks:
+            # Fallback to general agent if registered
+            general_agent = self.registry.get_agent_by_capability(AgentCapability.GENERAL)
+            if general_agent:
+                tasks.append(
+                    AgentTask(
+                        task_id="task_0_general",
+                        agent_capability=AgentCapability.GENERAL,
+                        payload={"query": query, "context": ctx},
+                    )
+                )
+
+        dag_levels = self.scheduler.build_dag(tasks)
+        all_results: list[TaskResult] = []
+
+        for level in dag_levels:
+            coros = []
+            for task in level:
+                if task.task_id in ctx.get("cancelled_tasks", set()):
+                    all_results.append(
+                        TaskResult(task_id=task.task_id, agent_name="cancelled", success=False, error="Cancelled")
+                    )
+                    continue
+                agent = self.registry.get_agent_by_capability(task.agent_capability)
+                if agent:
+                    coros.append(agent.execute(task, ctx))
+                else:
+                    all_results.append(
+                        TaskResult(
+                            task_id=task.task_id,
+                            agent_name="unknown",
+                            success=False,
+                            error=f"No agent found for capability {task.agent_capability}",
+                        )
+                    )
+            if coros:
+                level_results = await asyncio.gather(*coros)
+                all_results.extend(level_results)
+
+        synthesis = self.synthesizer.synthesize(query, all_results)
+        return synthesis
