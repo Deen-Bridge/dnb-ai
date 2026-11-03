@@ -407,6 +407,11 @@ class CircuitBreaker:
                 self.state = CircuitState.OPEN
                 self.opened_at = time.monotonic()
 
+    async def release_probe(self) -> None:
+        """Release a half-open probe cancelled before it records an outcome."""
+        async with self._lock:
+            self._probe_in_progress = False
+
 
 @dataclass(frozen=True)
 class TraceSpan:
@@ -761,15 +766,18 @@ class MultiAgentOrchestrator:
 
         limiter = self._limiters[agent_name]
         semaphore = self._semaphores[agent_name]
-        await limiter.acquire()
         timeout = task.timeout_seconds or task_timeout_seconds or self.default_task_timeout
         try:
+            await limiter.acquire()
             async with semaphore:
                 async with asyncio.timeout(timeout):
                     output = agent.handler(task, context)
                     if not inspect.isawaitable(output):
                         raise TypeError(f"Agent {agent_name} handler must return an awaitable")
                     value = await output
+        except asyncio.CancelledError:
+            await breaker.release_probe()
+            raise
         except Exception:
             await breaker.record_failure()
             self.metrics.increment(f"agent_{agent_name}_failures")

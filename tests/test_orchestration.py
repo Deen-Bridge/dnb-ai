@@ -7,6 +7,7 @@ from orchestration import (
     AgentRegistry,
     AgentSpec,
     AgentTask,
+    CircuitBreaker,
     CircuitState,
     ExecutionPlan,
     MultiAgentOrchestrator,
@@ -171,6 +172,17 @@ def test_failure_uses_fallback_and_opens_circuit() -> None:
         assert calls == 1
         assert orchestrator.circuit_state("primary") is CircuitState.OPEN
         assert orchestrator.metrics.snapshot()["fallbacks_succeeded"] == 2
+
+    asyncio.run(run())
+
+
+def test_cancelled_half_open_probe_can_be_retried() -> None:
+    async def run() -> None:
+        breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=0)
+        await breaker.record_failure()
+        assert await breaker.allow() is True
+        await breaker.release_probe()
+        assert await breaker.allow() is True
 
     asyncio.run(run())
 
