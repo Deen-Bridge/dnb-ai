@@ -378,6 +378,7 @@ class CircuitBreaker:
         self.state = CircuitState.CLOSED
         self.opened_at = 0.0
         self._probe_in_progress = False
+        self._probe_owner: asyncio.Task[Any] | None = None
         self._lock = asyncio.Lock()
 
     async def allow(self) -> bool:
@@ -391,6 +392,7 @@ class CircuitBreaker:
             if self._probe_in_progress:
                 return False
             self._probe_in_progress = True
+            self._probe_owner = asyncio.current_task()
             return True
 
     async def record_success(self) -> None:
@@ -398,6 +400,7 @@ class CircuitBreaker:
             self.failures = 0
             self.state = CircuitState.CLOSED
             self._probe_in_progress = False
+            self._probe_owner = None
 
     async def record_failure(self) -> None:
         async with self._lock:
@@ -406,11 +409,14 @@ class CircuitBreaker:
             if self.failures >= self.failure_threshold or self.state is CircuitState.HALF_OPEN:
                 self.state = CircuitState.OPEN
                 self.opened_at = time.monotonic()
+            self._probe_owner = None
 
     async def release_probe(self) -> None:
         """Release a half-open probe cancelled before it records an outcome."""
         async with self._lock:
-            self._probe_in_progress = False
+            if self._probe_owner is asyncio.current_task():
+                self._probe_in_progress = False
+                self._probe_owner = None
 
 
 @dataclass(frozen=True)
