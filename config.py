@@ -38,6 +38,11 @@ class Settings(BaseSettings):
 
     gemini_timeout: int = Field(default=30, ge=1)
 
+    # Arabic OCR settings (#214 / #851)
+    arabic_ocr_provider: str = "stub"
+    arabic_ocr_max_image_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    arabic_ocr_min_confidence: float = Field(default=0.40, ge=0, le=1)
+
     # Synthesis engine settings
     synthesis_max_agents: int = Field(default=5, ge=2, le=10)
     synthesis_contradiction_threshold: float = Field(default=0.9, ge=0, le=1)
