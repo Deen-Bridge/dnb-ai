@@ -21,12 +21,19 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
+from media_upload_limits import (
+    MAX_TRANSCRIPT_CHARS,
+    MAX_VIDEO_BYTES,
+    BoundedJobManager,
+    validate_video_upload,
+)
+
 router = APIRouter(prefix="/video-analysis", tags=["video-analysis"])
 
-MAX_VIDEO_BYTES = 100 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm"}
-TERMINAL_STATES = {"completed", "failed"}
-_jobs: dict[str, dict[str, Any]] = {}
+TERMINAL_STATES = {"completed", "failed", "cancelled"}
+job_manager = BoundedJobManager()
+_jobs: dict[str, dict[str, Any]] = job_manager._jobs
 
 
 def extract_quran_references(text: str) -> list[str]:
@@ -167,15 +174,32 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
 
 
 async def _process(job_id: str, payload: bytes, suffix: str, transcript: str) -> None:
-    _jobs[job_id]["status"] = "processing"
+    current_job = job_manager.get_job(job_id)
+    if not current_job or current_job.get("status") == "cancelled":
+        return
+    job_manager.update_job(job_id, status="processing")
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as handle:
             handle.write(payload)
             handle.flush()
             result = await asyncio.to_thread(analyze_video, Path(handle.name), transcript)
-        _jobs[job_id].update(status="completed", result=result, completed_at=datetime.now(UTC).isoformat())
-    except Exception as error:  # keep job failures observable to clients
-        _jobs[job_id].update(status="failed", error=str(error))
+        # Check if cancelled while processing
+        latest = job_manager.get_job(job_id)
+        if latest and latest.get("status") == "cancelled":
+            return
+        job_manager.update_job(
+            job_id,
+            status="completed",
+            result=result,
+            completed_at=datetime.now(UTC).isoformat(),
+        )
+    except Exception as error:  # sanitized generic error message
+        job_manager.update_job(
+            job_id,
+            status="failed",
+            error="Video analysis processing encountered an error.",
+            error_details=str(error),
+        )
 
 
 @router.post("/analyze", status_code=202)
@@ -183,27 +207,35 @@ async def submit_video_analysis(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="MP4, MOV, AVI, or WebM video up to 100MB"),
     transcript: str = Form(""),
+    consent_to_process: bool = Form(default=True, description="Explicit user consent to process uploaded media."),
 ) -> dict[str, Any]:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=415, detail="Only MP4, MOV, AVI, and WebM videos are supported.")
+    if len(transcript) > MAX_TRANSCRIPT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Transcript exceeds maximum allowed length of {MAX_TRANSCRIPT_CHARS} characters.",
+        )
     payload = await file.read(MAX_VIDEO_BYTES + 1)
-    if len(payload) > MAX_VIDEO_BYTES:
-        raise HTTPException(status_code=413, detail="Video must be 100MB or smaller.")
+    mime_type, detected_format = validate_video_upload(
+        payload,
+        file.filename,
+        consent=consent_to_process,
+    )
+    suffix = f".{detected_format}"
     job_id = str(uuid.uuid4())
-    _jobs[job_id] = {
-        "id": job_id,
-        "status": "queued",
-        "filename": file.filename,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
+    job_record = job_manager.register_job(job_id, file.filename)
+    job_record["mime_type"] = mime_type
     background_tasks.add_task(_process, job_id, payload, suffix, transcript)
     return {"job_id": job_id, "status": "queued", "poll_url": f"/video-analysis/jobs/{job_id}"}
 
 
 @router.get("/jobs/{job_id}")
 async def get_video_analysis(job_id: str) -> dict[str, Any]:
-    job = _jobs.get(job_id)
+    job = job_manager.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Analysis job not found")
     return json.loads(json.dumps(job, default=str))
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_video_analysis(job_id: str) -> dict[str, Any]:
+    return job_manager.cancel_job(job_id)

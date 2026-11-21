@@ -14,7 +14,7 @@ and surfaces riwayah, reciter and maqam metadata.
 
 Scope and honest limitations
 ----------------------------
-This is a deterministic, dependency-free heuristic layer — **not** an acoustic
+This is a deterministic, dependency-free heuristic layer - **not** an acoustic
 model. It ships no ASR, no voice fingerprinting and no pitch analysis, so:
 
 * reciter identity and maqam are only reported when the caller supplies them
@@ -435,7 +435,10 @@ class AnalyzeRequest(BaseModel):
         None, max_length=MAX_WORD_TIMINGS, description="Per-word ASR timings in seconds."
     )
     duration_seconds: float | None = Field(
-        None, gt=0, description="Clip length; used to estimate timings when none are given."
+        None,
+        gt=0,
+        le=3600,
+        description="Clip length; used to estimate timings when none are given (max 3600s / 60 mins).",
     )
     asr_confidence: float | None = Field(
         None, ge=0, le=1, description="ASR confidence; low values loosen word matching."
@@ -446,6 +449,7 @@ class AnalyzeRequest(BaseModel):
     metadata_text: str | None = Field(
         None, max_length=500, description="Title or filename, searched for a known reciter."
     )
+    consent_to_process: bool = Field(True, description="Explicit user consent to process uploaded recitation.")
 
 
 class AnalyzeResponse(BaseModel):
@@ -466,6 +470,9 @@ class AnalyzeResponse(BaseModel):
     reciter: ReciterInfo | None
     maqam: str | None
     note: str
+    confidence_band: str = "high"
+    fallback_recommended: bool = False
+    review_required: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -664,11 +671,26 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
 
     note = (
         f"Aligned to {surah.name} {reference} (Hafs Mushaf text) with accuracy {accuracy:.2f}. "
-        "Reciter and maqam are reported only from supplied hints/metadata — no voice or pitch "
+        "Reciter and maqam are reported only from supplied hints/metadata - no voice or pitch "
         "analysis is performed. Verify against a printed Mushaf and a qualified teacher of tajwid."
     )
     if timing_source == "estimated":
         note += " Timestamps are estimated from clip duration, not measured."
+
+    confidence_band = "high"
+    fallback_recommended = False
+    review_required = False
+    if request.asr_confidence is not None:
+        if request.asr_confidence >= 0.75:
+            confidence_band = "high"
+        elif request.asr_confidence >= 0.40:
+            confidence_band = "medium"
+            review_required = True
+        else:
+            confidence_band = "low"
+            fallback_recommended = True
+            review_required = True
+            note += " Low ASR confidence detected; safe fallback mode recommended."
 
     return AnalyzeResponse(
         identified=True,
@@ -694,12 +716,25 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
         reciter=reciter,
         maqam=_resolve_alias(request.maqam_hint, MAQAMAT),
         note=note,
+        confidence_band=confidence_band,
+        fallback_recommended=fallback_recommended,
+        review_required=review_required,
     )
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_quran_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
     """Identify and verify a transcribed Quranic recitation against the bundled Mushaf."""
+    if not request.consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
+    if request.duration_seconds is not None and request.duration_seconds > 3600:
+        raise HTTPException(
+            status_code=422,
+            detail="Audio duration exceeds maximum allowed limit of 3600 seconds (60 minutes).",
+        )
     has_text = bool(request.transcript and request.transcript.strip())
     if not has_text and not request.word_timings:
         raise HTTPException(status_code=422, detail="Provide a transcript or word_timings.")
