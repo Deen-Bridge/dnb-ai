@@ -123,6 +123,48 @@ _STOPWORDS = frozenset(
 )
 
 
+# ---------------------------------------------------------------------------
+# Prompt-injection hardening for untrusted transcripts
+# ---------------------------------------------------------------------------
+
+# Transcripts come from speech recognition of arbitrary audio, so they are
+# untrusted data. They are never executed or interpreted as instructions here,
+# but they may be forwarded to downstream LLM steps, so instruction-like
+# content is flagged and neutralized.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏‪-‮⁠-⁤﻿]")
+_INJECTION_PATTERNS = (
+    re.compile(
+        r"\b(?:ignore|disregard|forget|override)\b[^.\n]{0,40}\b(?:previous|prior|above|earlier|all|system)\b"
+        r"[^.\n]{0,40}\b(?:instructions?|prompts?|rules?|context)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:system|developer)\s+(?:prompt|message|instructions?)\b", re.IGNORECASE),
+    re.compile(r"\byou\s+are\s+now\b", re.IGNORECASE),
+    re.compile(r"\b(?:act|behave|respond)\s+as\s+(?:if|an?|the)\b", re.IGNORECASE),
+    re.compile(r"\b(?:reveal|print|show|leak)\b[^.\n]{0,30}\b(?:prompt|secrets?|api[ _-]?keys?|tokens?)\b", re.IGNORECASE),
+    re.compile(r"\bmark\s+(?:this|it)\s+as\s+(?:verified|sahih|authentic)\b", re.IGNORECASE),
+    re.compile(r"</?\s*(?:system|assistant|user|instructions?)\s*>", re.IGNORECASE),
+    re.compile(r"\bBEGIN\s+(?:SYSTEM|INSTRUCTIONS?)\b", re.IGNORECASE),
+)
+
+
+def sanitize_transcript(text: str) -> tuple[str, list[str]]:
+    """Strip control/invisible characters and remove instruction-like spans.
+
+    Returns ``(clean_text, flags)``; ``flags`` is empty when nothing suspicious
+    was found. The removed spans are never echoed back.
+    """
+    flags: list[str] = []
+    cleaned = _CONTROL_CHARS.sub("", text)
+    if cleaned != text:
+        flags.append("control_characters_removed")
+    for idx, pattern in enumerate(_INJECTION_PATTERNS):
+        if pattern.search(cleaned):
+            flags.append(f"instruction_like_content_{idx}")
+            cleaned = pattern.sub(" ", cleaned)
+    return cleaned, flags
+
+
 def strip_arabic_diacritics(text: str) -> str:
     """Remove Arabic tashkeel and normalize alef/hamza variants."""
     text = _ARABIC_DIACRITICS.sub("", text)
@@ -453,23 +495,35 @@ class VerifyResponse(BaseModel):
     isnad: list[NarratorInfo]
     flagged_misquotation: bool
     note: str
+    injection_flags: list[str] = Field(default_factory=list)
 
 
 def verify_transcript(transcript: str, language: str = "en") -> VerifyResponse:
     """Match a narration transcript against the corpus and assemble a verdict."""
+    transcript, injection_flags = sanitize_transcript(transcript)
     candidates = find_matches(transcript)
     best = candidates[0] if candidates and candidates[0].score > 0 else None
     isnad = [NarratorInfo(name=n.name, bio=n.bio) for n in extract_isnad(transcript)]
 
     confidence = best.score if best else 0.0
     verified = best is not None and confidence >= MATCH_THRESHOLD
+    # Safe fallback: a transcript carrying instruction-like content is never
+    # auto-verified; it needs human review.
+    suspicious = any(f.startswith("instruction_like_content") for f in injection_flags)
+    if suspicious:
+        verified = False
     grade = best.grade if (verified and best is not None) else None
 
     # A misquotation is a partial-but-weak match: the transcript clearly
     # gestures at a known hadith yet does not line up cleanly with it.
     flagged_misquotation = best is not None and 0.2 <= confidence < STRONG_MATCH_THRESHOLD
 
-    if verified and best is not None:
+    if suspicious:
+        note = (
+            "The transcript contained instruction-like content, which was ignored and removed. "
+            "It was not verified; review it manually against a full hadith reference."
+        )
+    elif verified and best is not None:
         note = (
             f"Matched {best.reference} ({best.grade}) with confidence "
             f"{confidence:.2f}. Confirm against a full hadith reference before relying on it."
@@ -492,6 +546,7 @@ def verify_transcript(transcript: str, language: str = "en") -> VerifyResponse:
         isnad=isnad,
         flagged_misquotation=flagged_misquotation,
         note=note,
+        injection_flags=injection_flags,
     )
 
 
@@ -729,6 +784,7 @@ class LectureResponse(BaseModel):
     summary: str
     key_takeaways: list[str]
     searchable_text: str
+    injection_flags: list[str] = Field(default_factory=list)
 
 
 def extract_lecture_transcript(
@@ -757,6 +813,15 @@ def extract_lecture_transcript(
         )
     engine = transcriber or PassthroughVideoTranscriber()
     segments = engine.transcribe(video_ref, language)
+    injection_flags: list[str] = []
+    safe_segments: list[TranscriptSegment] = []
+    for seg in segments:
+        clean, flags = sanitize_transcript(seg.text)
+        injection_flags.extend(f for f in flags if f not in injection_flags)
+        clean = clean.strip()
+        if clean:
+            safe_segments.append(TranscriptSegment(seg.start, seg.end, seg.speaker, clean))
+    segments = safe_segments
     topics = _segment_topics(segments)
     citations = _detect_citations(segments)
     summary, takeaways = _summarize(segments, topics)
@@ -770,6 +835,7 @@ def extract_lecture_transcript(
         summary=summary,
         key_takeaways=takeaways,
         searchable_text=searchable,
+        injection_flags=injection_flags,
     )
 
 
