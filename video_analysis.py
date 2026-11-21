@@ -130,15 +130,19 @@ def ocr_frame(frame: Path) -> str:
 
 
 def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
+    from multimodal_budget import sanitize_multimodal_extracted_content
+
     with tempfile.TemporaryDirectory(prefix="dnb-video-") as directory:
         audio, frames = extract_media(video_path, Path(directory))
         if transcript.strip():
-            transcript = transcript.strip()
+            transcript = sanitize_multimodal_extracted_content(transcript.strip()).sanitized_text
             timestamps: list[dict[str, Any]] = []
         else:
-            transcript, timestamps = transcribe_audio(audio)
+            raw_transcript, timestamps = transcribe_audio(audio)
+            transcript = sanitize_multimodal_extracted_content(raw_transcript).sanitized_text
         for frame in frames:
-            frame["text"] = ocr_frame(Path(frame["path"]))
+            frame_raw = ocr_frame(Path(frame["path"]))
+            frame["text"] = sanitize_multimodal_extracted_content(frame_raw).sanitized_text
         visual_text = " ".join(frame["text"] for frame in frames if frame["text"])
         combined = " ".join(part for part in (transcript, visual_text) if part)
         topics = segment_topics(combined, timestamps)
