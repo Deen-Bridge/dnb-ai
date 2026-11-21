@@ -285,7 +285,7 @@ decision instead of `get_model()`.
 
 ### 3.2 Fallback and circuit breaking
 
-Three layers, each independent:
+Four layers, each independent:
 
 1. **Transport retries** — `send_message_with_retry()` in `main.py` retries
    `TimeoutError` / `ServiceUnavailable` / `DeadlineExceeded` twice (max 3
@@ -298,7 +298,23 @@ Three layers, each independent:
    `CircuitOpenError`/`AgentUnavailableError`, so the orchestrator routes to an
    alternative agent or degrades to partial results instead of retrying a dead
    dependency.
-3. **HTTP error mapping** — the `/chat` handler converts upstream failures into
+3. **Auditable fallback decisions (#884)** — `agent_fallback.py` routes through
+   alternative agents and deterministic paths while emitting structured,
+   content-free `FallbackMetadata` (`reason`, `component`, `version`, `duration_ms`,
+   `risk_level`, `user_message`, `trace_id`).
+   - **Stable reason codes**: `provider_timeout`, `circuit_open`, `circuit_half_open_failed`,
+     `safety_block`, `provider_rate_limit`, `provider_unavailable`, `stale_data`,
+     `deterministic_fallback`, `local_data_fallback`, `handler_failure`.
+   - **Truthful user messaging**: Risk-graded explanations (low, medium, high) so users
+     are informed when answers are degraded or deterministic rather than standard model answers.
+   - **Non-bypassable controls**: Fallbacks cannot bypass safety moderation (terminal refusals),
+     citation verification requirements, authentication, or token/cost quotas.
+   - **Telemetry by provider/feature**: `telemetry.py` tracks fallback rates, counts, and
+     latencies grouped by provider and feature under strict privacy invariants (never prompts or secrets).
+   - **Thresholds & rollback**: Fallback paths can be capped by rate thresholds (`FallbackThresholdConfig`),
+     triggering review or automatic disabling, with manual operator rollback via `rollback_fallback()`.
+   See `docs/FALLBACK_AUDIT.md` for the full taxonomy, dashboard/alerting config, and failure-injection evidence.
+4. **HTTP error mapping** — the `/chat` handler converts upstream failures into
    typed `APIException`s with hints: 429 (rate limit/quota), 400
    (`InvalidArgument`), 503 (`ServiceUnavailable`), 504 (timeout), 500
    (unexpected, including an empty model response). Every error response keeps

@@ -284,6 +284,7 @@ Create `tests/test_<lang>.py`. Follow existing patterns:
 - **Endpoint tests** need `main` imported. Set the env stub *before* importing:
   ```python
   import os
+
   os.environ.setdefault("GEMINI_API_KEY", "test-key")
   from main import app
   ```

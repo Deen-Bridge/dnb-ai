@@ -10,10 +10,12 @@ import pytest
 
 import telemetry
 from telemetry import (
+    FallbackEvent,
     MetricsRegistry,
     Trace,
     capture_usage,
     estimate_cost,
+    record_fallback_event,
     record_model_call,
 )
 
@@ -193,3 +195,87 @@ class TestNoContentLeak:
             _ = SECRET_PROMPT  # text exists in scope but must never be recorded
         blob = json.dumps(trace.as_dict())
         assert SECRET_PROMPT not in blob
+
+    def test_fallback_labels_contain_no_text(self):
+        _ = SECRET_PROMPT
+        event = FallbackEvent(
+            provider="gemini",
+            feature="hadith",
+            reason="provider_timeout",
+            component="primary_agent",
+            version="1.0.0",
+            duration_ms=45.2,
+            risk_level="medium",
+            trace_id="trace-fb-1",
+        )
+        blob = json.dumps(event.as_labels())
+        assert SECRET_PROMPT not in blob
+        assert "prompt" not in blob.lower()
+        assert "secret" not in blob.lower()
+
+
+class TestFallbackTelemetry:
+    """Telemetry tests for external-provider fallback decisions (#884)."""
+
+    def test_record_fallback_aggregates_by_provider_feature_and_reason(self, fresh_registry):
+        record_fallback_event(
+            provider="gemini",
+            feature="chat",
+            reason="provider_timeout",
+            component="gemini-flash",
+            version="1.0.0",
+            duration_ms=50.0,
+        )
+        record_fallback_event(
+            provider="gemini",
+            feature="hadith",
+            reason="circuit_open",
+            component="hadith_agent",
+            version="1.0.0",
+            duration_ms=10.0,
+        )
+        record_fallback_event(
+            provider="anthropic",
+            feature="chat",
+            reason="safety_block",
+            component="claude_agent",
+            version="1.0.0",
+            duration_ms=15.0,
+        )
+
+        fresh_registry.record_request(100.0, error=False)
+        fresh_registry.record_request(100.0, error=False)
+        fresh_registry.record_request(100.0, error=False)
+
+        snap = fresh_registry.snapshot()
+        fb = snap["fallbacks"]
+        assert fb["total"] == 3
+        assert fb["rate"] == 1.0  # 3 fallbacks / 3 requests
+        assert fb["by_provider"]["gemini"] == 2
+        assert fb["by_provider"]["anthropic"] == 1
+        assert fb["by_feature"]["chat"] == 2
+        assert fb["by_feature"]["hadith"] == 1
+        assert fb["by_reason"]["provider_timeout"] == 1
+        assert fb["by_reason"]["circuit_open"] == 1
+        assert fb["by_reason"]["safety_block"] == 1
+        assert fb["by_provider_feature"]["gemini"]["chat"] == 1
+        assert fb["by_provider_feature"]["gemini"]["hadith"] == 1
+        assert fb["by_provider_feature"]["anthropic"]["chat"] == 1
+        assert fb["latency_ms"]["p50"] > 0.0
+
+    def test_fallback_reset_clears_metrics(self, fresh_registry):
+        record_fallback_event(
+            provider="gemini",
+            feature="chat",
+            reason="provider_timeout",
+            component="gemini-flash",
+            duration_ms=25.0,
+        )
+        assert fresh_registry.snapshot()["fallbacks"]["total"] == 1
+        fresh_registry.reset()
+        snap = fresh_registry.snapshot()
+        assert snap["fallbacks"]["total"] == 0
+        assert snap["fallbacks"]["by_provider"] == {}
+        assert snap["fallbacks"]["by_feature"] == {}
+        assert snap["fallbacks"]["by_reason"] == {}
+        assert snap["fallbacks"]["latency_ms"]["p50"] == 0.0
