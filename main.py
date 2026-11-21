@@ -648,12 +648,32 @@ class AdhkarRecommendRequest(BaseModel):
     }
 
 
+class AdhkarProvenance(BaseModel):
+    """Corpus provenance and freshness metadata returned with every recommendation."""
+
+    data_version: str = Field(..., description="Semantic version of the bundled adhkar data file.")
+    schema_version: int = Field(..., description="Integer schema revision of the data file format.")
+    source: str = Field(..., description="Human-readable description of the upstream source(s).")
+    data_last_updated: str = Field(
+        ..., description="ISO-8601 date the corpus content was last reviewed or changed."
+    )
+    loaded_at: str = Field(
+        ...,
+        description="UTC ISO-8601 timestamp at which the corpus was loaded into memory.",
+    )
+    entry_count: int = Field(..., description="Total number of entries in the loaded corpus.")
+
+
 class AdhkarRecommendResponse(BaseModel):
     matches: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Matching adhkar entries (id, title, arabic, transliteration, translation, category, source, grading). Empty when nothing matches.",
+        description="Matching adhkar entries (id, title, arabic, transliteration, translation, category, source, reference, grading). Empty when nothing matches.",
     )
     message: str = Field(..., description="Human-readable summary of how many supplications matched.")
+    provenance: AdhkarProvenance = Field(
+        ...,
+        description="Data provenance and freshness metadata: corpus version, source, last-updated date, and load timestamp.",
+    )
 
 
 @app.post(
@@ -685,6 +705,14 @@ class AdhkarRecommendResponse(BaseModel):
                             }
                         ],
                         "message": "Found 1 authenticated supplication(s) matching your request.",
+                        "provenance": {
+                            "data_version": "1.0.0",
+                            "schema_version": 1,
+                            "source": "Hisnul Muslim; Sahih al-Bukhari",
+                            "data_last_updated": "2024-01-01",
+                            "loaded_at": "2024-01-01T00:00:00Z",
+                            "entry_count": 4,
+                        },
                     }
                 }
             },
@@ -702,6 +730,7 @@ async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
     return {
         "matches": matches,
         "message": message,
+        "provenance": adhkar_corpus.provenance(),
     }
 
 
