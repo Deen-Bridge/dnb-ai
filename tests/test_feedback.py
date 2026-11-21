@@ -66,6 +66,29 @@ class TestSQLiteStore:
         assert loaded.categories == ["incorrect_information"]
         assert loaded.generation_config == {"temperature": 0.7}
 
+    def test_create_if_absent_keeps_first_submission(self, store):
+        first = make_record(rating="down", comment="original")
+        retry = make_record(rating="up", comment="changed")
+
+        stored_first = store.create_if_absent(first)
+        stored_retry = store.create_if_absent(retry)
+
+        assert stored_first.feedback_id == first.feedback_id
+        assert stored_retry.feedback_id == first.feedback_id
+        assert stored_retry.rating == "down"
+        assert stored_retry.comment == "original"
+
+    def test_delete_chat_removes_only_that_chats_feedback(self, store):
+        store.upsert(make_record(chat_id="chat-a", message_id="one"))
+        store.upsert(make_record(chat_id="chat-a", message_id="two"))
+        store.upsert(make_record(chat_id="chat-b", message_id="one"))
+
+        store.delete_chat("chat-a")
+
+        remaining = store.list_records()
+        assert len(remaining) == 1
+        assert remaining[0].chat_id == "chat-b"
+
     def test_get_missing_returns_none(self, store):
         assert store.get("nope", "nope") is None
 
@@ -189,10 +212,16 @@ class FakeRedisPipeline:
         self._ops.append(("zrem", key, member))
         return self
 
+    def delete(self, key):
+        self._ops.append(("delete", key))
+        return self
+
     def execute(self):
         for op in self._ops:
             if op[0] == "hset":
                 self._client.hashes[op[1]] = dict(op[2])
+            elif op[0] == "delete":
+                self._client.hashes.pop(op[1], None)
             elif op[0] == "zadd":
                 self._client.zsets.setdefault(op[1], {}).update(op[2])
             elif op[0] == "zrem":
@@ -201,7 +230,7 @@ class FakeRedisPipeline:
 
 
 class FakeRedis:
-    """Just enough Redis for RedisFeedbackStore's index bookkeeping."""
+    """Just enough Redis for feedback storage and index bookkeeping."""
 
     def __init__(self):
         self.hashes = {}
@@ -210,8 +239,25 @@ class FakeRedis:
     def pipeline(self):
         return FakeRedisPipeline(self)
 
+    def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.hashes:
+            return False
+        self.hashes[key] = value
+        return True
+
+    def exists(self, key):
+        return key in self.hashes
+
+    def delete(self, key):
+        return self.hashes.pop(key, None) is not None
+
+    def scan_iter(self, match):
+        prefix = match[:-1] if match.endswith("*") else match
+        return iter(key for key in list(self.hashes) if key.startswith(prefix))
+
     def hgetall(self, key):
-        return dict(self.hashes.get(key, {}))
+        value = self.hashes.get(key, {})
+        return dict(value) if isinstance(value, dict) else {}
 
     def zcard(self, key):
         return len(self.zsets.get(key, {}))
@@ -226,6 +272,35 @@ class TestRedisIndexHygiene:
 
     def _store(self):
         return RedisFeedbackStore(FakeRedis())
+
+    def test_create_if_absent_keeps_first_submission(self):
+        store = self._store()
+        first = make_record(rating="down", comment="original")
+        retry = make_record(rating="up", comment="changed")
+
+        stored_first = store.create_if_absent(first)
+        stored_retry = store.create_if_absent(retry)
+
+        assert stored_first.feedback_id == first.feedback_id
+        assert stored_retry.feedback_id == first.feedback_id
+        assert stored_retry.rating == "down"
+        assert stored_retry.comment == "original"
+        assert store._r.zcard("feedback:index:rating:down") == 1
+        assert store._r.zcard("feedback:index:rating:up") == 0
+
+    def test_delete_chat_removes_only_that_chats_records_and_indexes(self):
+        store = self._store()
+        store.create_if_absent(make_record(chat_id="chat-a", message_id="one"))
+        store.create_if_absent(make_record(chat_id="chat-a", message_id="two"))
+        store.create_if_absent(make_record(chat_id="chat-b", message_id="one"))
+
+        store.delete_chat("chat-a")
+
+        remaining = store.list_records()
+        assert len(remaining) == 1
+        assert remaining[0].chat_id == "chat-b"
+        assert store._r.zcard("feedback:index:rating:down") == 1
+        assert store.get("chat-a", "one") is None
 
     def test_rerating_moves_the_index_membership(self):
         store = self._store()
@@ -505,7 +580,7 @@ class TestFeedbackEndpoint:
             resp = await client.post("/feedback", json=payload)
             assert resp.status_code == 422
 
-    async def test_missing_snapshot_requires_client_prompt_and_answer(self, client):
+    async def test_missing_snapshot_without_client_context_is_404(self, client):
         async with client:
             resp = await client.post(
                 "/feedback",
@@ -515,9 +590,9 @@ class TestFeedbackEndpoint:
                     "rating": "down",
                 },
             )
-            assert resp.status_code == 422
+            assert resp.status_code == 404
 
-    async def test_missing_snapshot_accepts_client_supplied_pair(self, client):
+    async def test_missing_snapshot_rejects_client_supplied_pair(self, client):
         async with client:
             resp = await client.post(
                 "/feedback",
@@ -525,27 +600,58 @@ class TestFeedbackEndpoint:
                     "chat_id": "gone",
                     "message_id": "gone",
                     "rating": "down",
-                    "prompt": "client prompt",
-                    "answer": "client answer",
+                    "prompt": "forged",
+                    "answer": "forged",
                 },
-            )
-            assert resp.status_code == 200
-            import main
+            )            assert resp.status_code == 404
 
-            stored = main.feedback_store.get("gone", "gone")
-            assert stored.prompt == "client prompt"
-            assert stored.answer == "client answer"
-
-    async def test_resubmission_overwrites(self, client):
+    async def test_duplicate_submission_is_immutable_and_idempotent(self, client):
         async with client:
             chat_id, message_id = await self._one_answer(client)
             base = {"chat_id": chat_id, "message_id": message_id}
-            await client.post("/feedback", json={**base, "rating": "down"})
-            await client.post("/feedback", json={**base, "rating": "up"})
+            first = await client.post("/feedback", json={**base, "rating": "down"})
+            retry = await client.post("/feedback", json={**base, "rating": "up"})
             import main
 
-            assert main.feedback_store.get(chat_id, message_id).rating == "up"
+            assert first.json()["feedback_id"] == retry.json()["feedback_id"]
+            assert main.feedback_store.get(chat_id, message_id).rating == "down"
             assert len(main.feedback_store.list_records()) == 1
+
+    async def test_chat_deletion_clears_only_its_feedback(self, client):
+        async with client:
+            chat_a, message_a = await self._one_answer(client)
+            chat_b, message_b = await self._one_answer(client)
+            import main
+
+            for chat_id, message_id in ((chat_a, message_a), (chat_b, message_b)):
+                response = await client.post(
+                    "/feedback",
+                    json={"chat_id": chat_id, "message_id": message_id, "rating": "down"},
+                )
+                assert response.status_code == 200
+
+            response = await client.delete(f"/chat/{chat_a}")
+
+            assert response.status_code == 200
+            assert main.feedback_store.get(chat_a, message_a) is None
+            assert main.feedback_store.get(chat_b, message_b) is not None
+
+    async def test_storage_failure_returns_sanitized_500(self, client, monkeypatch):
+        import main
+
+        def fail_store(_record):
+            raise RuntimeError("private storage detail")
+
+        monkeypatch.setattr(main.feedback_store, "create_if_absent", fail_store)
+        async with client:
+            chat_id, message_id = await self._one_answer(client)
+            response = await client.post(
+                "/feedback",
+                json={"chat_id": chat_id, "message_id": message_id, "rating": "up"},
+            )
+
+            assert response.status_code == 500
+            assert "private storage detail" not in response.text
 
     async def test_rate_limit_blocks_a_flood(self, client, monkeypatch):
         import main
