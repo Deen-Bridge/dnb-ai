@@ -133,13 +133,13 @@ record = build_call_record(
     input_tokens=response.usage_metadata.prompt_token_count,
     output_tokens=response.usage_metadata.candidates_token_count,
     trace_id=current_trace_id,
-    tenant_id=request.tenant_id,       # optional
+    tenant_id=request.tenant_id,  # optional
     is_retry=attempt > 0,
     is_fallback=False,
 )
 degraded = default_cutoff.check_and_record(record, path=request.url.path)
 if degraded is not None:
-    return degraded.to_dict()          # safe, content-free response to user
+    return degraded.to_dict()  # safe, content-free response to user
 ```
 
 The `CallRecord` captures:
