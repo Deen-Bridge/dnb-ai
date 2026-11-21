@@ -42,6 +42,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 _OUTPUT = ROOT / "data" / "theme_verses.json"
 _SURAH_INDEX = ROOT / "data" / "quran" / "surah_index.json"
+_MANIFEST = ROOT / "data" / "theme_verses.meta.json"
+
+# Version manifest for the mapping dataset. Bump DATASET_VERSION (semver) whenever
+# CURATED_MAPPINGS changes: patch for annotation/score fixes, minor for added
+# mappings, major for removed or re-themed mappings or a schema change. The
+# manifest is deterministic (no timestamps) so ``--check`` can verify it. The
+# content hash is computed at load time by ``ThemeVerseStore.dataset_info``.
+DATASET_VERSION = "1.0.0"
+MANIFEST: dict = {
+    "dataset_version": DATASET_VERSION,
+    "schema_version": 1,
+    "source": "scripts/build_theme_mappings.py (CURATED_MAPPINGS)",
+    "curation": "Hand-curated from the classical tafsir/concordance tradition; "
+    "bounds-checked against data/quran/surah_index.json. Not exhaustive.",
+}
 
 # ---------------------------------------------------------------------------
 # Curated concordance table: (surah, ayah, theme_id, relevance, context, note)
@@ -855,12 +870,21 @@ def main() -> None:
             committed = json.load(handle)
         if committed != payload:
             raise SystemExit("data/theme_verses.json is out of date; run scripts/build_theme_mappings.py")
+        manifest_path = args.output.with_suffix(".meta.json")
+        if not manifest_path.exists():
+            raise SystemExit(f"Missing manifest: {manifest_path}")
+        with open(manifest_path, encoding="utf-8") as handle:
+            if json.load(handle) != MANIFEST:
+                raise SystemExit(f"{manifest_path.name} is out of date; run scripts/build_theme_mappings.py")
         print(f"OK: {len(mappings)} mappings match the curated table.")
         return
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+    with open(args.output.with_suffix(".meta.json"), "w", encoding="utf-8") as handle:
+        json.dump(MANIFEST, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
     print(f"Wrote {len(mappings)} validated mappings to {args.output}")
 
 
