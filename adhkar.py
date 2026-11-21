@@ -32,7 +32,7 @@ observable without log access.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +76,7 @@ class AdhkarCorpus:
         self._load_corpus()
 
     def _load_corpus(self) -> None:
-        self.loaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.loaded_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         if not self.data_file.exists():
             self.entries = []
             return
