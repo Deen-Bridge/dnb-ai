@@ -25,8 +25,36 @@ router = APIRouter(prefix="/video-analysis", tags=["video-analysis"])
 
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm"}
-TERMINAL_STATES = {"completed", "failed"}
+MAX_TRANSCRIPT_CHARS = 200_000
+TERMINAL_STATES = {"completed", "failed", "cancelled"}
+JOB_TTL_SECONDS = 3600  # retention for finished jobs (results are purged after this)
+MAX_JOBS = 200
+MAX_ACTIVE_JOBS = 20
 _jobs: dict[str, dict[str, Any]] = {}
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def purge_expired_jobs(now: datetime | None = None) -> int:
+    """Drop terminal jobs older than the retention window; returns count removed."""
+    current = now or _now()
+    expired = [
+        job_id
+        for job_id, job in _jobs.items()
+        if job["status"] in TERMINAL_STATES
+        and (current - datetime.fromisoformat(job.get("finished_at") or job["created_at"])).total_seconds()
+        > JOB_TTL_SECONDS
+    ]
+    for job_id in expired:
+        _jobs.pop(job_id, None)
+    return len(expired)
+
+
+def _is_cancelled(job_id: str) -> bool:
+    job = _jobs.get(job_id)
+    return job is None or job["status"] == "cancelled"
 
 
 def extract_quran_references(text: str) -> list[str]:
@@ -75,7 +103,10 @@ def build_search_index(transcript: str, frames: list[dict[str, Any]]) -> dict[st
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=False, capture_output=True, text=True, timeout=120)
+    try:
+        return subprocess.run(command, check=False, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 124, "", "timeout")
 
 
 def extract_media(video_path: Path, workdir: Path) -> tuple[Path | None, list[dict[str, Any]]]:
@@ -167,15 +198,24 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
 
 
 async def _process(job_id: str, payload: bytes, suffix: str, transcript: str) -> None:
+    if _is_cancelled(job_id):
+        return
     _jobs[job_id]["status"] = "processing"
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as handle:
             handle.write(payload)
             handle.flush()
             result = await asyncio.to_thread(analyze_video, Path(handle.name), transcript)
-        _jobs[job_id].update(status="completed", result=result, completed_at=datetime.now(UTC).isoformat())
-    except Exception as error:  # keep job failures observable to clients
-        _jobs[job_id].update(status="failed", error=str(error))
+        if _is_cancelled(job_id):
+            return  # discard result of a cancelled job
+        finished = _now().isoformat()
+        _jobs[job_id].update(status="completed", result=result, completed_at=finished, finished_at=finished)
+    except Exception:  # keep job failures observable without leaking internals
+        if _is_cancelled(job_id):
+            return
+        _jobs[job_id].update(
+            status="failed", error="Video analysis failed.", finished_at=_now().isoformat()
+        )
 
 
 @router.post("/analyze", status_code=202)
@@ -190,12 +230,18 @@ async def submit_video_analysis(
     payload = await file.read(MAX_VIDEO_BYTES + 1)
     if len(payload) > MAX_VIDEO_BYTES:
         raise HTTPException(status_code=413, detail="Video must be 100MB or smaller.")
+    if len(transcript) > MAX_TRANSCRIPT_CHARS:
+        raise HTTPException(status_code=413, detail="Transcript is too long.")
+    purge_expired_jobs()
+    active = sum(1 for job in _jobs.values() if job["status"] not in TERMINAL_STATES)
+    if active >= MAX_ACTIVE_JOBS or len(_jobs) >= MAX_JOBS:
+        raise HTTPException(status_code=429, detail="Too many video analysis jobs; try again later.")
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         "id": job_id,
         "status": "queued",
-        "filename": file.filename,
-        "created_at": datetime.now(UTC).isoformat(),
+        "filename": Path(file.filename or "").name,
+        "created_at": _now().isoformat(),
     }
     background_tasks.add_task(_process, job_id, payload, suffix, transcript)
     return {"job_id": job_id, "status": "queued", "poll_url": f"/video-analysis/jobs/{job_id}"}
@@ -203,7 +249,23 @@ async def submit_video_analysis(
 
 @router.get("/jobs/{job_id}")
 async def get_video_analysis(job_id: str) -> dict[str, Any]:
+    purge_expired_jobs()
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Analysis job not found")
     return json.loads(json.dumps(job, default=str))
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_video_analysis(job_id: str) -> dict[str, Any]:
+    """Cancel a queued or processing job and drop any partial data (idempotent)."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Analysis job not found")
+    if job["status"] == "cancelled":
+        return {"job_id": job_id, "status": "cancelled"}
+    if job["status"] in TERMINAL_STATES:
+        raise HTTPException(status_code=409, detail=f"Job already {job['status']}.")
+    job.pop("result", None)
+    job.update(status="cancelled", finished_at=_now().isoformat())
+    return {"job_id": job_id, "status": "cancelled"}
