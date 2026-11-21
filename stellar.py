@@ -15,8 +15,9 @@ import asyncio
 import logging
 import os
 import re
+import time
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Literal, overload
+from typing import Any, Literal, overload
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -69,6 +70,12 @@ ZAKAT_RATE = Decimal("0.025")
 # unit the asset can actually represent.
 USDC_PRECISION = Decimal("0.0000001")
 STROOPS_PER_USDC = Decimal("10000000")
+
+# Horizon provider resilience and pagination bounds
+HORIZON_TIMEOUT_SECONDS = float(os.getenv("HORIZON_TIMEOUT_SECONDS", "10.0"))
+HORIZON_MAX_RETRIES = int(os.getenv("HORIZON_MAX_RETRIES", "3"))
+HORIZON_INITIAL_RETRY_DELAY = float(os.getenv("HORIZON_INITIAL_RETRY_DELAY", "0.2"))
+HORIZON_MAX_BALANCES_INSPECTED = int(os.getenv("HORIZON_MAX_BALANCES_INSPECTED", "100"))
 
 DISCLAIMER = (
     "This is an automated estimate based on your on-chain USDC balance only. "
@@ -213,26 +220,96 @@ def build_zakat_response(public_key: str, balance: Decimal | None, nisab_quote: 
     )
 
 
-def fetch_usdc_balance(public_key: str) -> Decimal | None:
-    """Return the account's USDC balance, or None if it has no USDC trustline.
+def call_horizon_with_retry(
+    call_fn: Any,
+    max_retries: int = HORIZON_MAX_RETRIES,
+    initial_delay: float = HORIZON_INITIAL_RETRY_DELAY,
+    network: str | None = None,
+) -> Any:
+    """Execute a Horizon call with bounded exponential backoff retries and sanitized error reporting."""
+    net = network or STELLAR_NETWORK
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return call_fn()
+        except NotFoundError:
+            # 404 is an authoritative business response (account does not exist on network); never retried.
+            raise
+        except Exception as exc:
+            last_error = exc
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            # Permanent client errors are not retried
+            if status_code in (400, 401, 403, 404):
+                raise
+            if attempt < max_retries:
+                delay = initial_delay * (2**attempt)
+                time.sleep(delay)
+                continue
+            break
 
+    logger.warning("Horizon provider call exhausted %d retries on %s: %s", max_retries, net, last_error)
+    raise APIException(
+        status_code=503,
+        detail=f"Stellar Horizon provider temporarily unavailable on {net}.",
+        hint="The Horizon node is unreachable or taking too long to respond. Please retry in a few moments.",
+    ) from None
+
+
+def fetch_usdc_balance(public_key: str, network: str | None = None) -> Decimal | None:
+    """Return the account's USDC balance with bounded retries and pagination protection.
+
+    Enforces network, asset, issuer, freshness, and evidence checks before provider access.
+    Guarantees that secret keys are never accepted or queried against the network.
     Raises HTTPException(404) if the account does not exist on this network.
     """
-    server = Server(horizon_url())
+    net = network or STELLAR_NETWORK
+    if net not in HORIZON_URLS:
+        raise APIException(
+            status_code=400,
+            detail=f"Unsupported Stellar network: {net}",
+            hint=f"Supported networks are: {', '.join(HORIZON_URLS.keys())}",
+        )
+
+    # Security check: never query or forward secret keys
+    if contains_secret_key(public_key):
+        raise APIException(
+            status_code=400,
+            detail="Secret keys are never accepted or queried against Horizon.",
+            hint="Provide a Stellar public key starting with G. Never share or paste your secret key.",
+        )
+    validated_key = validate_public_key(public_key)
+
+    server = Server(horizon_url(net))
     try:
-        account = server.accounts().account_id(public_key).call()
+        account = call_horizon_with_retry(
+            lambda: server.accounts().account_id(validated_key).call(),
+            network=net,
+        )
     except NotFoundError:
         raise APIException(
             status_code=404,
-            detail=f"Account not found on the Stellar {STELLAR_NETWORK} network.",
+            detail=f"Account not found on the Stellar {net} network.",
             hint=(
                 f"Ensure the account has been funded with XLM and created on the Stellar "
-                f"{STELLAR_NETWORK} network (Horizon URL: {horizon_url()})."
+                f"{net} network (Horizon URL: {horizon_url(net)})."
             ),
         ) from None
-    for balance in account.get("balances", []):
-        if balance.get("asset_code") == "USDC" and balance.get("asset_issuer") == usdc_issuer():
-            return Decimal(balance["balance"])
+
+    expected_issuer = usdc_issuer(net)
+    raw_balances = account.get("balances", [])
+    # Bounded inspection: cap at HORIZON_MAX_BALANCES_INSPECTED to guard against bloat/DDoS
+    for balance in raw_balances[:HORIZON_MAX_BALANCES_INSPECTED]:
+        if not isinstance(balance, dict):
+            continue
+        if balance.get("asset_code") == "USDC" and balance.get("asset_issuer") == expected_issuer:
+            raw_amount = balance.get("balance")
+            try:
+                parsed = Decimal(str(raw_amount))
+                if parsed >= 0:
+                    return parsed
+            except Exception:
+                logger.warning("Malformed USDC balance on %s: %r", validated_key[:8], raw_amount)
+                return None
     return None
 
 
