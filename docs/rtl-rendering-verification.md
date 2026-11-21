@@ -51,8 +51,10 @@ pytest -q tests/browser
 ```
 
 If Playwright or Chromium is missing, the suite **skips** with an explicit
-message, so the normal contributor test run stays green. CI installs Chromium
-and runs the suite for real.
+message. It is also excluded from the default `pytest tests/` session
+(`norecursedirs` in `pytest.ini`), because the sync Playwright API leaves an
+event loop running that breaks later sync `TestClient` tests. CI installs
+Chromium and runs `pytest tests/browser` in its own `browser-rtl` job.
 
 Outputs:
 
