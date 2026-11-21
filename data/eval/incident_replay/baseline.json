@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "owner": "AI quality & evaluation maintainers (Deen-Bridge/dnb-ai)",
+  "min_incidents": 5,
+  "min_pass_rate": 1.0,
+  "rollback": "Revert the commit that changed incidents.jsonl or this file; see docs/INCIDENT_REPLAY.md"
+}
