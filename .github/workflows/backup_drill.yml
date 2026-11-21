@@ -1,0 +1,105 @@
+name: Backup and Restore Drill
+
+on:
+  schedule:
+    # Run daily at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      sqlite_path:
+        description: "Path to SQLite feedback database (relative to repo root)"
+        required: false
+        default: "feedback.db"
+
+permissions:
+  contents: read
+
+jobs:
+  backup-and-restore-drill:
+    name: Backup verification and restore drill
+    runs-on: ubuntu-latest
+    env:
+      # REDIS_URL is provided as a repository secret; unset means Redis drill is skipped
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      FEEDBACK_DB_PATH: ${{ inputs.sqlite_path || 'feedback.db' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Create backup output directory
+        run: |
+          mkdir -p backups
+          chmod 700 backups
+
+      - name: Run backup script
+        # Never log REDIS_URL, passwords, or secrets - only redacted URLs appear in output
+        run: |
+          python -m scripts.backup_stores \
+            --sqlite-path "${FEEDBACK_DB_PATH}" \
+            --output-dir backups \
+            --json \
+            2>&1 | tee backups/backup-run.log
+        env:
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+
+      - name: Run restore drill
+        run: |
+          python -m scripts.restore_drill \
+            --backup-dir backups \
+            --json \
+            --output-report backups/restore-report.json \
+            2>&1 | tee backups/restore-drill.log
+        env:
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+
+      - name: Verify restore report status
+        run: |
+          python - <<'EOF'
+          import json, sys
+          with open("backups/restore-report.json") as f:
+              report = json.load(f)
+          status = report.get("status", "unknown")
+          failures = report.get("failures", [])
+          print(f"Restore drill status: {status}")
+          if failures:
+              print("Failures detected:")
+              for failure in failures:
+                  print(f"  - {failure}")
+          if status != "passed":
+              print("ALERT: Restore drill FAILED. Investigate backups immediately.")
+              sys.exit(1)
+          print("All stores verified successfully.")
+          EOF
+
+      - name: Upload backup and drill artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-restore-drill-${{ github.run_id }}
+          path: backups/
+          retention-days: 30
+
+      - name: Alert on failure
+        if: failure()
+        run: |
+          echo "::error::Backup or restore drill FAILED for run ${{ github.run_id }}."
+          echo "::error::Review the uploaded artifacts in 'backup-restore-drill-${{ github.run_id }}'."
+          echo "::error::Runbook: docs/BACKUP_AND_RESTORE.md"
+          echo "::error::Oncall: platform-oncall (see CODEOWNERS)"
+          echo ""
+          echo "Actionable steps:"
+          echo "  1. Download artifacts from the failed workflow run."
+          echo "  2. Inspect backups/restore-report.json for the failed store."
+          echo "  3. Run 'python -m scripts.restore_drill --backup-dir <dir> --json' locally."
+          echo "  4. Escalate to the runbook owner if the issue cannot be resolved."
+          exit 1
