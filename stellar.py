@@ -280,6 +280,19 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
             raise HTTPException(status_code=404, detail="Account not found on the Stellar testnet network.")
         return Decimal(os.getenv("MOCK_USDC_BALANCE", "100"))
 
+    from stellar_network_guard import validate_asset_issuer_pair_for_provider
+
+    is_valid_pair, pair_error = validate_asset_issuer_pair_for_provider(
+        network=STELLAR_NETWORK,
+        asset_code="USDC",
+        issuer=usdc_issuer(),
+    )
+    if not is_valid_pair:
+        raise APIException(
+            status_code=400,
+            detail=f"Invalid asset-issuer configuration for provider access: {pair_error}",
+        )
+
     server = Server(horizon_url())
     try:
         account = server.accounts().account_id(public_key).call()
@@ -318,6 +331,7 @@ async def stellar_info():
             "chat-purchases",
             "soroban-auth-explainer",
             "chat-soroban-auth",
+            "validate-asset-issuer-pair",
         ],
     }
 
