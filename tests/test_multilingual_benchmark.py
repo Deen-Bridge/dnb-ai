@@ -30,7 +30,7 @@ def make_items(count: int = 2) -> list[BenchmarkItem]:
     answers = {
         "en": "Tawhid means the oneness of Allah.",
         "ar": "التوحيد يعني إفراد الله بألٹابةن.",
-        "ur": "توحيد سْ مراد الله کی وحدانیت ہی۶",
+        "ur": "توحید سْ مراد الله کی وحدانیت ہی۶",
         "tr": "Tevhid, Allah'ın birliği demektir.",
         "ms": "Tauhid bermaksud keesaan Allah.",
         "fr": "Le tawhid désigne l'unicité d'Allah.",

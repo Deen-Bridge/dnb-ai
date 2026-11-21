@@ -8,9 +8,8 @@
 #   docker run --env-file .env -p 8000:8000 deenbridge-ai
 #   docker run -e GEMINI_API_KEY=... -p 8000:8000 deenbridge-ai
 #
-# Render: to switch from Python buildpack to Docker, change render.yaml:
-#   env: python  →  runtime: docker
-# and update buildCommand/startCommand to use this image.
+# Render: Production deployment uses this hardened container runtime (#880).
+# Configured via render.yaml using `runtime: docker` and `./Dockerfile`.
 # -----------------------------------------------
 
 FROM python:3.12-slim AS base

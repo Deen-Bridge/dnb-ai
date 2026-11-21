@@ -175,6 +175,37 @@ def capture_usage(
 
 
 # ---------------------------------------------------------------------------
+# Fallback decision capture (#884)
+# ---------------------------------------------------------------------------
+@dataclass
+class FallbackEvent:
+    """One fallback decision's telemetry. Contains no prompt, answer, or secret."""
+
+    provider: str
+    feature: str
+    reason: str
+    component: str
+    version: str = "1.0.0"
+    duration_ms: float = 0.0
+    risk_level: str = "medium"
+    trace_id: str = "-"
+    timestamp: float = field(default_factory=time.time)
+
+    def as_labels(self) -> dict[str, Any]:
+        """A content-free dict safe to log or expose in metrics."""
+        return {
+            "trace_id": self.trace_id,
+            "provider": self.provider,
+            "feature": self.feature,
+            "reason": self.reason,
+            "component": self.component,
+            "version": self.version,
+            "duration_ms": round(self.duration_ms, 2),
+            "risk_level": self.risk_level,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Spans / stage timing
 # ---------------------------------------------------------------------------
 @dataclass
@@ -267,6 +298,13 @@ class MetricsRegistry:
         self._handler_latencies: list[float] = []
         self._model_latencies: list[float] = []
         self._by_model: dict[str, dict[str, float]] = {}
+        # Fallback metrics (#884)
+        self.fallback_count = 0
+        self._fallbacks_by_provider: dict[str, int] = {}
+        self._fallbacks_by_feature: dict[str, int] = {}
+        self._fallbacks_by_reason: dict[str, int] = {}
+        self._fallbacks_by_provider_feature: dict[str, dict[str, int]] = {}
+        self._fallback_latencies: list[float] = []
 
     def record_call(self, call: LlmCall) -> None:
         with self._lock:
@@ -283,6 +321,18 @@ class MetricsRegistry:
             bucket["calls"] += 1
             bucket["total_tokens"] += call.total_tokens
             bucket["cost_usd"] = round(bucket["cost_usd"] + call.cost_usd, 8)
+
+    def record_fallback(self, event: FallbackEvent) -> None:
+        """Record one fallback event thread-safely."""
+        with self._lock:
+            self.fallback_count += 1
+            self._fallbacks_by_provider[event.provider] = self._fallbacks_by_provider.get(event.provider, 0) + 1
+            self._fallbacks_by_feature[event.feature] = self._fallbacks_by_feature.get(event.feature, 0) + 1
+            self._fallbacks_by_reason[event.reason] = self._fallbacks_by_reason.get(event.reason, 0) + 1
+            pf = self._fallbacks_by_provider_feature.setdefault(event.provider, {})
+            pf[event.feature] = pf.get(event.feature, 0) + 1
+            self._fallback_latencies.append(event.duration_ms)
+            self._trim(self._fallback_latencies)
 
     def record_request(self, handler_latency_ms: float, error: bool = False) -> None:
         with self._lock:
@@ -324,6 +374,20 @@ class MetricsRegistry:
                     }
                     for model, b in self._by_model.items()
                 },
+                "fallbacks": {
+                    "total": self.fallback_count,
+                    "rate": round(self.fallback_count / self.request_count, 4) if self.request_count else 0.0,
+                    "by_provider": dict(self._fallbacks_by_provider),
+                    "by_feature": dict(self._fallbacks_by_feature),
+                    "by_reason": dict(self._fallbacks_by_reason),
+                    "by_provider_feature": {
+                        prov: dict(feat) for prov, feat in self._fallbacks_by_provider_feature.items()
+                    },
+                    "latency_ms": {
+                        "p50": _percentile(self._fallback_latencies, 50),
+                        "p95": _percentile(self._fallback_latencies, 95),
+                    },
+                },
             }
 
     def reset(self) -> None:
@@ -341,6 +405,12 @@ class MetricsRegistry:
             self._handler_latencies.clear()
             self._model_latencies.clear()
             self._by_model.clear()
+            self.fallback_count = 0
+            self._fallbacks_by_provider.clear()
+            self._fallbacks_by_feature.clear()
+            self._fallbacks_by_reason.clear()
+            self._fallbacks_by_provider_feature.clear()
+            self._fallback_latencies.clear()
 
 
 # Process-wide registry the app records into and /metrics reads from.
@@ -373,3 +443,36 @@ def record_model_call(
     registry.record_call(call)
     logger.info("llm=%s", call.as_labels())
     return call
+
+
+def record_fallback_event(
+    provider: str,
+    feature: str,
+    reason: str,
+    component: str,
+    version: str = "1.0.0",
+    duration_ms: float = 0.0,
+    risk_level: str = "medium",
+    trace_id: str | None = None,
+) -> FallbackEvent:
+    """Capture one fallback decision, record it globally and in telemetry.
+
+    Prompt, answer, and secret text never enter this function, so it is impossible
+    for content to leak into metric labels or logs.
+    """
+    if trace_id is None:
+        tr = current_trace.get()
+        trace_id = tr.trace_id if tr is not None else "-"
+    event = FallbackEvent(
+        provider=provider,
+        feature=feature,
+        reason=reason,
+        component=component,
+        version=version,
+        duration_ms=duration_ms,
+        risk_level=risk_level,
+        trace_id=trace_id,
+    )
+    registry.record_fallback(event)
+    logger.info("fallback=%s", event.as_labels())
+    return event
