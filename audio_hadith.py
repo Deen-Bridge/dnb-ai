@@ -449,6 +449,11 @@ class VerifyResponse(BaseModel):
 
 def verify_transcript(transcript: str, language: str = "en") -> VerifyResponse:
     """Match a narration transcript against the corpus and assemble a verdict."""
+    from multimodal_budget import sanitize_multimodal_extracted_content
+
+    sanitized = sanitize_multimodal_extracted_content(transcript)
+    transcript = sanitized.sanitized_text
+
     candidates = find_matches(transcript)
     best = candidates[0] if candidates and candidates[0].score > 0 else None
     isnad = [NarratorInfo(name=n.name, bio=n.bio) for n in extract_isnad(transcript)]

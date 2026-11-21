@@ -681,7 +681,10 @@ def apply_post_processing(
     # Normalize line-final ta marbuta
     # Pattern: word ending in ة followed by space or end
     # This is a simplified heuristic - in production use dictionary lookup
-    return corrected_text, lines, corrections
+    from multimodal_budget import sanitize_multimodal_extracted_content
+
+    sanitized = sanitize_multimodal_extracted_content(corrected_text)
+    return sanitized.sanitized_text, lines, corrections
 
 
 def calculate_confidence_metrics(
