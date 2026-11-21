@@ -242,3 +242,144 @@ def override_quote(nisab_usd: Decimal) -> NisabQuote:
         source="caller-supplied override",
         note="This threshold was supplied in the request, not derived from a gold price.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Assumption validation — explicit, versioned, and testable
+# ---------------------------------------------------------------------------
+
+# The 85g-gold nisab is a scholarly consensus figure derived from the
+# classical silver-weight equivalent of 20 mithqal, and standardised across
+# contemporary fiqh councils (OIC, AAOIFI). The gram weight is a physical
+# constant, not an estimate.
+#
+# References (non-authoritative summaries; for authoritative rulings consult a
+# qualified scholar or institution):
+#   - IslamQA Q&A 65703 (Shaykh Ibn Baaz, standardised as 85 g)
+#   - AAOIFI Sharia Standard No. 35 (Zakat), clause 2/3
+#   - OIC Islamic Fiqh Academy resolution 3/2/5 (1986)
+#
+# Version of this record — increment when any constant changes.
+NISAB_ASSUMPTIONS_VERSION = "1.0.0"
+
+# Tolerance for floating-point comparison when validating derived values.
+# We use Decimal throughout, so the actual error should be zero; this guards
+# against future refactors that accidentally introduce float arithmetic.
+_VALIDATION_TOLERANCE = Decimal("0.01")
+
+# Known-good values derived from the constants above, used in
+# validate_nisab_assumptions() to catch accidental constant drift.
+_EXPECTED_GRAMS_PER_TROY_OUNCE = Decimal("31.1034768")
+_EXPECTED_NISAB_GOLD_GRAMS = Decimal("85")
+
+
+class NisabAssumptions(BaseModel):
+    """Versioned record of every constant that affects the nisab calculation.
+
+    This is returned by :func:`validate_nisab_assumptions` so that callers,
+    tests, and audit logs can pin exactly what the service assumed without
+    having to read source code.
+    """
+
+    version: str = Field(..., description="Monotone version of this assumption set")
+    nisab_gold_grams: str = Field(..., description="Classical 85 g gold weight used as nisab")
+    grams_per_troy_ounce: str = Field(..., description="NIST conversion factor (exact)")
+    nisab_in_troy_ounces: str = Field(
+        ..., description="85 g expressed in troy ounces (derived, not independently set)"
+    )
+    example_nisab_at_2000_usd_oz: str = Field(
+        ...,
+        description=(
+            "Nisab in USD when spot gold is exactly 2000 USD/troy oz — "
+            "a stable reference point for regression tests"
+        ),
+    )
+    example_nisab_at_3000_usd_oz: str = Field(
+        ...,
+        description="Nisab in USD when spot gold is exactly 3000 USD/troy oz",
+    )
+    basis: str = Field(
+        "85g gold (OIC/AAOIFI standard)",
+        description="Which classical nisab basis is implemented",
+    )
+    silver_basis_note: str = Field(
+        ...,
+        description="Explanation of why the gold standard is used rather than silver",
+    )
+    valid: bool = Field(..., description="True when all derived values match the expected constants")
+    errors: list[str] = Field(default_factory=list, description="Any inconsistencies found")
+
+
+def validate_nisab_assumptions() -> NisabAssumptions:
+    """Check every constant that affects the nisab and return a versioned record.
+
+    This is designed to be called at startup, in tests, and during audits.
+    It never raises — callers must inspect ``valid`` and ``errors`` themselves
+    so that a configuration problem is surfaced, not silenced.
+
+    The function is pure (no network, no cache) so it is safe to run offline.
+    """
+    errors: list[str] = []
+
+    # --- Constant integrity checks ----------------------------------------
+
+    if NISAB_GOLD_GRAMS != _EXPECTED_NISAB_GOLD_GRAMS:
+        errors.append(
+            f"NISAB_GOLD_GRAMS is {NISAB_GOLD_GRAMS!r}; expected {_EXPECTED_NISAB_GOLD_GRAMS!r}. "
+            "This constant encodes the OIC/AAOIFI-standardised 85 g fiqh ruling and must not be "
+            "changed without a corresponding scholarly reference and version bump."
+        )
+
+    if GRAMS_PER_TROY_OUNCE != _EXPECTED_GRAMS_PER_TROY_OUNCE:
+        errors.append(
+            f"GRAMS_PER_TROY_OUNCE is {GRAMS_PER_TROY_OUNCE!r}; expected {_EXPECTED_GRAMS_PER_TROY_OUNCE!r}. "
+            "This is a physical constant (NIST) and must not be changed."
+        )
+
+    # --- Derived-value spot checks ----------------------------------------
+
+    nisab_oz = NISAB_GOLD_GRAMS / GRAMS_PER_TROY_OUNCE
+
+    # At $2 000/oz: 85 / 31.1034768 * 2000 ≈ 5 464.78 USD
+    # Computed precisely with Decimal so there is no float error.
+    expected_at_2000 = nisab_from_ounce_price(Decimal("2000"))
+    expected_at_3000 = nisab_from_ounce_price(Decimal("3000"))
+
+    # Cross-check: nisab = (85 / 31.1034768) * price, quantized to cents.
+    manual_at_2000 = (Decimal("85") / Decimal("31.1034768") * Decimal("2000")).quantize(Decimal("0.01"))
+    if abs(expected_at_2000 - manual_at_2000) > _VALIDATION_TOLERANCE:
+        errors.append(
+            f"nisab_from_ounce_price(2000) = {expected_at_2000} but manual cross-check gives "
+            f"{manual_at_2000}. The formula has drifted."
+        )
+
+    manual_at_3000 = (Decimal("85") / Decimal("31.1034768") * Decimal("3000")).quantize(Decimal("0.01"))
+    if abs(expected_at_3000 - manual_at_3000) > _VALIDATION_TOLERANCE:
+        errors.append(
+            f"nisab_from_ounce_price(3000) = {expected_at_3000} but manual cross-check gives "
+            f"{manual_at_3000}. The formula has drifted."
+        )
+
+    # --- Plausibility bounds for the default --------------------------------
+
+    if not (MIN_PLAUSIBLE_OUNCE_USD <= DEFAULT_NISAB_USD <= MAX_PLAUSIBLE_OUNCE_USD * NISAB_GOLD_GRAMS / GRAMS_PER_TROY_OUNCE):
+        errors.append(
+            f"DEFAULT_NISAB_USD ({DEFAULT_NISAB_USD}) is outside a plausible nisab range. "
+            "Check the ZAKAT_NISAB_USD environment variable."
+        )
+
+    return NisabAssumptions(
+        version=NISAB_ASSUMPTIONS_VERSION,
+        nisab_gold_grams=str(NISAB_GOLD_GRAMS),
+        grams_per_troy_ounce=str(GRAMS_PER_TROY_OUNCE),
+        nisab_in_troy_ounces=str(nisab_oz.quantize(Decimal("0.0000001"))),
+        example_nisab_at_2000_usd_oz=str(expected_at_2000),
+        example_nisab_at_3000_usd_oz=str(expected_at_3000),
+        silver_basis_note=(
+            "Silver nisab (595 g) is not implemented here because contemporary fiqh councils "
+            "(OIC, AAOIFI) and many scholars use gold as the basis for cash/USDC wealth. "
+            "The two thresholds differ substantially; consulting a qualified scholar is essential."
+        ),
+        valid=len(errors) == 0,
+        errors=errors,
+    )
