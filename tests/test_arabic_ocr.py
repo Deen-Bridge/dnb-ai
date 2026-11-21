@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from arabic_ocr import (
+    MAX_IMAGE_BYTES,
+    BoundingBox,
     CalligraphyDetection,
     CalligraphyStyle,
     CharacterResult,
@@ -24,7 +26,9 @@ from arabic_ocr import (
     normalize_arabic,
     preprocess_manuscript_image,
     process_manuscript_page,
+    sniff_image_mime,
     strip_diacritics,
+    validate_image_payload,
 )
 from main import app
 
@@ -403,3 +407,271 @@ async def test_full_pipeline():
     assert len(result.image_hash) == 64  # SHA-256
     assert result.calligraphy is not None
     assert 0.0 <= result.confidence.overall <= 1.0
+
+
+class TestMultiLineAndDegradedInputCoverage:
+    """Expanded coverage for multi-line OCR, degraded regions, and error paths (#431)."""
+
+    def test_multiline_post_processing_and_confidence_aggregation(self):
+        lines = [
+            LineResult(
+                text="بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
+                words=[
+                    WordResult(
+                        text="بِسْمِ",
+                        confidence=0.92,
+                        characters=[
+                            CharacterResult(char="ب", confidence=0.95, is_diacritic=False),
+                            CharacterResult(char="ِ", confidence=0.82, is_diacritic=True),
+                        ],
+                        diacritic_count=1,
+                    ),
+                ],
+                confidence=0.92,
+            ),
+            LineResult(
+                text="الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ",
+                words=[
+                    WordResult(
+                        text="الْحَمْدُ",
+                        confidence=0.88,
+                        characters=[
+                            CharacterResult(char="ا", confidence=0.91, is_diacritic=False),
+                            CharacterResult(char="ْ", confidence=0.79, is_diacritic=True),
+                        ],
+                        diacritic_count=1,
+                    ),
+                ],
+                confidence=0.88,
+            ),
+        ]
+        raw_text = "\n".join(line.text for line in lines)
+        corrected_text, corrected_lines, corrections = apply_post_processing(raw_text, lines)
+        assert len(corrected_lines) == 2
+        assert "بِسْمِ" in corrected_text
+        assert isinstance(corrections, list)
+
+        clean_q = calculate_confidence_metrics(corrected_lines, damaged_regions=None)
+        damaged_q = calculate_confidence_metrics(
+            corrected_lines,
+            damaged_regions=[
+                BoundingBox(x=0, y=0, width=20, height=20),
+                BoundingBox(x=30, y=30, width=15, height=15),
+            ],
+        )
+        assert damaged_q.damaged_region_penalty == 0.1
+        assert damaged_q.overall < clean_q.overall
+
+    def test_word_confidence_diacritic_only_and_empty_lines_metrics(self):
+        diacritic_only = WordResult(
+            text="ِ",
+            confidence=0.9,
+            characters=[CharacterResult(char="ِ", confidence=0.9, is_diacritic=True)],
+            diacritic_count=1,
+        )
+        assert calculate_word_confidence(diacritic_only) == 0.5
+
+        empty_metrics = calculate_confidence_metrics([])
+        assert empty_metrics.overall == 0.0
+        assert empty_metrics.word_level == 0.0
+        assert empty_metrics.confidence_band == "low"
+        assert empty_metrics.review_required is True
+        assert empty_metrics.fallback_recommended is True
+
+
+class TestArabicOCRProductionContract:
+    """Production contract verification: input limits, consent, formats, fallback (#851)."""
+
+    VALID_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+    def test_consent_required_rejection_400(self):
+        """Requests without explicit user consent are rejected with 400."""
+        response = client.post(
+            "/arabic-ocr/process",
+            json={
+                "image_base64": self.VALID_PNG_B64,
+                "consent_to_process": False,
+            },
+        )
+        assert response.status_code == 400
+        assert "consent" in response.json()["detail"].lower()
+
+    def test_unsupported_format_rejected_415(self):
+        """Unsupported image types or arbitrary bytes are rejected with 415."""
+        fake_b64 = base64.b64encode(b"This is plain text, not an image").decode("utf-8")
+        response = client.post(
+            "/arabic-ocr/process",
+            json={"image_base64": fake_b64},
+        )
+        assert response.status_code == 415
+        assert "unsupported" in response.json()["detail"].lower()
+
+    def test_empty_image_payload_rejected_400(self):
+        """Empty base64 payload after decode is rejected with 400."""
+        empty_b64 = base64.b64encode(b"").decode("utf-8")
+        response = client.post(
+            "/arabic-ocr/process",
+            json={"image_base64": empty_b64},
+        )
+        assert response.status_code == 400
+        assert "empty" in response.json()["detail"].lower()
+
+    def test_oversize_image_rejected_413(self):
+        """Image bytes exceeding 10MB limit are rejected with 413."""
+        oversize_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * (MAX_IMAGE_BYTES + 100)
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            validate_image_payload(oversize_bytes, consent_to_process=True)
+        assert exc_info.value.status_code == 413
+
+    def test_valid_image_formats_sniffing(self):
+        """Magic byte sniffing correctly identifies PNG, JPEG, TIFF, and WebP."""
+        png_magic = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+        jpeg_magic = b"\xff\xd8\xff\xe0" + b"\x00" * 20
+        tiff_magic_le = b"II*\x00" + b"\x00" * 20
+        tiff_magic_be = b"MM\x00*" + b"\x00" * 20
+        webp_magic = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 20
+
+        assert sniff_image_mime(png_magic) == "image/png"
+        assert sniff_image_mime(jpeg_magic) == "image/jpeg"
+        assert sniff_image_mime(tiff_magic_le) == "image/tiff"
+        assert sniff_image_mime(tiff_magic_be) == "image/tiff"
+        assert sniff_image_mime(webp_magic) == "image/webp"
+        assert sniff_image_mime(b"BM" + b"\x00" * 20) is None
+
+    def test_confidence_bands_and_review_flags(self):
+        """Confidence bands are correctly assigned based on overall score."""
+        high_lines = [
+            LineResult(
+                text="الحمد لله",
+                words=[
+                    WordResult(
+                        text="الحمد",
+                        confidence=0.95,
+                        characters=[
+                            CharacterResult(char="ا", confidence=0.95, is_diacritic=False),
+                        ],
+                    )
+                ],
+                confidence=0.95,
+            )
+        ]
+        high_metrics = calculate_confidence_metrics(high_lines)
+        assert high_metrics.confidence_band == "high"
+        assert high_metrics.review_required is False
+        assert high_metrics.fallback_recommended is False
+
+        med_lines = [
+            LineResult(
+                text="الحمد لله",
+                words=[
+                    WordResult(
+                        text="الحمد",
+                        confidence=0.55,
+                        characters=[
+                            CharacterResult(char="ا", confidence=0.55, is_diacritic=False),
+                        ],
+                    )
+                ],
+                confidence=0.55,
+            )
+        ]
+        med_metrics = calculate_confidence_metrics(med_lines)
+        assert med_metrics.confidence_band == "medium"
+        assert med_metrics.review_required is True
+        assert med_metrics.fallback_recommended is False
+
+        low_lines = [
+            LineResult(
+                text="الحمد لله",
+                words=[
+                    WordResult(
+                        text="الحمد",
+                        confidence=0.15,
+                        characters=[
+                            CharacterResult(char="ا", confidence=0.15, is_diacritic=False),
+                        ],
+                    )
+                ],
+                confidence=0.15,
+            )
+        ]
+        low_metrics = calculate_confidence_metrics(low_lines)
+        assert low_metrics.confidence_band == "low"
+        assert low_metrics.review_required is True
+        assert low_metrics.fallback_recommended is True
+
+    @pytest.mark.asyncio
+    async def test_safe_fallback_on_degraded_manuscript(self, monkeypatch):
+        """When confidence is low, safe fallback mode is engaged with actionable warnings."""
+
+        async def mock_call_ocr(*args, **kwargs):
+            return "نص مشوش", [
+                LineResult(
+                    text="نص مشوش",
+                    words=[
+                        WordResult(
+                            text="مشوش",
+                            confidence=0.20,
+                            characters=[
+                                CharacterResult(char="م", confidence=0.20, is_diacritic=False),
+                            ],
+                        )
+                    ],
+                    confidence=0.20,
+                )
+            ]
+
+        import arabic_ocr
+
+        monkeypatch.setattr(arabic_ocr, "call_ocr_engine", mock_call_ocr)
+
+        image_data = base64.b64decode(self.VALID_PNG_B64)
+        result = await process_manuscript_page(image_data=image_data, detect_style=False)
+
+        assert result.fallback_mode is True
+        assert result.fallback_reason is not None
+        assert "Safe fallback engaged" in result.fallback_reason
+        assert result.confidence.confidence_band == "low"
+        assert result.retention_policy == "ephemeral_in_memory_only"
+
+    def test_ephemeral_retention_policy_in_response(self):
+        """Endpoint responses guarantee ephemeral in-memory processing only."""
+        response = client.post(
+            "/arabic-ocr/process",
+            json={"image_base64": self.VALID_PNG_B64},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["retention_policy"] == "ephemeral_in_memory_only"
+        assert data["detected_mime"] == "image/png"
+        assert "fallback_mode" in data
+
+    def test_multipart_file_upload_contract(self):
+        """Multipart upload endpoint validates consent and mime types."""
+        png_bytes = base64.b64decode(self.VALID_PNG_B64)
+        response = client.post(
+            "/arabic-ocr/process-file",
+            files={"file": ("page.png", png_bytes, "image/png")},
+            data={"consent_to_process": "true"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["detected_mime"] == "image/png"
+        assert data["retention_policy"] == "ephemeral_in_memory_only"
+
+        response_no_consent = client.post(
+            "/arabic-ocr/process-file",
+            files={"file": ("page.png", png_bytes, "image/png")},
+            data={"consent_to_process": "false"},
+        )
+        assert response_no_consent.status_code == 400
+        assert "consent" in response_no_consent.json()["detail"].lower()
+
+        response_bad_type = client.post(
+            "/arabic-ocr/process-file",
+            files={"file": ("test.txt", b"plain text", "text/plain")},
+            data={"consent_to_process": "true"},
+        )
+        assert response_bad_type.status_code == 415

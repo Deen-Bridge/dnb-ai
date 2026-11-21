@@ -36,15 +36,79 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/arabic-ocr", tags=["arabic-ocr"])
+
+# ---------------------------------------------------------------------------
+# Constants & Validation
+# ---------------------------------------------------------------------------
+
+MAX_IMAGE_BYTES: int = 10 * 1024 * 1024  # 10MB limit
+MAX_BASE64_LENGTH: int = 15_000_000  # Cap base64 string length (~10.7MB payload)
+RETENTION_POLICY: str = "ephemeral_in_memory_only"
+
+SUPPORTED_MIME_TYPES: dict[str, str] = {
+    "image/png": "PNG",
+    "image/jpeg": "JPEG",
+    "image/tiff": "TIFF",
+    "image/webp": "WEBP",
+}
+
+
+def sniff_image_mime(data: bytes) -> str | None:
+    """Sniff image mime type from magic bytes."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"II*\x00") or data.startswith(b"MM\x00*"):
+        return "image/tiff"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def validate_image_payload(image_bytes: bytes, consent_to_process: bool = True) -> str:
+    """Validate image payload for consent, length, and magic bytes.
+
+    Raises:
+        HTTPException(400): If consent is missing or payload is empty.
+        HTTPException(413): If payload exceeds MAX_IMAGE_BYTES.
+        HTTPException(415): If format is unsupported.
+    """
+    if not consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="User consent is required to process manuscript imagery.",
+        )
+
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Image payload cannot be empty.")
+
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {MAX_IMAGE_BYTES // (1024 * 1024)}MB size limit.",
+        )
+
+    mime = sniff_image_mime(image_bytes)
+    if mime is None:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported image format. Only JPEG, PNG, TIFF, and WebP are supported.",
+        )
+
+    return mime
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +391,18 @@ class OCRConfidenceMetrics(BaseModel):
         le=1.0,
         description="Confidence reduction due to damaged regions.",
     )
+    confidence_band: str = Field(
+        default="high",
+        description="Confidence classification: 'high' (>=0.70), 'medium' (0.40-0.69), or 'low' (<0.40).",
+    )
+    review_required: bool = Field(
+        default=False,
+        description="True if manual scholar or paleographer review is recommended.",
+    )
+    fallback_recommended: bool = Field(
+        default=False,
+        description="True if transcription falls below minimum confidence threshold.",
+    )
 
 
 class OCRResult(BaseModel):
@@ -344,6 +420,22 @@ class OCRResult(BaseModel):
     corrections_applied: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     image_hash: str = Field(..., description="SHA-256 hash of input image.")
+    fallback_mode: bool = Field(
+        default=False,
+        description="Indicates whether safe fallback behavior was triggered.",
+    )
+    fallback_reason: str | None = Field(
+        default=None,
+        description="Reason for safe fallback activation, if applicable.",
+    )
+    retention_policy: str = Field(
+        default="ephemeral_in_memory_only",
+        description="Data retention policy governing manuscript processing.",
+    )
+    detected_mime: str | None = Field(
+        default=None,
+        description="MIME type detected from image magic bytes.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -698,6 +790,9 @@ def calculate_confidence_metrics(
             character_level=0.0,
             word_level=0.0,
             diacritic_confidence=0.0,
+            confidence_band="low",
+            review_required=True,
+            fallback_recommended=True,
         )
 
     # Collect all confidence scores
@@ -732,12 +827,26 @@ def calculate_confidence_metrics(
     # Overall weighted average
     overall = (char_avg * 0.5 + word_avg * 0.3 + diacritic_avg * 0.2) * (1 - damage_penalty)
 
+    # Confidence band calculation
+    if overall >= 0.70:
+        band = "high"
+    elif overall >= 0.40:
+        band = "medium"
+    else:
+        band = "low"
+
+    review_required = overall < 0.70 or diacritic_avg < 0.60 or damage_penalty >= 0.10
+    fallback_recommended = overall < 0.40 or damage_penalty >= 0.25
+
     return OCRConfidenceMetrics(
         overall=round(overall, 3),
         character_level=round(char_avg, 3),
         word_level=round(word_avg, 3),
         diacritic_confidence=round(diacritic_avg, 3),
         damaged_region_penalty=round(damage_penalty, 3),
+        confidence_band=band,
+        review_required=review_required,
+        fallback_recommended=fallback_recommended,
     )
 
 
@@ -751,6 +860,7 @@ async def process_manuscript_page(
     preprocessing_config: PreprocessingConfig | None = None,
     ocr_config: OCREngineConfig | None = None,
     detect_style: bool = True,
+    detected_mime: str | None = None,
 ) -> OCRResult:
     """Full OCR pipeline for an Islamic manuscript page.
 
@@ -759,12 +869,14 @@ async def process_manuscript_page(
     3. Run OCR with style-optimized settings
     4. Post-process for Arabic-specific corrections
     5. Calculate confidence metrics
+    6. Evaluate fallback thresholds
 
     Args:
-        image_data: Raw image bytes (PNG, JPEG, TIFF, etc.)
+        image_data: Raw image bytes (PNG, JPEG, TIFF, WebP).
         preprocessing_config: Image preprocessing settings.
         ocr_config: OCR engine configuration.
         detect_style: Whether to run calligraphy detection.
+        detected_mime: Optional detected MIME type.
 
     Returns:
         Complete OCRResult with text, confidence, and metadata.
@@ -803,14 +915,30 @@ async def process_manuscript_page(
     # Generate normalized version
     text_normalized = normalize_arabic(corrected_text)
 
-    if confidence.overall < 0.7:
-        warnings.append(f"Overall OCR confidence is low ({confidence.overall:.0%}). Manual review recommended.")
+    # Step 6: Fallback and review evaluation
+    fallback_mode = False
+    fallback_reason = None
+
+    if confidence.fallback_recommended or confidence.overall < 0.40:
+        fallback_mode = True
+        fallback_reason = (
+            f"Overall OCR confidence is low ({confidence.overall:.0%}). "
+            "Safe fallback engaged: automated transcription should be treated as tentative draft only."
+        )
+        warnings.append(fallback_reason)
+    elif confidence.overall < 0.7:
+        warnings.append(f"Overall OCR confidence is moderate ({confidence.overall:.0%}). Manual review recommended.")
 
     if confidence.diacritic_confidence < 0.6:
         warnings.append(
             f"Diacritical mark confidence is low ({confidence.diacritic_confidence:.0%}). "
             "Vowel markings may be inaccurate."
         )
+
+    if not corrected_text.strip():
+        fallback_mode = True
+        fallback_reason = "No legible Arabic text detected in manuscript image."
+        warnings.append(fallback_reason)
 
     return OCRResult(
         text=corrected_text,
@@ -822,6 +950,10 @@ async def process_manuscript_page(
         corrections_applied=corrections,
         warnings=warnings,
         image_hash=image_hash,
+        fallback_mode=fallback_mode,
+        fallback_reason=fallback_reason,
+        retention_policy=RETENTION_POLICY,
+        detected_mime=detected_mime,
     )
 
 
@@ -833,7 +965,12 @@ async def process_manuscript_page(
 class OCRRequest(BaseModel):
     """Request body for OCR endpoint (base64 image)."""
 
-    image_base64: str = Field(..., description="Base64-encoded image data.")
+    image_base64: str = Field(..., max_length=MAX_BASE64_LENGTH, description="Base64-encoded image data.")
+
+    consent_to_process: bool = Field(
+        default=True,
+        description="Explicit user consent to process the uploaded manuscript imagery.",
+    )
 
     preprocessing: PreprocessingConfig = Field(
         default_factory=PreprocessingConfig,
@@ -867,7 +1004,11 @@ class OCRRequest(BaseModel):
 class StyleDetectionRequest(BaseModel):
     """Request for standalone calligraphy style detection."""
 
-    image_base64: str
+    image_base64: str = Field(..., max_length=MAX_BASE64_LENGTH)
+    consent_to_process: bool = Field(
+        default=True,
+        description="Explicit user consent to process the uploaded manuscript imagery.",
+    )
     text_sample: str | None = Field(
         default=None,
         description="Optional OCR'd text to aid detection.",
@@ -877,7 +1018,11 @@ class StyleDetectionRequest(BaseModel):
 class PreprocessingRequest(BaseModel):
     """Request for standalone image preprocessing."""
 
-    image_base64: str
+    image_base64: str = Field(..., max_length=MAX_BASE64_LENGTH)
+    consent_to_process: bool = Field(
+        default=True,
+        description="Explicit user consent to process the uploaded manuscript imagery.",
+    )
     config: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
 
 
@@ -906,12 +1051,14 @@ async def process_page(request: OCRRequest) -> OCRResult:
     """
     # Decode image
     image_data = base64.b64decode(request.image_base64)
+    mime = validate_image_payload(image_data, request.consent_to_process)
 
     result = await process_manuscript_page(
         image_data=image_data,
         preprocessing_config=request.preprocessing,
         ocr_config=request.ocr_engine,
         detect_style=request.detect_calligraphy,
+        detected_mime=mime,
     )
 
     return result
@@ -919,15 +1066,22 @@ async def process_page(request: OCRRequest) -> OCRResult:
 
 @router.post("/process-file", response_model=OCRResult)
 async def process_file(
-    file: UploadFile = File(..., description="Image file (PNG, JPEG, TIFF)"),
+    file: UploadFile = File(..., description="Image file (PNG, JPEG, TIFF, WebP)"),
     preprocessing_profile: PreprocessingProfile = Form(default=PreprocessingProfile.AGED),
     detect_calligraphy: bool = Form(default=True),
+    consent_to_process: bool = Form(default=True),
 ) -> OCRResult:
     """Process an uploaded manuscript image file.
 
     Alternative to /process that accepts multipart file upload instead of base64.
     """
-    contents = await file.read()
+    contents = await file.read(MAX_IMAGE_BYTES + 1)
+    if len(contents) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {MAX_IMAGE_BYTES // (1024 * 1024)}MB size limit.",
+        )
+    mime = validate_image_payload(contents, consent_to_process)
 
     config = PreprocessingConfig(profile=preprocessing_profile)
 
@@ -935,6 +1089,7 @@ async def process_file(
         image_data=contents,
         preprocessing_config=config,
         detect_style=detect_calligraphy,
+        detected_mime=mime,
     )
 
     return result
@@ -948,6 +1103,7 @@ async def detect_style(request: StyleDetectionRequest) -> CalligraphyDetection:
     or to classify manuscripts for cataloging purposes.
     """
     image_data = base64.b64decode(request.image_base64)
+    validate_image_payload(image_data, request.consent_to_process)
     return detect_calligraphy_style(image_data, request.text_sample)
 
 
@@ -961,6 +1117,7 @@ async def preprocess(request: PreprocessingRequest) -> PreprocessingResponse:
     - Batch preprocessing before OCR
     """
     image_data = base64.b64decode(request.image_base64)
+    validate_image_payload(image_data, request.consent_to_process)
     processed, operations = preprocess_manuscript_image(image_data, request.config)
 
     return PreprocessingResponse(
