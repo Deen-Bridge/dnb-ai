@@ -393,11 +393,14 @@ def analyze_page(page: PageInput) -> PageAnalysisResponse:
         element_type = classify_block(block, page, median_font, index in referenced_blocks)
         if element_type == ElementType.BODY_TEXT and _is_side_column(block, page, columns):
             element_type = ElementType.COMMENTARY
+        from multimodal_budget import sanitize_multimodal_extracted_content
+
+        clean_block_text = sanitize_multimodal_extracted_content((block.text or "").strip()).sanitized_text
         elements.append(
             ClassifiedElement(
                 block_index=index,
                 element_type=element_type,
-                text=(block.text or "").strip(),
+                text=clean_block_text,
                 reading_order=position_in_reading.get(index, 0),
                 column=column_of.get(index, 0),
             )
