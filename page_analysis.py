@@ -6,14 +6,14 @@ A scanned page of a classical Islamic work is not a flat stream of words. It is
 a layout: a heading, a body of main text, a band of footnotes at the foot of the
 page, marginal commentary (hashiya), and citations to the Qur'an and hadith
 threaded through all of it. An OCR engine reads the glyphs but throws that
-structure away — it hands back a bag of text blocks with pixel coordinates and
+structure away - it hands back a bag of text blocks with pixel coordinates and
 no notion of which block is a heading, which is a footnote, or what order a
 human reads them in. This module rebuilds that structure.
 
 Why structured input rather than pixels
 ---------------------------------------
-It deliberately operates on the *output* of an OCR/layout engine — a list of
-positioned text blocks — not on raw image pixels. That keeps the whole thing
+It deliberately operates on the *output* of an OCR/layout engine - a list of
+positioned text blocks - not on raw image pixels. That keeps the whole thing
 deterministic and dependency-free: no OpenCV, no ML model, no image decoding.
 Everything here is geometry and text heuristics over ``PageInput``, so it runs
 in the same lightweight FastAPI process as the rest of the service and is fully
@@ -27,9 +27,9 @@ analyzer returns, for the page:
 * an **element classification** for every block (heading, body text, footnote,
   commentary, reference citation, or decorative), from font size, vertical
   position, centering, and text-pattern heuristics;
-* a **reading order** that respects multi-column layout — columns are detected
-  by clustering block x-positions — and Arabic right-to-left column ordering;
-* **references** — Qur'an ``surah:ayah`` citations and hadith-source mentions —
+* a **reading order** that respects multi-column layout - columns are detected
+  by clustering block x-positions - and Arabic right-to-left column ordering;
+* **references** - Qur'an ``surah:ayah`` citations and hadith-source mentions -
   extracted and linked back to the block they came from;
 * a **semantic structure**: the ordered blocks grouped into regions by role
   (main text, footnotes, commentary, references), the "semantically structured
@@ -47,8 +47,8 @@ geometry must be finite numbers.
 
 Reuse
 -----
-Reference extraction mirrors the conventions of ``citations.py`` — the same
-notion of typed Qur'an and hadith references — but works on positioned OCR text
+Reference extraction mirrors the conventions of ``citations.py`` - the same
+notion of typed Qur'an and hadith references - but works on positioned OCR text
 rather than a model's delimited citation block, so the two do not share code.
 """
 
@@ -58,14 +58,15 @@ import re
 from enum import Enum
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from media_upload_limits import MAX_PAGE_BLOCKS, MAX_PAGE_DIMENSION
 from untrusted_content import UntrustedContentInfo, describe_untrusted
 
 router = APIRouter(prefix="/page-analysis", tags=["page-analysis"])
 
-MAX_BLOCKS = 2_000
+MAX_BLOCKS = MAX_PAGE_BLOCKS  # 5000, shared with the upload limits from #853
 MAX_BLOCK_TEXT_CHARS = 10_000
 MAX_PAGE_TEXT_CHARS = 200_000
 
@@ -123,10 +124,13 @@ class PageInput(BaseModel):
 
     model_config = ConfigDict(allow_inf_nan=False)
 
-    width: float = Field(..., gt=0)
-    height: float = Field(..., gt=0)
-    blocks: list[PageBlock] = Field(default_factory=list, max_length=MAX_BLOCKS)
+    width: float = Field(..., gt=0, le=MAX_PAGE_DIMENSION, description="Page width in units (max 20000).")
+    height: float = Field(..., gt=0, le=MAX_PAGE_DIMENSION, description="Page height in units (max 20000).")
+    blocks: list[PageBlock] = Field(
+        default_factory=list, max_length=MAX_BLOCKS, description="Blocks on page (max 5000)."
+    )
     rtl: bool = True
+    consent_to_process: bool = Field(True, description="Explicit user consent to process.")
 
     @model_validator(mode="after")
     def bounded_text(self) -> PageInput:
@@ -212,7 +216,7 @@ class ElementTypeInfo(BaseModel):
 # Reference extraction
 # ---------------------------------------------------------------------------
 
-# "2:153", "Surah 2:153", "Q 2:255-256" — a colon-separated surah/ayah pair,
+# "2:153", "Surah 2:153", "Q 2:255-256" - a colon-separated surah/ayah pair,
 # optionally with a range end that we keep only as the matched text.
 _QURAN_PATTERN = re.compile(
     r"\b(?:Q(?:ur[’']?an)?\.?\s*|S(?:urah|ura|urat)?\.?\s*)?"
@@ -244,7 +248,7 @@ def extract_references(blocks: list[PageBlock]) -> list[ExtractedReference]:
     """Pull Qur'an and hadith references out of every block, linked to its index.
 
     Never raises: a block whose text matches nothing simply contributes no
-    references. Order is stable — blocks in input order, matches left to right.
+    references. Order is stable - blocks in input order, matches left to right.
     """
     references: list[ExtractedReference] = []
     for index, block in enumerate(blocks):
@@ -511,6 +515,16 @@ async def analyze(page: PageInput) -> PageAnalysisResponse:
     Returns per-block classification, a layout-aware reading order, extracted
     Qur'an and hadith references, and a semantically structured page.
     """
+    if not page.consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
+    if len(page.blocks) > 5000:
+        raise HTTPException(
+            status_code=413,
+            detail="Page contains too many blocks. Maximum allowed is 5000.",
+        )
     return analyze_page(page)
 
 

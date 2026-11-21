@@ -9,7 +9,7 @@ service's own processing is measured. Prints a Markdown table.
 Timings depend on the machine; record the environment with the numbers. Every
 path here is deterministic and makes no paid provider call, so the provider
 cost of each request is $0. Media decoding, ASR and OCR run on the worker's CPU
-and are bounded by VIDEO_MAX_DURATION_SECONDS and VIDEO_MAX_FRAMES, not
+and are bounded by MAX_VIDEO_DURATION_SECONDS (#853) and VIDEO_MAX_FRAMES, not
 measured here.
 """
 

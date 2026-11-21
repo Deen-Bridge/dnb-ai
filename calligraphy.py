@@ -12,13 +12,13 @@ encodable piece of domain knowledge.
 
 Why traits rather than pixels
 -----------------------------
-The issue frames this as a vision/OCR problem — recognize a script from an
+The issue frames this as a vision/OCR problem - recognize a script from an
 image of it. This module deliberately does **not** pretend to be a trained
 vision model. It has no model, no OpenCV, no image decoding, and pulls in no
 heavy dependency: it is pure Python over the standard library plus the
 ``pydantic`` and ``fastapi`` the service already ships.
 
-Instead it operates on a small vector of *measurable style signals* — the kind
+Instead it operates on a small vector of *measurable style signals* - the kind
 of features a real upstream layout/vision stage would emit (angularity, stroke
 contrast, curvature, diacritic density, geometric regularity, elongation,
 slant, letter stacking). Over those signals it runs a transparent, deterministic
@@ -29,12 +29,12 @@ rule-based *estimate*, not a trained recognizer, and every response says so.
 
 What it produces
 ----------------
-* ``GET /calligraphy/styles`` — the catalog of known hands with their era and
+* ``GET /calligraphy/styles`` - the catalog of known hands with their era and
   descriptive characteristics.
-* ``GET /calligraphy/styles/{style}`` — detail for one hand (404 on unknown).
-* ``POST /calligraphy/classify`` — rank the catalog against a supplied trait
+* ``GET /calligraphy/styles/{style}`` - detail for one hand (404 on unknown).
+* ``POST /calligraphy/classify`` - rank the catalog against a supplied trait
   vector and return per-style confidence scores plus an ``ambiguous`` flag.
-* ``POST /calligraphy/analyze`` — the classification plus human-readable notes
+* ``POST /calligraphy/analyze`` - the classification plus human-readable notes
   on the embellishment/legibility trade-off and a text-reconstruction hint.
 """
 
@@ -85,7 +85,7 @@ class StyleProfile(BaseModel):
     ``ideal`` maps each name in :data:`TRAIT_NAMES` to the value a textbook
     specimen of this hand would show. Classification scores an input by its
     distance from these ideals, so the profile is both documentation and the
-    model itself — there is nothing hidden.
+    model itself - there is nothing hidden.
     """
 
     name: StyleName
@@ -278,6 +278,7 @@ class TraitVector(BaseModel):
     elongation: float = Field(0.5, ge=0.0, le=1.0, description="Horizontal stretching of letters.")
     slant: float = Field(0.5, ge=0.0, le=1.0, description="Upward/descending slope of the baseline.")
     letter_stacking: float = Field(0.5, ge=0.0, le=1.0, description="Crowding and overlap of letters.")
+    consent_to_process: bool = Field(True, description="Explicit user consent to process.")
 
     def as_dict(self) -> dict[str, float]:
         """Return the trait values keyed by :data:`TRAIT_NAMES`, in that order."""
@@ -517,10 +518,20 @@ async def classify_route(traits: TraitVector) -> ClassificationResponse:
     and an ``ambiguous`` flag set when the top two hands are within the margin.
     The result is a deterministic heuristic estimate, not a trained model.
     """
+    if not traits.consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
     return classify(traits)
 
 
-@router.post("/analyze", response_model=AnalysisResponse)
+@router.post("/estimate", response_model=AnalysisResponse)
 async def analyze_route(traits: TraitVector) -> AnalysisResponse:
     """Classify a specimen and add legibility, embellishment, and OCR-hint notes."""
+    if not traits.consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
     return analyze(traits)

@@ -34,10 +34,57 @@ class RegressionRunner:
         with open(self.baseline_path, encoding="utf-8") as f:
             return json.load(f)
 
-    def save_baseline(self, results: dict[str, Any]) -> None:
+    @property
+    def previous_baseline_path(self) -> Path:
+        return self.baseline_path.with_suffix(self.baseline_path.suffix + ".prev")
+
+    def save_baseline(
+        self,
+        results: dict[str, Any],
+        *,
+        owner: str | None = None,
+        version: str | None = None,
+        rollback_plan: str | None = None,
+        model_id: str | None = None,
+        prompt_version: str | None = None,
+    ) -> None:
+        """Save a baseline, keeping the prior one so it can be rolled back.
+
+        When any of owner/version/rollback_plan is given, a ``metadata`` block is
+        recorded (all three are then required).
+        """
+        data = dict(results)
+        if any((owner, version, rollback_plan)):
+            missing = [k for k, v in (("owner", owner), ("version", version), ("rollback_plan", rollback_plan)) if not v]
+            if missing:
+                raise ValueError(f"baseline metadata missing: {', '.join(missing)}")
+            data["metadata"] = {
+                "owner": owner,
+                "version": version,
+                "rollback_plan": rollback_plan,
+                "model_id": model_id,
+                "prompt_version": prompt_version,
+            }
         self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.baseline_path.exists():
+            self.previous_baseline_path.write_bytes(self.baseline_path.read_bytes())
         with open(self.baseline_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def rollback_baseline(self) -> bool:
+        """Restore the previous baseline. Returns False if none is available."""
+        if not self.previous_baseline_path.exists():
+            return False
+        self.baseline_path.write_bytes(self.previous_baseline_path.read_bytes())
+        return True
+
+    def baseline_metadata_errors(self) -> list[str]:
+        """Return problems with the baseline's owner/version/rollback metadata."""
+        baseline = self.load_baseline()
+        if baseline is None:
+            return ["baseline file missing"]
+        meta = baseline.get("metadata") or {}
+        return [f"metadata.{k} missing" for k in ("owner", "version", "rollback_plan") if not meta.get(k)]
 
     def evaluate_model_output(self, record: dict[str, Any], answer: str) -> dict[str, Any]:
         from scripts.eval_islamic_qa import evaluate_single_response
@@ -95,7 +142,13 @@ class RegressionRunner:
         }
         return summary
 
-    def compare_with_baseline(self, current_results: dict[str, Any], tolerance: float = 0.02) -> dict[str, Any]:
+    def compare_with_baseline(
+        self,
+        current_results: dict[str, Any],
+        tolerance: float = 0.02,
+        domain_tolerance: float | None = None,
+        pass_rate_tolerance: float | None = None,
+    ) -> dict[str, Any]:
         baseline = self.load_baseline()
         if not baseline:
             return {
@@ -117,6 +170,21 @@ class RegressionRunner:
             base_val = base_domains.get(d, curr_val)
             domain_diffs[d] = round(curr_val - base_val, 4)
 
+        reasons: list[str] = []
+        if degraded:
+            reasons.append(f"mean score {curr_score} < baseline {base_score} - {tolerance}")
+        if domain_tolerance is not None:
+            for d, delta in domain_diffs.items():
+                if delta < -domain_tolerance:
+                    degraded = True
+                    reasons.append(f"domain {d} dropped by {-delta:.4f}")
+        if pass_rate_tolerance is not None:
+            base_pr = baseline.get("pass_rate", 0.0)
+            curr_pr = current_results.get("pass_rate", 0.0)
+            if curr_pr - base_pr < -pass_rate_tolerance:
+                degraded = True
+                reasons.append(f"pass_rate {curr_pr} < baseline {base_pr} - {pass_rate_tolerance}")
+
         return {
             "has_baseline": True,
             "baseline_score": base_score,
@@ -125,5 +193,10 @@ class RegressionRunner:
             "degraded": degraded,
             "tolerance": tolerance,
             "domain_differences": domain_diffs,
-            "alert": "REGRESSION DETECTED: Performance dropped below baseline tolerance." if degraded else "OK",
+            "reasons": reasons,
+            "alert": (
+                "REGRESSION DETECTED: Performance dropped below baseline tolerance. " + "; ".join(reasons)
+                if degraded
+                else "OK"
+            ),
         }

@@ -256,6 +256,68 @@ class TestThematicRetriever:
         assert summary is None
 
 
+class TestDatasetVersioning:
+    """Versioned data, provenance and failure states for the mapping store."""
+
+    def _write(self, tmp_path, mappings, manifest=None):
+        import json
+
+        data = tmp_path / "tv.json"
+        data.write_text(json.dumps({"mappings": mappings}, ensure_ascii=False), encoding="utf-8")
+        if manifest is not None:
+            (tmp_path / "tv.meta.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return str(data)
+
+    def test_manifest_and_hash_loaded(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            [{"surah": 2, "ayah": 255, "theme_id": "tawhid", "annotation": "آية الكرسي"}],
+            {"dataset_version": "9.9.9", "schema_version": 1, "source": "test"},
+        )
+        info = ThemeVerseStore(data_file=path).dataset_info()
+        assert info["dataset_version"] == "9.9.9"
+        assert info["mapping_count"] == 1
+        assert len(info["content_sha256"]) == 64
+        assert info["uncertainty_note"]
+
+    def test_missing_manifest_is_unversioned(self, tmp_path):
+        path = self._write(tmp_path, [{"surah": 1, "ayah": 1, "theme_id": "tawhid"}])
+        assert ThemeVerseStore(data_file=path).dataset_info()["dataset_version"] == "unversioned"
+
+    def test_invalid_records_skipped(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            [
+                {"surah": 2, "ayah": 255, "theme_id": "tawhid"},
+                {"surah": 115, "ayah": 1, "theme_id": "tawhid"},
+                {"surah": 1, "ayah": 1, "theme_id": "tawhid", "relevance_score": 3},
+                {"surah": "x", "ayah": 1, "theme_id": "tawhid"},
+                "garbage",
+            ],
+        )
+        store = ThemeVerseStore(data_file=path)
+        info = store.dataset_info()
+        assert info["mapping_count"] == 1
+        assert info["skipped_invalid"] == 4
+
+    def test_missing_data_file_is_empty(self, tmp_path):
+        store = ThemeVerseStore(data_file=str(tmp_path / "absent.json"))
+        info = store.dataset_info()
+        assert info["mapping_count"] == 0
+        assert info["content_sha256"] is None
+
+    def test_browse_theme_includes_provenance_when_empty(self, tmp_path):
+        store = ThemeVerseStore(data_file=str(tmp_path / "absent.json"))
+        result = ThematicRetriever(ThematicTaxonomy(), store).browse_theme("tawhid")
+        assert result["verses"] == []
+        assert result["provenance"]["uncertainty_note"]
+
+    def test_bundled_dataset_is_versioned(self):
+        info = ThemeVerseStore().dataset_info()
+        assert info["dataset_version"] != "unversioned"
+        assert info["skipped_invalid"] == 0
+
+
 class TestRevelationPeriod:
     """Tests for RevelationPeriod enum."""
 

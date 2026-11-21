@@ -13,12 +13,12 @@ All OCR/ASR/ffmpeg behaviour is faked; nothing here needs a network or a key.
 from __future__ import annotations
 
 import ast
+import asyncio
 import logging
 import math
 import subprocess
 import tempfile
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+import media_upload_limits
 import video_analysis as va
 from audio_hadith import LectureRequest, extract_lecture_transcript
 from page_analysis import (
@@ -335,7 +336,11 @@ def _fake_media(monkeypatch: pytest.MonkeyPatch, *, transcript: str = "", ocr: s
     monkeypatch.setattr(va, "ocr_frame", lambda frame: ocr)
 
 
-def _submit(client: TestClient, name: str = "lecture.mp4", body: bytes = b"\x00video", **form: str) -> Any:
+# An MP4 container header, so uploads pass the signature check from #853.
+SAMPLE_MP4 = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 64
+
+
+def _submit(client: TestClient, name: str = "lecture.mp4", body: bytes = SAMPLE_MP4, **form: str) -> Any:
     return client.post("/video-analysis/analyze", files={"file": (name, body, "video/mp4")}, data=form)
 
 
@@ -363,7 +368,7 @@ def test_asr_and_ocr_text_is_preserved_and_labelled(client, tmp_uploads, monkeyp
     assert result["reference_status"] == "unverified_pattern_matches"
     assert result["extraction_status"] == "content"
     assert result["metrics"]["frames_processed"] == 2 and result["metrics"]["provider_cost_usd"] == 0.0
-    assert job["expires_at"] > job["completed_at"]
+    assert job["input_bytes"] == len(SAMPLE_MP4)
     assert _leftover_uploads(tmp_uploads) == []
 
 
@@ -385,37 +390,66 @@ def test_no_content_is_empty_not_failed(client, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("name", "body", "form", "status", "code"),
+    ("name", "body", "form", "status"),
     [
-        ("lecture.mkv", b"x", {}, 415, "unsupported_format"),
-        ("lecture", b"x", {}, 415, "unsupported_format"),
-        ("lecture.mp4", b"", {}, 422, "empty_upload"),
-        ("lecture.mp4", b"x", {"transcript": "a" * (va.MAX_TRANSCRIPT_CHARS + 1)}, 413, "transcript_too_large"),
+        ("lecture.mp4", b"not a video", {}, 415),  # spoofed extension
+        ("lecture.mp4", b"", {}, 400),  # empty upload
+        ("lecture.mp4", SAMPLE_MP4, {"transcript": "a" * (va.MAX_TRANSCRIPT_CHARS + 1)}, 413),
+        ("lecture.mp4", SAMPLE_MP4, {"consent_to_process": "false"}, 400),
     ],
 )
-def test_rejected_uploads_have_stable_codes(client, tmp_uploads, name, body, form, status, code):
+def test_rejected_uploads_leave_no_file_or_job(client, tmp_uploads, name, body, form, status):
     resp = _submit(client, name=name, body=body, **form)
     assert resp.status_code == status
-    assert resp.json()["detail"]["code"] == code
     assert _leftover_uploads(tmp_uploads) == []
     assert va._jobs == {}
 
 
-def test_oversized_upload_is_rejected_while_streaming(client, tmp_uploads, monkeypatch):
+def test_oversized_upload_is_rejected_before_writing(client, tmp_uploads, monkeypatch):
     monkeypatch.setattr(va, "MAX_VIDEO_BYTES", 1024)
-    monkeypatch.setattr(va, "UPLOAD_CHUNK_BYTES", 256)
-    resp = _submit(client, body=b"x" * 2048)
+    monkeypatch.setattr(media_upload_limits, "MAX_VIDEO_BYTES", 1024)
+    resp = _submit(client, body=SAMPLE_MP4 + b"\x00" * 2048)
     assert resp.status_code == 413
-    assert resp.json()["detail"]["code"] == "payload_too_large"
     assert _leftover_uploads(tmp_uploads) == []
+    assert va._jobs == {}
 
 
-def test_busy_service_rejects_new_jobs(client, monkeypatch):
-    for index in range(va.MAX_PENDING_JOBS):
-        va._jobs[f"active-{index}"] = {"id": f"active-{index}", "status": "queued"}
+def test_busy_service_rejects_new_jobs_without_leaving_the_upload(client, tmp_uploads, monkeypatch):
+    monkeypatch.setattr(va.job_manager, "max_active", 1)
+    va.job_manager.register_job("active-0", "busy.mp4")
     resp = _submit(client)
-    assert resp.status_code == 503
-    assert resp.json()["detail"]["code"] == "service_busy"
+    assert resp.status_code == 429
+    assert _leftover_uploads(tmp_uploads) == []
+    assert set(va._jobs) == {"active-0"}
+
+
+def test_queued_jobs_hold_a_private_file_not_the_payload(client, tmp_uploads, monkeypatch):
+    queued: list[tuple[str, Path, str]] = []
+
+    async def hold(job_id: str, upload_path: Path, transcript: str) -> None:
+        queued.append((job_id, upload_path, transcript))
+
+    monkeypatch.setattr(va, "_process", hold)
+    resp = _submit(client, transcript="t")
+    assert resp.status_code == 202
+    [(job_id, upload_path, transcript)] = queued
+    assert job_id == resp.json()["job_id"] and transcript == "t"
+    assert isinstance(upload_path, Path) and upload_path.read_bytes() == SAMPLE_MP4
+    assert upload_path.stat().st_mode & 0o077 == 0  # owner-only
+    upload_path.unlink()
+
+
+def test_cancelled_job_is_skipped_and_its_upload_deleted(tmp_uploads, monkeypatch):
+    def must_not_run(*args: Any) -> dict[str, Any]:
+        raise AssertionError("a cancelled job must not be analyzed")
+
+    monkeypatch.setattr(va, "analyze_video", must_not_run)
+    va.job_manager.register_job("job-1", "lecture.mp4")
+    upload_path = va._write_upload(SAMPLE_MP4, ".mp4")
+    va.job_manager.cancel_job("job-1")
+    asyncio.run(va._process("job-1", upload_path, ""))
+    assert not upload_path.exists()
+    assert va.job_manager.get_job("job-1")["status"] == "cancelled"
 
 
 @pytest.mark.parametrize(
@@ -437,6 +471,7 @@ def test_failures_are_typed_safe_and_clean_up(client, tmp_uploads, monkeypatch, 
     assert job["status"] == "failed"
     assert job["error_code"] == code
     assert job["error"] == va.ERROR_MESSAGES[va.VideoErrorCode(code)]
+    assert "error_details" not in job
     assert "SECRET-CONTENT" not in str(job) and "/tmp" not in job["error"]
     assert "SECRET-CONTENT" not in caplog.text
     assert _leftover_uploads(tmp_uploads) == []
@@ -470,10 +505,10 @@ def test_logs_never_contain_transcript_text(client, monkeypatch, caplog):
     assert "PRIVATE-LECTURE-WORDS" not in caplog.text
 
 
-def test_filename_is_sanitized_and_bounded(client, monkeypatch):
+def test_filename_is_sanitized(client, monkeypatch):
     _fake_media(monkeypatch)
-    job = _job(client, _submit(client, name="a‮" + "b" * 400 + ".mp4").json()["job_id"])
-    assert "‮" not in job["filename"] and len(job["filename"]) == va.MAX_FILENAME_CHARS
+    job = _job(client, _submit(client, name="../a‮b.mp4").json()["job_id"])
+    assert "‮" not in job["filename"] and "/" not in job["filename"]
 
 
 def test_extract_media_bounds_duration_and_frames(monkeypatch, tmp_path):
@@ -528,31 +563,6 @@ def test_working_directory_is_removed_when_ocr_fails(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         va.analyze_video(tmp_path / "in.mp4")
     assert seen and not seen[0].exists()
-
-
-def test_results_expire_and_stored_jobs_are_capped(monkeypatch, tmp_uploads):
-    now = datetime.now(UTC)
-    past = (now - timedelta(seconds=1)).isoformat()
-    future = (now + timedelta(hours=1)).isoformat()
-    va._jobs["expired"] = {"id": "expired", "status": "completed", "completed_at": past, "expires_at": past}
-    va._jobs["fresh"] = {"id": "fresh", "status": "completed", "completed_at": now.isoformat(), "expires_at": future}
-    va._jobs["running"] = {"id": "running", "status": "processing"}
-    va._purge_jobs(now)
-    assert set(va._jobs) == {"fresh", "running"}
-
-    monkeypatch.setattr(va, "MAX_STORED_JOBS", 3)
-    for index in range(4):
-        stamp = (now + timedelta(seconds=index)).isoformat()
-        va._jobs[f"done-{index}"] = {
-            "id": f"done-{index}",
-            "status": "failed",
-            "completed_at": stamp,
-            "expires_at": future,
-        }
-    va._purge_jobs(now)
-    assert len(va._jobs) == 3
-    assert "running" in va._jobs  # active jobs are never evicted
-    assert "done-3" in va._jobs and "fresh" not in va._jobs
 
 
 def test_worst_case_transcript_completes_with_bounded_output(client, monkeypatch):

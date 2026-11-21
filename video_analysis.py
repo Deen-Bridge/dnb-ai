@@ -13,15 +13,17 @@ Production contract (#858, PROD-AUDIT AI-082)
   sent to a model, used to pick a tool, or passed to a shell. The "summary" is
   extractive (the first transcript segments verbatim) and references are
   unverified pattern matches, and both are labelled as such.
-* Work is bounded: uploads are streamed to a temporary file and capped at
-  ``VIDEO_MAX_BYTES``; ffmpeg processes at most ``VIDEO_MAX_DURATION_SECONDS``
+* Uploads are validated by ``media_upload_limits`` (#853): consent, size,
+  container signature and transcript length; jobs live in its
+  ``BoundedJobManager`` (active-job ceiling, one-hour retention, at most 200
+  stored, cancellable). A validated upload is written to a private temporary
+  file, so a queued job does not hold the payload in memory.
+* Processing is bounded: ffmpeg reads at most ``MAX_VIDEO_DURATION_SECONDS``
   of media and ``VIDEO_MAX_FRAMES`` frames, each call under
-  ``VIDEO_FFMPEG_TIMEOUT_SECONDS``; at most ``VIDEO_MAX_CONCURRENT_JOBS`` run at
-  once and at most ``VIDEO_MAX_PENDING_JOBS`` may be queued or running.
-* Retention: the uploaded file and all extracted audio/frames are deleted when
-  processing ends, on success or failure. Job results (which contain the
-  transcript) stay in process memory for ``VIDEO_JOB_RETENTION_SECONDS`` after
-  completion, at most ``VIDEO_MAX_STORED_JOBS`` jobs, and are lost on restart.
+  ``VIDEO_FFMPEG_TIMEOUT_SECONDS``; at most ``VIDEO_MAX_CONCURRENT_JOBS`` jobs
+  decode at once; extracted text is cut at ``VIDEO_MAX_EXTRACTED_CHARS``.
+* The uploaded file and all extracted audio/frames are deleted when processing
+  ends, on success, failure or cancellation.
 * Failures surface as a stable ``error_code`` with a safe message. Exception
   text, ffmpeg output, paths and media content are never returned or logged.
 """
@@ -39,13 +41,20 @@ import tempfile
 import time
 import traceback
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
+from media_upload_limits import (
+    MAX_TRANSCRIPT_CHARS,
+    MAX_VIDEO_BYTES,
+    MAX_VIDEO_DURATION_SECONDS,
+    BoundedJobManager,
+    validate_video_upload,
+)
 from untrusted_content import FLAG_TRUNCATED, ContentSource, describe_untrusted, truncate
 
 logger = logging.getLogger(__name__)
@@ -65,47 +74,33 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
     return max(minimum, value)
 
 
-MAX_VIDEO_BYTES = _env_int("VIDEO_MAX_BYTES", 100 * 1024 * 1024)
-MAX_TRANSCRIPT_CHARS = _env_int("VIDEO_MAX_TRANSCRIPT_CHARS", 200_000)
+# Upload size, transcript length, media duration, job retention and the
+# active-job ceiling come from media_upload_limits (#853). The limits below
+# bound the processing work itself (#858).
 MAX_EXTRACTED_CHARS = _env_int("VIDEO_MAX_EXTRACTED_CHARS", 200_000)
-MAX_DURATION_SECONDS = _env_int("VIDEO_MAX_DURATION_SECONDS", 7_200)
+MAX_DURATION_SECONDS = int(MAX_VIDEO_DURATION_SECONDS)
 FRAME_INTERVAL_SECONDS = 30
 MAX_FRAMES = _env_int("VIDEO_MAX_FRAMES", MAX_DURATION_SECONDS // FRAME_INTERVAL_SECONDS)
 FFMPEG_TIMEOUT_SECONDS = _env_int("VIDEO_FFMPEG_TIMEOUT_SECONDS", 120)
 MAX_CONCURRENT_JOBS = _env_int("VIDEO_MAX_CONCURRENT_JOBS", 2)
-MAX_PENDING_JOBS = _env_int("VIDEO_MAX_PENDING_JOBS", 8)
-JOB_RETENTION_SECONDS = _env_int("VIDEO_JOB_RETENTION_SECONDS", 3_600)
-MAX_STORED_JOBS = _env_int("VIDEO_MAX_STORED_JOBS", 200)
 MAX_TOPICS = 500
-MAX_FILENAME_CHARS = 255
-UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm"}
-TERMINAL_STATES = {"completed", "failed"}
-ACTIVE_STATES = {"queued", "processing"}
-_jobs: dict[str, dict[str, Any]] = {}
+TERMINAL_STATES = {"completed", "failed", "cancelled"}
+job_manager = BoundedJobManager()
+_jobs: dict[str, dict[str, Any]] = job_manager._jobs
 _processing_slots = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
 
 class VideoErrorCode(str, Enum):
-    """Stable, client-visible error codes."""
+    """Stable, client-visible failure codes for analysis jobs."""
 
-    UNSUPPORTED_FORMAT = "unsupported_format"
-    PAYLOAD_TOO_LARGE = "payload_too_large"
-    EMPTY_UPLOAD = "empty_upload"
-    TRANSCRIPT_TOO_LARGE = "transcript_too_large"
-    SERVICE_BUSY = "service_busy"
     PROCESSING_TIMEOUT = "processing_timeout"
     DECODE_FAILED = "decode_failed"
     INTERNAL_ERROR = "internal_error"
 
 
 ERROR_MESSAGES: dict[VideoErrorCode, str] = {
-    VideoErrorCode.UNSUPPORTED_FORMAT: "Only MP4, MOV, AVI, and WebM videos are supported.",
-    VideoErrorCode.PAYLOAD_TOO_LARGE: "Video must be 100MB or smaller.",
-    VideoErrorCode.EMPTY_UPLOAD: "The uploaded video is empty.",
-    VideoErrorCode.TRANSCRIPT_TOO_LARGE: "The transcript is longer than the allowed limit.",
-    VideoErrorCode.SERVICE_BUSY: "Too many video analyses are in progress. Retry later.",
     VideoErrorCode.PROCESSING_TIMEOUT: "Media processing took too long and was stopped.",
     VideoErrorCode.DECODE_FAILED: "The video could not be decoded and no transcript was supplied.",
     VideoErrorCode.INTERNAL_ERROR: "Video analysis failed unexpectedly.",
@@ -118,15 +113,6 @@ class MediaTimeoutError(RuntimeError):
 
 class MediaDecodeError(RuntimeError):
     """ffmpeg is installed but produced neither audio nor frames."""
-
-
-def _client_error(status_code: int, code: VideoErrorCode) -> HTTPException:
-    detail = ERROR_MESSAGES[code]
-    if code == VideoErrorCode.PAYLOAD_TOO_LARGE:
-        detail = f"Video must be {MAX_VIDEO_BYTES // (1024 * 1024)}MB or smaller."
-    elif code == VideoErrorCode.TRANSCRIPT_TOO_LARGE:
-        detail = f"The transcript must be at most {MAX_TRANSCRIPT_CHARS} characters."
-    return HTTPException(status_code=status_code, detail={"code": code.value, "detail": detail})
 
 
 def extract_quran_references(text: str) -> list[str]:
@@ -324,40 +310,25 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
     }
 
 
-def _purge_jobs(now: datetime | None = None) -> None:
-    """Drop expired results, then the oldest finished jobs beyond the stored-job cap."""
-    now = now or datetime.now(UTC)
-    for job_id in [
-        job_id
-        for job_id, job in _jobs.items()
-        if job["status"] in TERMINAL_STATES and datetime.fromisoformat(job["expires_at"]) <= now
-    ]:
-        del _jobs[job_id]
-    finished = sorted(
-        (job for job in _jobs.values() if job["status"] in TERMINAL_STATES), key=lambda job: job["completed_at"]
-    )
-    while len(_jobs) > MAX_STORED_JOBS and finished:
-        del _jobs[finished.pop(0)["id"]]
-
-
-def _finish(job_id: str, status: str, **fields: Any) -> None:
-    completed = datetime.now(UTC)
-    _jobs[job_id].update(
-        status=status,
-        completed_at=completed.isoformat(),
-        expires_at=(completed + timedelta(seconds=JOB_RETENTION_SECONDS)).isoformat(),
-        **fields,
-    )
+def _is_cancelled(job_id: str) -> bool:
+    job = job_manager.get_job(job_id)
+    return job is None or job.get("status") == "cancelled"
 
 
 async def _process(job_id: str, upload_path: Path, transcript: str) -> None:
     """Run one job. The uploaded file is always deleted, whatever happens."""
     error_code: VideoErrorCode | None = None
     try:
+        if _is_cancelled(job_id):
+            return
         async with _processing_slots:
-            _jobs[job_id]["status"] = "processing"
+            if _is_cancelled(job_id):  # cancelled while waiting for a slot
+                return
+            job_manager.update_job(job_id, status="processing")
             result = await asyncio.to_thread(analyze_video, upload_path, transcript)
-        _finish(job_id, "completed", result=result)
+        if _is_cancelled(job_id):  # cancelled while processing
+            return
+        job_manager.update_job(job_id, status="completed", result=result, completed_at=datetime.now(UTC).isoformat())
     except MediaTimeoutError:
         error_code = VideoErrorCode.PROCESSING_TIMEOUT
     except MediaDecodeError:
@@ -374,42 +345,37 @@ async def _process(job_id: str, upload_path: Path, transcript: str) -> None:
     finally:
         upload_path.unlink(missing_ok=True)
     if error_code is not None:
-        _finish(job_id, "failed", error_code=error_code.value, error=ERROR_MESSAGES[error_code])
-    job = _jobs[job_id]
-    logger.info(
-        "Video analysis job %s %s error_code=%s bytes=%s metrics=%s",
-        job_id,
-        job["status"],
-        job.get("error_code"),
-        job.get("input_bytes"),
-        json.dumps((job.get("result") or {}).get("metrics", {})),
-    )
+        job_manager.update_job(
+            job_id,
+            status="failed",
+            error_code=error_code.value,
+            error=ERROR_MESSAGES[error_code],
+            completed_at=datetime.now(UTC).isoformat(),
+        )
+    job = job_manager.get_job(job_id)
+    if job is not None:
+        logger.info(
+            "Video analysis job %s %s error_code=%s bytes=%s metrics=%s",
+            job_id,
+            job["status"],
+            job.get("error_code"),
+            job.get("input_bytes"),
+            json.dumps((job.get("result") or {}).get("metrics", {})),
+        )
 
 
-def _safe_filename(name: str | None) -> str:
-    """Untrusted client filename: drop control characters and bound its length."""
-    cleaned = re.sub(r"[\x00-\x1f\x7f‪-‮⁦-⁩]", "", name or "")
-    return cleaned[:MAX_FILENAME_CHARS]
-
-
-async def _spool_upload(file: UploadFile, suffix: str) -> tuple[Path, int]:
-    """Stream the upload to a private temporary file, enforcing the byte cap."""
+def _write_upload(payload: bytes, suffix: str) -> Path:
+    """Move a validated upload to a private temporary file, so a queued job
+    holds a path instead of the whole payload in memory."""
     handle = tempfile.NamedTemporaryFile(prefix="dnb-upload-", suffix=suffix, delete=False)
     path = Path(handle.name)
-    size = 0
     try:
         with handle:
-            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
-                size += len(chunk)
-                if size > MAX_VIDEO_BYTES:
-                    raise _client_error(413, VideoErrorCode.PAYLOAD_TOO_LARGE)
-                handle.write(chunk)
-        if size == 0:
-            raise _client_error(422, VideoErrorCode.EMPTY_UPLOAD)
+            handle.write(payload)
     except BaseException:
         path.unlink(missing_ok=True)
         raise
-    return path, size
+    return path
 
 
 @router.post("/analyze", status_code=202)
@@ -417,32 +383,40 @@ async def submit_video_analysis(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="MP4, MOV, AVI, or WebM video up to 100MB"),
     transcript: str = Form("", description="Optional transcript; treated as untrusted data"),
+    consent_to_process: bool = Form(default=True, description="Explicit user consent to process uploaded media."),
 ) -> dict[str, Any]:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_EXTENSIONS:
-        raise _client_error(415, VideoErrorCode.UNSUPPORTED_FORMAT)
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
-        raise _client_error(413, VideoErrorCode.TRANSCRIPT_TOO_LARGE)
-    _purge_jobs()
-    if sum(1 for job in _jobs.values() if job["status"] in ACTIVE_STATES) >= MAX_PENDING_JOBS:
-        raise _client_error(503, VideoErrorCode.SERVICE_BUSY)
-    upload_path, size = await _spool_upload(file, suffix)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Transcript exceeds maximum allowed length of {MAX_TRANSCRIPT_CHARS} characters.",
+        )
+    payload = await file.read(MAX_VIDEO_BYTES + 1)
+    mime_type, detected_format = validate_video_upload(
+        payload,
+        file.filename,
+        consent=consent_to_process,
+    )
+    upload_path = _write_upload(payload, f".{detected_format}")
     job_id = str(uuid.uuid4())
-    _jobs[job_id] = {
-        "id": job_id,
-        "status": "queued",
-        "filename": _safe_filename(file.filename),
-        "input_bytes": size,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
+    try:
+        job_record = job_manager.register_job(job_id, file.filename)
+    except BaseException:
+        upload_path.unlink(missing_ok=True)
+        raise
+    job_record["mime_type"] = mime_type
+    job_record["input_bytes"] = len(payload)
     background_tasks.add_task(_process, job_id, upload_path, transcript)
     return {"job_id": job_id, "status": "queued", "poll_url": f"/video-analysis/jobs/{job_id}"}
 
 
 @router.get("/jobs/{job_id}")
 async def get_video_analysis(job_id: str) -> dict[str, Any]:
-    _purge_jobs()
-    job = _jobs.get(job_id)
+    job = job_manager.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Analysis job not found")
     return json.loads(json.dumps(job, default=str))
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_video_analysis(job_id: str) -> dict[str, Any]:
+    return job_manager.cancel_job(job_id)

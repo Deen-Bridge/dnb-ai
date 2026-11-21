@@ -1,6 +1,6 @@
 """Tests for the study-content generator.
 
-All tests run offline against recorded fixtures — no GEMINI_API_KEY needed.
+All tests run offline against recorded fixtures - no GEMINI_API_KEY needed.
 """
 
 import json
@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from study import (
     MAX_LESSON_TEXT_LENGTH,
     ContentKind,
+    DeterministicCurriculumGenerator,
     Difficulty,
     FakeGenerator,
     Flashcard,
@@ -372,7 +373,7 @@ class TestGenerateContent:
         assert len(result.flashcards) == 1
 
     def test_retry_on_invalid_json_then_succeeds(self):
-        """First response is invalid JSON, second is valid — retry loop should recover."""
+        """First response is invalid JSON, second is valid - retry loop should recover."""
         invalid = load_fixture("invalid_json")
         valid = load_fixture("quiz_valid")
         gen = FakeGenerator(responses=[invalid, valid])
@@ -463,3 +464,207 @@ class TestStudyGenerateResponse:
         )
         assert resp.quizzes is None
         assert len(resp.flashcards) == 1
+
+
+# ---------------------------------------------------------------------------
+# Determinism and Auditable Generation Tests (#847)
+# ---------------------------------------------------------------------------
+
+
+class TestDeterministicStudyGeneration:
+    """Verifies that generation with explicit seed is strictly reproducible and auditable."""
+
+    def test_deterministic_curriculum_generator_identical_output_for_same_seed(self):
+        gen1 = DeterministicCurriculumGenerator(seed=123)
+        gen2 = DeterministicCurriculumGenerator(seed=123)
+
+        out1 = gen1.generate("dummy prompt", {})
+        out2 = gen2.generate("dummy prompt", {})
+
+        assert out1 == out2
+        data1 = json.loads(out1)
+        assert "quizzes" in data1
+        assert "flashcards" in data1
+        assert len(data1["quizzes"]) > 0
+
+    def test_different_seeds_produce_distinct_ordering(self):
+        gen1 = DeterministicCurriculumGenerator(seed=1)
+        gen2 = DeterministicCurriculumGenerator(seed=9999)
+
+        out1 = json.loads(gen1.generate("dummy prompt", {}))
+        out2 = json.loads(gen2.generate("dummy prompt", {}))
+
+        q1 = [item["question"] for item in out1["quizzes"]]
+        q2 = [item["question"] for item in out2["quizzes"]]
+        assert q1 != q2
+
+    def test_generation_with_seed_attaches_provenance_and_audit(self):
+        gen = DeterministicCurriculumGenerator(seed=42)
+        resp = _generate_content(
+            generator=gen,
+            source=make_topic_source("Pillars of Iman"),
+            kind=ContentKind.both,
+            difficulty=Difficulty.beginner,
+            count=3,
+            seed=42,
+        )
+
+        assert resp.seed == 42
+        assert resp.provenance is not None
+        assert resp.provenance.generator_version == "study-v1"
+        assert len(resp.provenance.source_hash) == 64
+        assert len(resp.provenance.citations) > 0
+        assert resp.audit_trail is not None
+        assert resp.audit_trail.deterministic is True
+        assert resp.audit_trail.seed == 42
+        assert resp.audit_trail.uncertainty_score < 0.05
+        assert len(resp.quizzes) == 3
+        assert len(resp.flashcards) == 3
+
+    def test_api_endpoint_generate_with_seed(self):
+        from fastapi.testclient import TestClient
+
+        from main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/study/generate",
+            json={
+                "source": {"topic": "Tawheed"},
+                "kind": "quiz",
+                "difficulty": "intermediate",
+                "count": 2,
+                "seed": 77,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["seed"] == 77
+        assert data["provenance"]["source_hash"] is not None
+        assert data["audit_trail"]["deterministic"] is True
+        assert len(data["quizzes"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Opt-In and Resettable Personalization Tests (#846)
+# ---------------------------------------------------------------------------
+
+
+class TestOptInAndResettablePersonalization:
+    """Verifies privacy-by-default opt-in and idempotent reset of user study data."""
+
+    def test_personalization_opt_in_default_is_false(self):
+        req = StudyGenerateRequest(
+            source=TopicSource(topic="Salah"),
+            kind=ContentKind.quiz,
+        )
+        assert req.opt_in_personalization is False
+
+    def test_no_tracking_when_opt_out(self):
+        from fastapi.testclient import TestClient
+
+        from main import app
+
+        client = TestClient(app)
+        resp = client.post(
+            "/study/generate",
+            json={
+                "source": {"topic": "Wudu and Taharah"},
+                "kind": "quiz",
+                "count": 2,
+                "seed": 10,
+                "user_id": "anon-learner-1",
+                "opt_in_personalization": False,
+            },
+        )
+        assert resp.status_code == 200
+
+        # Progress endpoint must return 404 because user did not opt in
+        prog_resp = client.get("/study/users/anon-learner-1/progress")
+        assert prog_resp.status_code == 404
+
+    def test_tracking_when_opted_in_and_reset(self):
+        from fastapi.testclient import TestClient
+
+        from main import app
+
+        client = TestClient(app)
+        user_id = "test-learner-optin-99"
+
+        # 1. Generate study content with opt-in tracking enabled
+        resp = client.post(
+            "/study/generate",
+            json={
+                "source": {"topic": "The Five Pillars of Islam"},
+                "kind": "quiz",
+                "count": 2,
+                "seed": 11,
+                "user_id": user_id,
+                "opt_in_personalization": True,
+            },
+        )
+        assert resp.status_code == 200
+
+        # 2. Progress endpoint returns stored record
+        prog_resp = client.get(f"/study/users/{user_id}/progress")
+        assert prog_resp.status_code == 200
+        prog_data = prog_resp.json()
+        assert prog_data["user_id"] == user_id
+        assert prog_data["quizzes_completed"] >= 1
+        assert "fiqh" in prog_data["mastery_by_discipline"]
+
+        # 3. Reset user study progress permanently
+        del_resp = client.delete(f"/study/users/{user_id}")
+        assert del_resp.status_code == 200
+        del_data = del_resp.json()
+        assert del_data["status"] == "reset"
+        assert del_data["user_id"] == user_id
+        assert del_data["existed"] is True
+
+        # 4. Verify progress is gone (404)
+        prog_after = client.get(f"/study/users/{user_id}/progress")
+        assert prog_after.status_code == 404
+
+        # 5. Reset again is idempotent
+        del_again = client.delete(f"/study/users/{user_id}")
+        assert del_again.status_code == 200
+        assert del_again.json()["existed"] is False
+
+
+# ---------------------------------------------------------------------------
+# Arabic and Edge Cases Tests
+# ---------------------------------------------------------------------------
+
+
+class TestArabicAndEdgeCases:
+    """Verifies Arabic script handling, boundary validation, and error states."""
+
+    def test_arabic_topic_success(self):
+        from fastapi.testclient import TestClient
+
+        from main import app
+
+        client = TestClient(app)
+        resp = client.post(
+            "/study/generate",
+            json={
+                "source": {"topic": "أركان الإسلام والإيمان"},
+                "kind": "both",
+                "count": 2,
+                "seed": 55,
+                "language": "ar",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["quizzes"]) == 2
+        assert len(data["flashcards"]) == 2
+        assert len(data["provenance"]["source_hash"]) == 64
+
+    def test_empty_or_whitespace_topic_rejected(self):
+        with pytest.raises(ValidationError):
+            TopicSource(topic="   ")
+
+    def test_empty_or_whitespace_lesson_text_rejected(self):
+        with pytest.raises(ValidationError):
+            LessonTextSource(lesson_text="   \n\t  ")
