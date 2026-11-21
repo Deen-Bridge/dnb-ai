@@ -696,15 +696,22 @@ class RedisFeedbackStore(FeedbackStore):
         return self.get(record.chat_id, record.message_id) or record
 
     def delete_chat(self, chat_id: str) -> None:
-        prefix=f"{self._PREFIX}:{chat_id}:"
+        prefix = f"{self._PREFIX}:{chat_id}:"
         for raw in self._r.scan_iter(match=f"{prefix}*"):
-            key=raw.decode() if isinstance(raw,bytes) else str(raw); mid=key[len(prefix):]
-            if mid.endswith(":submission-lock"): continue
-            rec=self.get(chat_id,mid)
-            if rec is None: continue
-            pipe=self._r.pipeline(); pipe.delete(key); pipe.zrem(f"{self._PREFIX}:index:rating:{rec.rating}",key)
-            for cat in rec.categories: pipe.zrem(f"{self._PREFIX}:index:cat:{cat}",key)
-            pipe.zrem(f"{self._PREFIX}:index:model:{rec.model_name or 'unknown'}",key); pipe.execute()
+            key = raw.decode() if isinstance(raw, bytes) else str(raw)
+            message_id = key[len(prefix) :]
+            if message_id.endswith(":submission-lock"):
+                continue
+            record = self.get(chat_id, message_id)
+            if record is None:
+                continue
+            pipe = self._r.pipeline()
+            pipe.delete(key)
+            pipe.zrem(f"{self._PREFIX}:index:rating:{record.rating}", key)
+            for category in record.categories:
+                pipe.zrem(f"{self._PREFIX}:index:cat:{category}", key)
+            pipe.zrem(f"{self._PREFIX}:index:model:{record.model_name or 'unknown'}", key)
+            pipe.execute()
 
     def get(self, chat_id: str, message_id: str) -> FeedbackRecord | None:
         data = self._r.hgetall(self._record_key(chat_id, message_id))

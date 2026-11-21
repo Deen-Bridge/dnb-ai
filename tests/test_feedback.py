@@ -617,7 +617,8 @@ class TestFeedbackEndpoint:
                     "prompt": "forged",
                     "answer": "forged",
                 },
-            )            assert resp.status_code == 404
+            )
+            assert resp.status_code == 404
 
     async def test_duplicate_submission_is_immutable_and_idempotent(self, client):
         async with client:
