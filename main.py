@@ -32,7 +32,7 @@ from google.api_core.exceptions import (
     ResourceExhausted,
     ServiceUnavailable,
 )
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -89,6 +89,8 @@ from hadith_context import router as hadith_context_router
 from hadith_research import router as hadith_research_router
 from history import router as history_router
 from intent import accuracy_tracker as intent_accuracy_tracker, classify_intent
+from language_direction import Direction, direction_for
+from malay import router as malay_router
 from memorization_planner import router as memorization_planner_router
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
@@ -153,6 +155,7 @@ from tafsir import (
     summarize_tafsir_context,
     tafsir_system_context,
 )
+from urdu_processor import router as urdu_router
 from video_analysis import router as video_analysis_router
 from vocabulary import router as vocabulary_router
 
@@ -612,6 +615,10 @@ app.include_router(arabic_ocr_router)
 app.include_router(vocabulary_router)
 # Swahili language processing: Islamic terminology, loanword morphology, and East African context
 app.include_router(swahili_router)
+# Malay/Indonesian language module (#879): normalize, dialects, terminology
+app.include_router(malay_router)
+# Urdu language module (#879): processing and terminology endpoints
+app.include_router(urdu_router)
 app.include_router(video_analysis_router)
 # Video lecture transcript extraction lives in video_analysis.py.
 # Arabic dialect support: Egyptian/Gulf/Levantine identification, MSA
@@ -928,11 +935,23 @@ class ChatResponse(BaseModel):
     zakat: ZakatInfo | None = None
     purchases: PurchaseInfo | None = None
     language: str | None = None
+    # The code the caller asked for, kept separate from ``language`` (the
+    # effective code) so a fallback or auto-detection cannot hide either (#879).
+    requested_language: str | None = None
+    # Render hint for clients: "rtl" for Arabic-script answers, "ltr" otherwise (#878).
+    direction: Direction | None = None
     # Structured references parsed out of the answer (#15). Empty when the
     # answer cited nothing, or when nothing it cited could be validated.
     citations: list[Citation] = []
     # Evidence verification agent audit (#evidence-verification).
     evidence_verification: EvidenceVerificationResult | None = None
+
+    @model_validator(mode="after")
+    def fill_direction(self) -> "ChatResponse":
+        """Fill direction from the effective language and response text (#878)."""
+        if self.direction is None:
+            self.direction = direction_for(self.language, self.response or self.text)
+        return self
 
 
 class FeedbackRequest(BaseModel):
@@ -1571,6 +1590,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
             effective_language = normalize_language(body.language)
+            requested_language = effective_language
 
             # Hierarchical multi-label intent classification (#203). Offline and
             # deterministic; recorded for accuracy tracking and structured logs.
@@ -1683,6 +1703,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(exact_cached["response"]),
                     language=effective_language,
+                    requested_language=requested_language,
                 )
 
             # Semantic cache lookup (tier 2)
@@ -1715,6 +1736,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(cached.response),
                     language=effective_language,
+                    requested_language=requested_language,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -1987,6 +2009,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             zakat=zakat_info,
             purchases=purchase_info,
             language=effective_language,
+            requested_language=requested_language,
             citations=citation_extraction.citations,
             evidence_verification=evidence_verification,
         )
@@ -2192,7 +2215,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             madhhab = normalize_madhhab(body.madhhab)
             is_fiqh = classify_fiqh(prompt)
             fiqh_info = FiqhInfo(is_fiqh_question=is_fiqh, madhhab_requested=madhhab)
-            effective_language = normalize_language(body.language)
+            requested_language = normalize_language(body.language)
+            effective_language = requested_language
 
             # Hierarchical multi-label intent classification (#203). Offline and
             # deterministic; recorded for accuracy tracking and structured logs.
@@ -2230,7 +2254,15 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
 
             try:
                 # --- Metadata event ---
-                meta = json.dumps({"type": "metadata", "chat_id": chat_id, "language": effective_language})
+                meta = json.dumps(
+                    {
+                        "type": "metadata",
+                        "chat_id": chat_id,
+                        "language": effective_language,
+                        "requested_language": requested_language,
+                        "direction": direction_for(effective_language),
+                    }
+                )
                 yield f"data: {meta}\n\n"
 
                 # --- Safety input gate ---
@@ -2447,6 +2479,9 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         "chat_id": chat_id,
                         "history": [m.model_dump() for m in history],
                         "text": combined_text,
+                        "language": effective_language,
+                        "requested_language": requested_language,
+                        "direction": direction_for(effective_language, combined_text),
                         "confidence": assessment.model_dump() if assessment else None,
                         "hadith_references": ([r.model_dump() for r in hadith_refs] if hadith_refs else None),
                         "fiqh": fiqh_info.model_dump() if fiqh_info else None,

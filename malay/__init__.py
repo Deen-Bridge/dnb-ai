@@ -4,5 +4,6 @@ from __future__ import annotations
 
 from malay.models import MalayQueryRequest, MalayQueryResponse
 from malay.processor import MalayProcessor
+from malay.router import router
 
-__all__ = ["MalayQueryRequest", "MalayQueryResponse", "MalayProcessor"]
+__all__ = ["MalayQueryRequest", "MalayQueryResponse", "MalayProcessor", "router"]
