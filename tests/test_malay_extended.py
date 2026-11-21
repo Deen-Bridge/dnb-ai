@@ -428,7 +428,7 @@ def test_blank_text_is_processed_without_error(processor: MalayProcessor, text: 
 
 
 def test_package_exports_public_api() -> None:
-    assert set(malay.__all__) == {"MalayQueryRequest", "MalayQueryResponse", "MalayProcessor"}
+    assert set(malay.__all__) == {"MalayQueryRequest", "MalayQueryResponse", "MalayProcessor", "router"}
     assert malay.MalayProcessor is MalayProcessor
     assert malay.MalayQueryRequest is MalayQueryRequest
     assert malay.MalayQueryResponse is MalayQueryResponse

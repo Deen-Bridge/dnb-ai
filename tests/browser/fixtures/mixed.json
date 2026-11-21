@@ -1,0 +1,23 @@
+{
+  "chat_id": "browser-mixed",
+  "response": "الصبر sabr مفتاح الفرج، patience is the key؟",
+  "language": "ur",
+  "requested_language": "ur",
+  "direction": "rtl",
+  "citations": [
+    {
+      "reference": "2:153",
+      "surah": 2,
+      "ayah_start": 153,
+      "quote": "يَا أَيُّهَا الَّذِينَ آمَنُوا اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ",
+      "quote_direction": "rtl"
+    },
+    {
+      "reference": "103:3",
+      "surah": 103,
+      "ayah_start": 3,
+      "quote": "إِلَّا الَّذِينَ آمَنُوا وَعَمِلُوا الصَّالِحَاتِ",
+      "quote_direction": "rtl"
+    }
+  ]
+}

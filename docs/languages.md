@@ -10,9 +10,12 @@ Existing language modules to use as reference:
 | Swahili (reference implementation) | `swahili/` | Yes (`/swahili`, `main.py:361`) | Yes — detection, prompt enhancement, response headers |
 | Arabic dialect | `arabic_dialect/` | Yes (`/arabic-dialect`, `main.py:365`) | No |
 | Arabic OCR (Arabic-script manuscripts) | `arabic_ocr.py` | Yes (`/arabic-ocr`, `main.py:357`) | No |
-| Malay / Indonesian | `malay/` | No (no FastAPI router) | No (only `ms`/`id` in the language whitelist) |
-| Urdu | `urdu_processor.py` | No (router defined at line 21, never imported by `main.py`) | No (only `ur` in the language whitelist) |
+| Malay / Indonesian | `malay/` | Yes (`/malay`) | No (only `ms`/`id` in the language whitelist) |
+| Urdu | `urdu_processor.py` | Yes (`/urdu`) | No (only `ur` in the language whitelist) |
 | Swahili legacy facade | `swahili_processor.py` | No | No — root-level re-export shim; prefer importing from `swahili/` |
+
+The public support matrix, including router paths and what is not wired into
+`/chat`, is [`docs/language-support-matrix.md`](language-support-matrix.md).
 
 ---
 
@@ -27,8 +30,9 @@ There is **no generic `detect_language()`**. Language is resolved in three layer
    applied too (`en-GB` → `en`).
 2. **LLM auto-detect when omitted.** The streaming path injects `LANGUAGE_INSTRUCTIONS`
    (`main.py:712`) plus `response_language: <code>` or `auto` into the system context
-   (`main.py:1640-1647`). The effective code is echoed back in `ChatResponse.language`
-   (`main.py:471`) so the frontend can set `dir="rtl"` (see README, "Multilingual support").
+   (`main.py:1640-1647`). The effective code is echoed back in `ChatResponse.language` and
+   `ChatResponse.direction` (computed by `language_direction.py`) so the frontend can set
+   `dir="rtl"` without guessing (see README, "Multilingual support").
 3. **Offline keyword heuristic (Swahili only, non-streaming `/chat`).** `main.py:992-1014`
    checks a keyword list against the prompt; if `analyze_swahili()` detects at least two Islamic
    terms, `effective_language` is overridden to `"sw"`.
@@ -362,8 +366,10 @@ handling today.
 4. **Keep script detection separate from language detection.** A Latin-script Swahili or
    Urdu-English mix is still the same language — use `analyze_script()`-style profiling for
    script, the whitelist/heuristic for language.
-5. **RTL direction (`dir="rtl"`) is a frontend contract.** Echo the effective code in
-   `ChatResponse.language` and let the frontend set direction (README "Multilingual support").
+5. **RTL direction (`dir="rtl"`) is part of the API contract.** Use
+   `language_direction.direction_for()` and echo `ChatResponse.direction` alongside
+   `ChatResponse.language`; the reference client in `tests/browser/` and the browser suite
+   verify rendered direction. Do not infer direction from CSS alone.
 6. **RTL layout for documents/images** belongs to `page_analysis.py` (`rtl` flag), not the
    chat pipeline.
 7. **Quote punctuation** must be language-appropriate (`؟` vs `?`, `،` vs `,`) — fold it

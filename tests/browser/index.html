@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deen Bridge reference chat client</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="chat" aria-label="Chat answer">
+      <header>
+        <h1>Reference chat client</h1>
+        <p class="hint">
+          Mirrors the documented <code>/chat</code> response contract. No network, no build step.
+        </p>
+      </header>
+
+      <button id="copy-button" type="button">Copy answer</button>
+      <pre id="copy-payload" data-copied-text="" aria-live="polite"></pre>
+
+      <section id="answer-region" aria-label="Answer">
+        <p id="answer" dir="ltr"></p>
+      </section>
+
+      <section id="citations" aria-label="Citations"></section>
+
+      <div id="bidi-probe" aria-hidden="true" dir="ltr"></div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

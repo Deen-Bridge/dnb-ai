@@ -332,8 +332,13 @@ the response is in.
 | `tl` | Tagalog |
 
 An unrecognized code falls back to auto-detection (warns in logs, never 422).
-The effective language is echoed in `ChatResponse.language` so the frontend can
-set `dir="rtl"` correctly.
+The effective language is echoed in `ChatResponse.language`, the code the caller
+asked for in `ChatResponse.requested_language`, and a render hint in
+`ChatResponse.direction` (`"rtl"` for Arabic-script answers, `"ltr"` otherwise)
+so the frontend can set `dir="rtl"` without guessing. Streaming responses carry
+the same metadata on the `metadata` and `done` events. See
+[docs/languages.md](docs/languages.md) and
+[docs/rtl-rendering-verification.md](docs/rtl-rendering-verification.md).
 
 ### Confidence, abstention, and scholar review
 

@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 on:
   pull_request:
     branches: [main, dev]
@@ -182,8 +182,53 @@ jobs:
       - name: Run book take-down and restore tests
         run: pytest -q tests/test_book_moderation.py
 
+      - name: Run Urdu language processing tests
+        run: pytest -q tests/test_urdu_processor.py
+
+      - name: Run Malay/Indonesian language processing tests
+        run: pytest -q tests/test_malay.py tests/test_malay_extended.py
+
+      - name: Run language contract and support-matrix tests
+        run: pytest -q tests/test_language_contract.py
+
+      - name: Run language direction tests
+        run: pytest -q tests/test_language_direction.py
+
       - name: Run container deployment contract tests (#880)
         run: pytest -q tests/test_container_deployment.py
+
+  browser-rtl:
+    name: Browser RTL and mixed-language rendering
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run RTL rendering suite
+        run: pytest -q tests/browser
+
+      - name: Upload screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-rtl-artifacts
+          path: tests/browser/artifacts/
+          if-no-files-found: ignore
 
   build-and-scan-image:
     name: Build, Scan and Verify Hardened Container (#880)
@@ -212,7 +257,7 @@ jobs:
           mkdir -p artifacts
           echo "commit: ${{ github.sha }}" > artifacts/image-digest.txt
           echo "digest: ${IMAGE_DIGEST}" >> artifacts/image-digest.txt
-          echo "tags: deenbridge-ai:${{ github.sha }}, deenbridge-ai:latest" >> artifacts/image-digest.txt
+          echo "tags: deenbridge-ai:${{ github.sha }},deenbridge-ai:latest" >> artifacts/image-digest.txt
           echo "Recorded image digest: ${IMAGE_DIGEST} for commit ${{ github.sha }}"
 
       - name: Scan container image for vulnerabilities (Trivy)
@@ -269,4 +314,3 @@ jobs:
           # Cleanup
           docker stop deenbridge-staging && docker rm deenbridge-staging
           echo "Staging container verification passed: non-root execution and write paths confirmed."
-
