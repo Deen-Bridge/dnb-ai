@@ -59,5 +59,6 @@ data/store.json
 feedback.db
 feedback.db-*
 
-# Committed virtual environments are machine-specific — never commit them
+# Browser test output (screenshots and traces are CI artifacts, not source)
+tests/browser/artifacts/
 venv_linux/

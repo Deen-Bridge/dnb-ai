@@ -1,0 +1,101 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #f7f7f5;
+  color: #1b1b1b;
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  background: #ffffff;
+  border: 1px solid #dddddd;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.hint {
+  color: #555555;
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+#copy-button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid #888888;
+  border-radius: 6px;
+  background: #f0f0f0;
+  cursor: pointer;
+}
+
+#copy-payload {
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  background: #f4f4f4;
+  border: 1px dashed #cccccc;
+  padding: 8px;
+  min-height: 1.5em;
+}
+
+#answer {
+  font-size: 20px;
+  line-height: 1.8;
+  margin: 16px 0;
+  unicode-bidi: isolate;
+}
+
+.citation-block {
+  border: 0;
+  border-top: 1px solid #e2e2e2;
+  margin: 12px 0 0;
+  padding-top: 12px;
+}
+
+.citation-block blockquote {
+  margin: 0 0 4px;
+  font-size: 18px;
+  line-height: 1.8;
+}
+
+.citation-link {
+  display: inline-block;
+  margin: 0 4px;
+  color: #0645ad;
+  text-decoration: underline;
+}
+
+#bidi-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  display: inline-block;
+  font-size: 20px;
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 8px;
+  }
+
+  main {
+    padding: 12px;
+  }
+
+  #answer {
+    font-size: 18px;
+  }
+}
