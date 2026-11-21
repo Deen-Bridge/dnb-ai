@@ -1,0 +1,6 @@
+{
+  "dataset_version": "1.0.0",
+  "schema_version": 1,
+  "source": "scripts/build_theme_mappings.py (CURATED_MAPPINGS)",
+  "curation": "Hand-curated from the classical tafsir/concordance tradition; bounds-checked against data/quran/surah_index.json. Not exhaustive."
+}

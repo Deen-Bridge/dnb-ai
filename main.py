@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import google.generativeai as genai
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response, Security
+from fastapi import Depends, FastAPI, File, HTTPException, Path, Query, Request, Response, Security, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -46,12 +46,19 @@ from book_moderation.api import (
     public_router as book_moderation_public_router,
 )
 from calligraphy import router as calligraphy_router
+from calligraphy_ocr import (
+    CalligraphyAnalysis,
+    GeminiCalligraphyEngine,
+    StubCalligraphyEngine,
+    sniff_image_mime,
+)
 from citations import (
     CITATION_BLOCK_CONTEXT,
     Citation,
     CitationExtraction,
     CitationStreamFilter,
     extract_citations,
+    validate_citations,
 )
 from concordance import router as concordance_router
 from confidence import (
@@ -264,7 +271,7 @@ OPENAPI_TAGS = [
     },
     {
         "name": "scholar-review",
-        "description": "Scholar-review queue: pending items, verdicts, and stats — the human end of the abstention loop.",
+        "description": "Scholar-review queue: pending items, verdicts, and stats - the human end of the abstention loop.",
     },
     {
         "name": "stellar",
@@ -357,7 +364,7 @@ app = FastAPI(
     description=(
         "AI backend for Deen Bridge: Islamic Q&A with verified citations, madhhab-aware "
         "framing, content-safety gating, confidence scoring, and scholar-review hand-off.\n\n"
-        "**Errors:** every non-2xx response shares the `{detail, hint}` envelope — `detail` is "
+        "**Errors:** every non-2xx response shares the `{detail, hint}` envelope - `detail` is "
         "the error summary (or the raw validation-error list on 422) and `hint` is an "
         "actionable suggestion. Rate-limited responses also set a `Retry-After` header.\n\n"
         "**Headers:** mutating chat endpoints return telemetry headers such as `X-Trace-Id`, "
@@ -533,7 +540,7 @@ def _json_error(
 def _validation_error_response() -> dict[str, Any]:
     """422 raised by the RequestValidationError handler for schema mismatches."""
     return _json_error(
-        "Request validation failed — a body or query parameter is missing or invalid.",
+        "Request validation failed - a body or query parameter is missing or invalid.",
         {
             "detail": [{"loc": ["body", "prompt"], "msg": "Field required", "type": "missing"}],
             "hint": (
@@ -654,12 +661,32 @@ class AdhkarRecommendRequest(BaseModel):
     }
 
 
+class AdhkarProvenance(BaseModel):
+    """Corpus provenance and freshness metadata returned with every recommendation."""
+
+    data_version: str = Field(..., description="Semantic version of the bundled adhkar data file.")
+    schema_version: int = Field(..., description="Integer schema revision of the data file format.")
+    source: str = Field(..., description="Human-readable description of the upstream source(s).")
+    data_last_updated: str = Field(
+        ..., description="ISO-8601 date the corpus content was last reviewed or changed."
+    )
+    loaded_at: str = Field(
+        ...,
+        description="UTC ISO-8601 timestamp at which the corpus was loaded into memory.",
+    )
+    entry_count: int = Field(..., description="Total number of entries in the loaded corpus.")
+
+
 class AdhkarRecommendResponse(BaseModel):
     matches: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Matching adhkar entries (id, title, arabic, transliteration, translation, category, source, grading). Empty when nothing matches.",
+        description="Matching adhkar entries (id, title, arabic, transliteration, translation, category, source, reference, grading). Empty when nothing matches.",
     )
     message: str = Field(..., description="Human-readable summary of how many supplications matched.")
+    provenance: AdhkarProvenance = Field(
+        ...,
+        description="Data provenance and freshness metadata: corpus version, source, last-updated date, and load timestamp.",
+    )
 
 
 @app.post(
@@ -668,7 +695,7 @@ class AdhkarRecommendResponse(BaseModel):
     summary="Recommend adhkar (supplications) from the bundled corpus",
     description=(
         "Searches the bundled authenticated adhkar corpus (`data/adhkar.json`) by category "
-        "and/or free-text query. Fully offline and deterministic — no LLM call, no safety "
+        "and/or free-text query. Fully offline and deterministic - no LLM call, no safety "
         "pipeline. Both filters are optional; supply neither to receive the whole corpus."
     ),
     tags=["islamic-content"],
@@ -691,6 +718,14 @@ class AdhkarRecommendResponse(BaseModel):
                             }
                         ],
                         "message": "Found 1 authenticated supplication(s) matching your request.",
+                        "provenance": {
+                            "data_version": "1.0.0",
+                            "schema_version": 1,
+                            "source": "Hisnul Muslim; Sahih al-Bukhari",
+                            "data_last_updated": "2024-01-01",
+                            "loaded_at": "2024-01-01T00:00:00Z",
+                            "entry_count": 4,
+                        },
                     }
                 }
             },
@@ -708,6 +743,7 @@ async def recommend_adhkar(body: AdhkarRecommendRequest) -> dict[str, Any]:
     return {
         "matches": matches,
         "message": message,
+        "provenance": adhkar_corpus.provenance(),
     }
 
 
@@ -949,7 +985,7 @@ class FeedbackRequest(BaseModel):
     categories: list[str] | None = Field(None, max_length=len(FEEDBACK_TAXONOMY))
     comment: str | None = Field(None, max_length=COMMENT_MAX_CHARS)
     # Supplied by the client when the snapshot is gone (restart). Bounded so an
-    # anonymous caller cannot fill the store with multi-megabyte bodies — the
+    # anonymous caller cannot fill the store with multi-megabyte bodies - the
     # rate limiter caps request count, not request size.
     prompt: str | None = Field(None, max_length=8000)
     answer: str | None = Field(None, max_length=16000)
@@ -1111,7 +1147,7 @@ chat_message_ids: dict[str, list[str]] = {}
 # Faithful snapshot of what the user was actually shown for each answered turn,
 # keyed by (chat_id, message_id). Feedback reads from here so the stored answer
 # is the displayed text (post safety/hadith/abstention shaping), not the raw
-# model output. Bounded LRU — on a free-tier restart it is empty, which is why
+# model output. Bounded LRU - on a free-tier restart it is empty, which is why
 # the feedback endpoint also accepts a client-supplied prompt/answer.
 FEEDBACK_SNAPSHOT_MAX = env_int("FEEDBACK_SNAPSHOT_MAX", 5000)
 answer_snapshots: "OrderedDict[tuple, dict[str, str]]" = OrderedDict()
@@ -1177,7 +1213,7 @@ ISLAMIC_CONTEXT = (
     "- Cite sources when possible (Quran surah:ayah and authentic Hadith collections).\n"
     "- Ensure exact accuracy of surah/ayah numbers and quoted text.\n"
     "- If you cannot cite a verifiable source for a claim, state the point as general scholarly consensus or "
-    "general knowledge—do NOT fabricate references.\n"
+    "general knowledge - do NOT fabricate references.\n"
 )
 
 SUPPORTED_LANGUAGES = {
@@ -1216,7 +1252,7 @@ def normalize_language(lang: str | None) -> str | None:
     """Validate a BCP-47 language code against SUPPORTED_LANGUAGES.
 
     Returns the lowercase code if valid, or None to signal auto-detection.
-    An unrecognized code is not an error — it falls back to auto-detection
+    An unrecognized code is not an error - it falls back to auto-detection
     so an unexpected locale degrades gracefully instead of failing with 422.
     """
     if not lang:
@@ -1621,7 +1657,7 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
             zakat_info = zakat_context.info if zakat_context else None
 
             # Purchase detection is offline (keywords). History comes from an
-            # inline summary or a best-effort JWT fetch — never other users'.
+            # inline summary or a best-effort JWT fetch - never other users'.
             purchase_context = await purchase_retriever(body.prompt, body.transactions, body.auth_token)
             purchase_info = purchase_context.info if purchase_context else None
             stellar_calculation_context = build_chat_stellar_calculation_context(prompt)
@@ -1681,14 +1717,35 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 cached_message_id = _record_answer(chat_id, prompt, exact_cached["response"])
                 _finalize()
                 _succeeded = True
+                cached_citations = validate_citations(exact_cached.get("citations", []))
+                cached_meta = exact_cached.get("metadata", {})
+                fastapi_response.headers["X-Cached-Citations"] = str(len(cached_citations))
+                cached_confidence = None
+                if "confidence_score" in cached_meta and "confidence_band" in cached_meta:
+                    cached_confidence = ConfidenceAssessment(
+                        score=float(cached_meta["confidence_score"]),
+                        band=ConfidenceBand(cached_meta["confidence_band"]),
+                        abstained=bool(cached_meta.get("abstained", False)),
+                        queued=bool(cached_meta.get("queued", False)),
+                        signals_used=cached_meta.get("signals_used", []),
+                        signals=cached_meta.get("signals", {}),
+                    )
                 return ChatResponse(
                     response=exact_cached["response"],
                     chat_id=chat_id,
                     message_id=cached_message_id,
                     history=exact_cached["history"],
+                    moderation=Moderation(
+                        category_id=cached_meta.get("safety_category"),
+                        action=cached_meta.get("safety_action", "pass"),
+                    )
+                    if cached_meta.get("safety_category")
+                    else None,
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(exact_cached["response"]),
+                    confidence=cached_confidence,
                     language=effective_language,
+                    citations=cached_citations,
                 )
 
             # Semantic cache lookup (tier 2)
@@ -1713,14 +1770,35 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
                 _finalize()
                 _succeeded = True
+                cached_citations = validate_citations(cached.citations)
+                cached_meta = cached.metadata or {}
+                fastapi_response.headers["X-Cached-Citations"] = str(len(cached_citations))
+                cached_confidence = None
+                if "confidence_score" in cached_meta and "confidence_band" in cached_meta:
+                    cached_confidence = ConfidenceAssessment(
+                        score=float(cached_meta["confidence_score"]),
+                        band=ConfidenceBand(cached_meta["confidence_band"]),
+                        abstained=bool(cached_meta.get("abstained", False)),
+                        queued=bool(cached_meta.get("queued", False)),
+                        signals_used=cached_meta.get("signals_used", []),
+                        signals=cached_meta.get("signals", {}),
+                    )
                 return ChatResponse(
                     response=cached.response,
                     chat_id=chat_id,
                     message_id=cached_message_id,
                     history=cached.history,
+                    moderation=Moderation(
+                        category_id=cached_meta.get("safety_category"),
+                        action=cached_meta.get("safety_action", "pass"),
+                    )
+                    if cached_meta.get("safety_category")
+                    else None,
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(cached.response),
+                    confidence=cached_confidence,
                     language=effective_language,
+                    citations=cached_citations,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -1938,11 +2016,32 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
 
+            cached_metadata = {
+                "model": telemetry.GEMINI_MODEL,
+                "language": effective_language,
+                "confidence_score": assessment.score,
+                "confidence_band": assessment.band.value,
+                "signals_used": assessment.signals_used,
+                "signals": assessment.signals,
+                "abstained": assessment.abstained,
+                "queued": assessment.queued,
+                "safety_category": safety_result.category_id if safety_result else None,
+                "safety_action": safety_result.action if safety_result else "pass",
+                "prompt_version": 1,
+                "created_at": time.time(),
+            }
+            cached_citations_dump = [c.model_dump() for c in citation_extraction.citations]
+
             # Write to exact-match cache (tier 1)
             exact_key = f"{cache_scope}:{normalized}"
             exact_cache.put(
                 exact_key,
-                {"response": response_text, "history": history},
+                {
+                    "response": response_text,
+                    "history": history,
+                    "citations": cached_citations_dump,
+                    "metadata": cached_metadata,
+                },
                 token_count=token_count,
             )
 
@@ -1954,6 +2053,9 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 history,
                 scope=cache_scope,
                 token_count=token_count,
+                version=2,
+                metadata=cached_metadata,
+                citations=cached_citations_dump,
             )
             logger.info("Two-tier cache WRITE for prompt: %s (scope: %s)", prompt[:80], cache_scope)
 
@@ -2138,10 +2240,10 @@ async def _summarize_history(
         "SSE twin of `POST /chat`: same `ChatRequest` schema, same safety pipeline, citation "
         "extraction, hadith grading, confidence scoring, and scholar-review hand-off. "
         "Events arrive in order:\n\n"
-        "1. `metadata` — `chat_id` and effective `language`\n"
-        '2. `content` — incremental text deltas (`{"type": "content", "delta": "…"}`)\n'
-        "3. `done` — final text, history, and metadata\n"
-        "4. `error` — explicit terminal failure (content policy refusal or upstream error); "
+        "1. `metadata` - `chat_id` and effective `language`\n"
+        '2. `content` - incremental text deltas (`{"type": "content", "delta": "…"}`)\n'
+        "3. `done` - final text, history, and metadata\n"
+        "4. `error` - explicit terminal failure (content policy refusal or upstream error); "
         "the stream is never silently truncated\n\n"
         "Streamed turns share session history with `POST /chat`, so a follow-up request with "
         "the same `chat_id` sees the streamed answer as context."
@@ -2551,7 +2653,7 @@ async def _persist_chat_history(chat_id: str, user_id: str | None, chat_session:
                 await session_store.add_user_chat(user_id, chat_id)
                 logger.info("Persisted chat %s for user %s (%d turns)", chat_id[:8], user_id[:8], len(history_dicts))
             else:
-                logger.warning("No user_id — chat %s not linked to any user", chat_id[:8])
+                logger.warning("No user_id - chat %s not linked to any user", chat_id[:8])
     except Exception as exc:
         logger.warning("Failed to persist chat history for %s: %s", chat_id, exc)
 
@@ -2691,8 +2793,8 @@ async def get_chat_history(
     summary="Delete a chat session and its bookkeeping",
     description=(
         "Drops the in-memory session, its persisted history, the per-message id list and "
-        "answer snapshots used for feedback, and — when `user_id` is supplied as a query "
-        "parameter — the user's link to the chat. Idempotent: deleting an unknown chat "
+        "answer snapshots used for feedback, and - when `user_id` is supplied as a query "
+        "parameter - the user's link to the chat. Idempotent: deleting an unknown chat "
         "still returns 200 with a 'not found' message."
     ),
     tags=["chats"],
@@ -2745,7 +2847,7 @@ async def delete_chat(
         "`<<<CITATIONS>>>` block, parses Quran/Hadith references, links them to the claims "
         "that rely on them, and returns per-claim support status (`supported` / `mismatch` / "
         "`unverified` / `not_quoted`) plus `overall_score` (supported claims ÷ total claims) "
-        "and an `audit_trail`. No LLM call — fully deterministic."
+        "and an `audit_trail`. No LLM call - fully deterministic."
     ),
     tags=["evidence"],
     responses={
@@ -2808,7 +2910,7 @@ async def verify_evidence_endpoint(body: EvidenceVerifyRequest) -> EvidenceVerif
 def _client_ip(request: Request) -> str:
     """Best-effort client IP for rate limiting.
 
-    X-Forwarded-For is honored only when TRUST_PROXY_HEADERS is set — otherwise
+    X-Forwarded-For is honored only when TRUST_PROXY_HEADERS is set - otherwise
     a client can rotate the header to get a fresh bucket every request. Even
     when trusted, take the rightmost hop (the address our proxy saw) rather than
     the leftmost, which the client controls.
@@ -2875,8 +2977,8 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
     """Attach a rating and optional failure categories to one model answer.
 
     The prompt/answer snapshot is resolved server-side from what the user was
-    shown for that (chat_id, message_id). If the snapshot is gone — a free-tier
-    restart evicts it — the client MUST supply prompt and answer, or the
+    shown for that (chat_id, message_id). If the snapshot is gone - a free-tier
+    restart evicts it - the client MUST supply prompt and answer, or the
     request is rejected with 422.
 
     Rate-limited per IP (in-process sliding window). Idempotent: resubmitting
@@ -2976,7 +3078,7 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
             },
         ),
         503: _json_error(
-            "Admin endpoints disabled — ADMIN_TOKEN is unset on this server.",
+            "Admin endpoints disabled - ADMIN_TOKEN is unset on this server.",
             {
                 "detail": "ADMIN_TOKEN is not configured on this server.",
                 "hint": "Set the ADMIN_TOKEN environment variable in server configuration to enable admin management routes.",
@@ -3045,14 +3147,14 @@ async def feedback_stats() -> dict[str, Any]:
             },
         ),
         422: _json_error(
-            "Invalid query parameter — rating not up/down, unknown category, or limit outside 1..500.",
+            "Invalid query parameter - rating not up/down, unknown category, or limit outside 1..500.",
             {
                 "detail": "rating must be 'up' or 'down'",
                 "hint": "Set the 'rating' query parameter to either 'up' or 'down' (e.g., ?rating=down).",
             },
         ),
         503: _json_error(
-            "Admin endpoints disabled — ADMIN_TOKEN is unset on this server.",
+            "Admin endpoints disabled - ADMIN_TOKEN is unset on this server.",
             {
                 "detail": "ADMIN_TOKEN is not configured on this server.",
                 "hint": "Set the ADMIN_TOKEN environment variable in server configuration to enable admin management routes.",
@@ -3105,6 +3207,63 @@ async def feedback_records(
         ) from exc
 
 
+# --- Calligraphy OCR (#234 / #852) --------------------------------------------
+
+
+@app.post("/calligraphy/analyze", response_model=CalligraphyAnalysis)
+@limiter.limit("10/minute")
+async def analyze_calligraphy(request: Request, file: UploadFile = File(...)) -> CalligraphyAnalysis:
+    """Recognize text in an Arabic calligraphy image and classify its style.
+
+    Accepts a single multipart JPEG or PNG (validated by magic bytes, capped at
+    ``calligraphy_max_image_bytes``). Heavy lifting lives in calligraphy_ocr;
+    this handler only enforces transport rules and picks the provider.
+
+    Errors: 413 oversize, 415 unsupported format, 422 no legible calligraphy,
+    502 engine failure, 503 provider unavailable. Rate-limited per API key/IP.
+    """
+    max_bytes = settings.calligraphy_max_image_bytes
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {max_bytes // (1024 * 1024)}MB size limit.",
+        )
+
+    mime = sniff_image_mime(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported.")
+
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    if settings.calligraphy_provider == "stub":
+        # The stub fabricates results from marker bytes - a dev/test aid only.
+        if environment == "production":
+            raise HTTPException(status_code=503, detail="The stub calligraphy provider is disabled in production.")
+        engine: GeminiCalligraphyEngine | StubCalligraphyEngine = StubCalligraphyEngine(
+            min_confidence=settings.calligraphy_min_confidence
+        )
+    elif settings.calligraphy_provider == "gemini":
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+        engine = GeminiCalligraphyEngine(timeout=GEMINI_TIMEOUT, min_confidence=settings.calligraphy_min_confidence)
+    else:
+        raise HTTPException(status_code=503, detail="Calligraphy analysis is not configured on this server.")
+
+    try:
+        # The vision call is synchronous; keep it off the event loop.
+        analysis = await run_in_threadpool(engine.analyze, data, mime)
+    except Exception as exc:
+        logger.error("Calligraphy analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Calligraphy analysis failed upstream.") from exc
+
+    if not analysis.extracted_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No legible Arabic calligraphy was detected in the image.",
+        )
+    return analysis
+
+
 @app.get(
     "/ping",
     response_model=PingResponse,
@@ -3131,7 +3290,7 @@ async def ping() -> dict[str, str]:
         "Returns the long-term profile accumulated from the user's chats: knowledge level, "
         "madhhab, preferred language, topics studied, and remembered facts. Returns 404 when "
         "no profile exists yet (memory is created lazily on the first chat with a "
-        "`user_id`). Not yet bound to an authenticated principal — anyone who knows a "
+        "`user_id`). Not yet bound to an authenticated principal - anyone who knows a "
         "`user_id` can read it (TODO #9)."
     ),
     tags=["memory"],
@@ -3178,7 +3337,7 @@ async def get_memory(
 ) -> dict[str, Any]:
     """Retrieve the stored user profile for transparency.
 
-    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    TODO(#9): bind to authenticated principal - anyone who knows a user_id
     can currently read another user's memory.
     """
     profile = await memory_store.get_profile(user_id)
@@ -3214,7 +3373,7 @@ async def delete_memory(
 ) -> dict[str, str]:
     """Completely erase the stored user profile.
 
-    TODO(#9): bind to authenticated principal — anyone who knows a user_id
+    TODO(#9): bind to authenticated principal - anyone who knows a user_id
     can currently erase another user's memory.
     """
     existed = await memory_store.delete_profile(user_id)
@@ -3264,7 +3423,7 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
             },
         },
         503: {
-            "description": "Service not ready — see `failing_check` and `hint`.",
+            "description": "Service not ready - see `failing_check` and `hint`.",
             "model": HealthResponse,
             "content": {
                 "application/json": {
@@ -3293,8 +3452,8 @@ async def health(
     response_model=CacheStatsResponse,
     summary="Response-cache hit/miss statistics",
     description=(
-        "Counters for both response-cache tiers — the semantic (embedding) cache and the "
-        "exact keyed cache — plus combined totals (hits, misses, tokens saved). "
+        "Counters for both response-cache tiers - the semantic (embedding) cache and the "
+        "exact keyed cache - plus combined totals (hits, misses, tokens saved). "
         "Semantic-cache hit rate uses the cache's own precise counters (#27)."
     ),
     tags=["observability"],
@@ -3341,7 +3500,7 @@ async def cache_stats() -> dict[str, Any]:
         "Lightweight LLM observability surface: token, cost, and latency aggregates plus "
         "error rate (`requests`), followed by `semantic_cache`, `exact_cache`, and "
         "`combined_cache` statistics. Contains only counts, durations, costs, model names, "
-        "and trace-derived aggregates — never prompt or answer content. Free-form schema: "
+        "and trace-derived aggregates - never prompt or answer content. Free-form schema: "
         "keys are additive."
     ),
     tags=["observability"],

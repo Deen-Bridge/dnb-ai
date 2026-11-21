@@ -536,3 +536,99 @@ class TestTokenQuotaTracker:
 
         usage = tracker.get_usage("user1")
         assert usage == 800
+
+
+# ---------------------------------------------------------------------------
+# Citation preservation and validation on cache hits (#871 / AI-095)
+# ---------------------------------------------------------------------------
+
+
+class TestSemanticCacheCitations:
+    def test_citations_stored_and_retrieved(self):
+        cache = get_cache()
+        set_fake_embedding(V_EXACT)
+        citations = [
+            {"type": "quran", "surah": 2, "ayah_start": 153, "surah_name": "Al-Baqarah"},
+            {"type": "hadith", "collection": "Sahih al-Bukhari", "number": "1"},
+        ]
+        meta = {
+            "model": "models/gemini-2.0-flash",
+            "confidence_score": 0.95,
+            "confidence_band": "confident",
+            "locale": "en",
+        }
+        cache.put(
+            embedding=V_EXACT,
+            response="Patience is advised in Al-Baqarah.",
+            chat_id="chat-1",
+            history=make_history("What is patience?", "Patience is advised in Al-Baqarah."),
+            scope="public",
+            citations=citations,
+            metadata=meta,
+        )
+
+        entry = cache.get(V_EXACT, scope="public")
+        assert entry is not None
+        assert len(entry.citations) == 2
+        assert entry.metadata["confidence_score"] == 0.95
+        assert entry.metadata["model"] == "models/gemini-2.0-flash"
+
+        # Validate retrieved citations using validate_citations
+        from citations import validate_citations
+
+        validated = validate_citations(entry.citations)
+        assert len(validated) == 2
+        assert validated[0].surah == 2
+        assert validated[0].ayah_start == 153
+        assert validated[1].collection == "Sahih al-Bukhari"
+
+    def test_tampered_cached_citations_rejected_by_validator(self):
+        """Fabricated or corrupted citations in cache entries are rejected upon retrieval."""
+        from citations import validate_citations
+
+        corrupt_citations = [
+            {"type": "quran", "surah": 999, "ayah_start": 1},  # Invalid surah
+            {"type": "quran", "surah": 2, "ayah_start": 999},  # Ayah beyond surah 2
+            {"type": "hadith", "collection": "Fabricated Collection XYZ", "number": "1"},  # Unknown collection
+            {"type": "quran", "surah": 1, "ayah_start": 1, "surah_name": "Al-Fatihah"},  # Valid
+        ]
+        validated = validate_citations(corrupt_citations)
+        assert len(validated) == 1
+        assert validated[0].surah == 1
+        assert validated[0].ayah_start == 1
+
+    def test_exact_cache_preserves_citations_and_metadata(self):
+        exact_cache = get_chat_exact_cache()
+        key = "public:test query"
+        exact_cache.put(
+            key,
+            {
+                "response": "Test answer",
+                "history": [],
+                "citations": [{"type": "quran", "surah": 1, "ayah_start": 1}],
+                "metadata": {"confidence_score": 0.98},
+            },
+        )
+        cached = exact_cache.get(key)
+        assert cached is not None
+        assert "citations" in cached
+        assert len(cached["citations"]) == 1
+        assert cached["metadata"]["confidence_score"] == 0.98
+
+    def test_scope_isolation_for_cached_citations(self):
+        """User-scoped citations are isolated from the public cache."""
+        cache = get_cache()
+        set_fake_embedding(V_EXACT)
+        cache.put(
+            embedding=V_EXACT,
+            response="User specific answer",
+            chat_id="chat-user",
+            history=[],
+            scope="user:alice",
+            citations=[{"type": "quran", "surah": 112, "ayah_start": 1}],
+        )
+
+        assert cache.get(V_EXACT, scope="public") is None
+        user_hit = cache.get(V_EXACT, scope="user:alice")
+        assert user_hit is not None
+        assert len(user_hit.citations) == 1
