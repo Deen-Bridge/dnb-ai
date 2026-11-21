@@ -96,7 +96,10 @@ from hadith_context import router as hadith_context_router
 from hadith_research import router as hadith_research_router
 from history import router as history_router
 from intent import accuracy_tracker as intent_accuracy_tracker, classify_intent
-from memorization_planner import router as memorization_planner_router
+from memorization_planner import (
+    router as memorization_planner_router,
+    user_router as memorization_planner_user_router,
+)
 from memory import ChatSummary, UserProfile, create_memory_store, render_user_context
 from memory.extraction import (
     MEMORY_EXTRACTION_ENABLED,
@@ -586,6 +589,9 @@ app.include_router(research_orchestration_router)
 app.include_router(study_router)
 # Quran memorization planner: personalized schedules, revision balance, and adaptive pacing
 app.include_router(memorization_planner_router)
+# User-bound planner data (plans, Muraja'ah progress, reset) reads and writes one
+# user's stored record, so it requires the service API key (#843).
+app.include_router(memorization_planner_user_router, dependencies=[Depends(verify_api_key)])
 # Religious sentiment analysis: reads the emotional/spiritual tone of a question
 app.include_router(sentiment_router)
 # Tafsir: grounded, attributed ayah explanations from named classical works
