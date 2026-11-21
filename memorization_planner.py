@@ -95,7 +95,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     1: SurahInfo(
         1,
         "Al-Fatihah",
-        "Ø§Ù„ÙØ§ØªØ­Ø©",
+        "الفاتحة",
         7,
         "meccan",
         DifficultyTier.EASY,
@@ -107,7 +107,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     2: SurahInfo(
         2,
         "Al-Baqarah",
-        "Ø§Ù„Ø¨Ù‚Ø±Ø©",
+        "البقرة",
         286,
         "medinan",
         DifficultyTier.HARD,
@@ -119,7 +119,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     3: SurahInfo(
         3,
         "Ali 'Imran",
-        "Ø¢Ù„ Ø¹Ù…Ø±Ø§Ù†",
+        "آل عمران",
         200,
         "medinan",
         DifficultyTier.HARD,
@@ -131,7 +131,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     4: SurahInfo(
         4,
         "An-Nisa",
-        "Ø§Ù„Ù†Ø³Ø§Ø¡",
+        "النساء",
         176,
         "medinan",
         DifficultyTier.HARD,
@@ -143,7 +143,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     5: SurahInfo(
         5,
         "Al-Ma'idah",
-        "Ø§Ù„Ù…Ø§Ø¦Ø¯Ø©",
+        "المائدة",
         120,
         "medinan",
         DifficultyTier.HARD,
@@ -155,7 +155,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     6: SurahInfo(
         6,
         "Al-An'am",
-        "Ø§Ù„Ø£Ù†Ø¹Ø§Ù…",
+        "الأنعام",
         165,
         "meccan",
         DifficultyTier.HARD,
@@ -167,7 +167,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     7: SurahInfo(
         7,
         "Al-A'raf",
-        "Ø§Ù„Ø£Ø¹Ø±Ø§Ù",
+        "الأعراف",
         206,
         "meccan",
         DifficultyTier.HARD,
@@ -179,7 +179,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     8: SurahInfo(
         8,
         "Al-Anfal",
-        "Ø§Ù„Ø£Ù†ÙØ§Ù„",
+        "الأنفال",
         75,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -191,7 +191,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     9: SurahInfo(
         9,
         "At-Tawbah",
-        "Ø§Ù„ØªÙˆØ¨Ø©",
+        "التوبة",
         129,
         "medinan",
         DifficultyTier.HARD,
@@ -203,7 +203,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     10: SurahInfo(
         10,
         "Yunus",
-        "ÙŠÙˆÙ†Ø³",
+        "يونس",
         109,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -215,7 +215,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     11: SurahInfo(
         11,
         "Hud",
-        "Ù‡ÙˆØ¯",
+        "هود",
         123,
         "meccan",
         DifficultyTier.HARD,
@@ -227,7 +227,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     12: SurahInfo(
         12,
         "Yusuf",
-        "ÙŠÙˆØ³Ù",
+        "يوسف",
         111,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -239,7 +239,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     13: SurahInfo(
         13,
         "Ar-Ra'd",
-        "Ø§Ù„Ø±Ø¹Ø¯",
+        "الرعد",
         43,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -251,7 +251,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     14: SurahInfo(
         14,
         "Ibrahim",
-        "Ø¥Ø¨Ø±Ø§Ù‡ÙŠÙ…",
+        "إبراهيم",
         52,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -263,7 +263,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     15: SurahInfo(
         15,
         "Al-Hijr",
-        "Ø§Ù„Ø­Ø¬Ø±",
+        "الحجر",
         99,
         "meccan",
         DifficultyTier.EASY,
@@ -275,7 +275,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     16: SurahInfo(
         16,
         "An-Nahl",
-        "Ø§Ù„Ù†Ø­Ù„",
+        "النحل",
         128,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -287,7 +287,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     17: SurahInfo(
         17,
         "Al-Isra",
-        "Ø§Ù„Ø¥Ø³Ø±Ø§Ø¡",
+        "الإسراء",
         111,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -299,7 +299,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     18: SurahInfo(
         18,
         "Al-Kahf",
-        "Ø§Ù„ÙƒÙ‡Ù",
+        "الكهف",
         110,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -311,7 +311,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     19: SurahInfo(
         19,
         "Maryam",
-        "Ù…Ø±ÙŠÙ…",
+        "مريم",
         98,
         "meccan",
         DifficultyTier.EASY,
@@ -323,7 +323,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     20: SurahInfo(
         20,
         "Ta-Ha",
-        "Ø·Ù‡",
+        "طه",
         135,
         "meccan",
         DifficultyTier.EASY,
@@ -335,7 +335,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     21: SurahInfo(
         21,
         "Al-Anbiya",
-        "Ø§Ù„Ø£Ù†Ø¨ÙŠØ§Ø¡",
+        "الأنبياء",
         112,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -347,7 +347,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     22: SurahInfo(
         22,
         "Al-Hajj",
-        "Ø§Ù„Ø­Ø¬",
+        "الحج",
         78,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -359,7 +359,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     23: SurahInfo(
         23,
         "Al-Mu'minun",
-        "Ø§Ù„Ù…Ø¤Ù…Ù†ÙˆÙ†",
+        "المؤمنون",
         118,
         "meccan",
         DifficultyTier.EASY,
@@ -371,7 +371,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     24: SurahInfo(
         24,
         "An-Nur",
-        "Ø§Ù„Ù†ÙˆØ±",
+        "النور",
         64,
         "medinan",
         DifficultyTier.HARD,
@@ -383,7 +383,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     25: SurahInfo(
         25,
         "Al-Furqan",
-        "Ø§Ù„ÙØ±Ù‚Ø§Ù†",
+        "الفرقان",
         77,
         "meccan",
         DifficultyTier.EASY,
@@ -395,7 +395,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     26: SurahInfo(
         26,
         "Ash-Shu'ara",
-        "Ø§Ù„Ø´Ø¹Ø±Ø§Ø¡",
+        "الشعراء",
         227,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -407,7 +407,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     27: SurahInfo(
         27,
         "An-Naml",
-        "Ø§Ù„Ù†Ù…Ù„",
+        "النمل",
         93,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -419,7 +419,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     28: SurahInfo(
         28,
         "Al-Qasas",
-        "Ø§Ù„Ù‚ØµØµ",
+        "القصص",
         88,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -431,7 +431,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     29: SurahInfo(
         29,
         "Al-'Ankabut",
-        "Ø§Ù„Ø¹Ù†ÙƒØ¨ÙˆØª",
+        "العنكبوت",
         69,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -443,7 +443,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     30: SurahInfo(
         30,
         "Ar-Rum",
-        "Ø§Ù„Ø±ÙˆÙ…",
+        "الروم",
         60,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -453,12 +453,12 @@ _SURAH_DATA: dict[int, SurahInfo] = {
         "Prophecy of Byzantine victory, signs in creation",
     ),
     31: SurahInfo(
-        31, "Luqman", "Ù„Ù‚Ù…Ø§Ù†", 34, "meccan", DifficultyTier.EASY, 4.5, 21, 21, "Wisdom of Luqman advising his son"
+        31, "Luqman", "لقمان", 34, "meccan", DifficultyTier.EASY, 4.5, 21, 21, "Wisdom of Luqman advising his son"
     ),
     32: SurahInfo(
         32,
         "As-Sajdah",
-        "Ø§Ù„Ø³Ø¬Ø¯Ø©",
+        "السجدة",
         30,
         "meccan",
         DifficultyTier.EASY,
@@ -470,7 +470,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     33: SurahInfo(
         33,
         "Al-Ahzab",
-        "Ø§Ù„Ø£Ø­Ø²Ø§Ø¨",
+        "الأحزاب",
         73,
         "medinan",
         DifficultyTier.HARD,
@@ -482,7 +482,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     34: SurahInfo(
         34,
         "Saba",
-        "Ø³Ø¨Ø£",
+        "سبأ",
         54,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -494,7 +494,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     35: SurahInfo(
         35,
         "Fatir",
-        "ÙØ§Ø·Ø±",
+        "فاطر",
         45,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -506,7 +506,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     36: SurahInfo(
         36,
         "Ya-Sin",
-        "ÙŠØ³",
+        "يس",
         83,
         "meccan",
         DifficultyTier.EASY,
@@ -518,7 +518,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     37: SurahInfo(
         37,
         "As-Saffat",
-        "Ø§Ù„ØµØ§ÙØ§Øª",
+        "الصافات",
         182,
         "meccan",
         DifficultyTier.EASY,
@@ -528,12 +528,12 @@ _SURAH_DATA: dict[int, SurahInfo] = {
         "Short verses, vivid imagery of angelic ranks",
     ),
     38: SurahInfo(
-        38, "Sad", "Øµ", 88, "meccan", DifficultyTier.MEDIUM, 5.5, 23, 23, "Prophets Dawud, Sulaiman, Ayyub in trial"
+        38, "Sad", "ص", 88, "meccan", DifficultyTier.MEDIUM, 5.5, 23, 23, "Prophets Dawud, Sulaiman, Ayyub in trial"
     ),
     39: SurahInfo(
         39,
         "Az-Zumar",
-        "Ø§Ù„Ø²Ù…Ø±",
+        "الزمر",
         75,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -545,7 +545,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     40: SurahInfo(
         40,
         "Ghafir",
-        "ØºØ§ÙØ±",
+        "غافر",
         85,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -557,7 +557,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     41: SurahInfo(
         41,
         "Fussilat",
-        "ÙØµÙ„Øª",
+        "فصلت",
         54,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -569,7 +569,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     42: SurahInfo(
         42,
         "Ash-Shura",
-        "Ø§Ù„Ø´ÙˆØ±Ù‰",
+        "الشورى",
         53,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -581,7 +581,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     43: SurahInfo(
         43,
         "Az-Zukhruf",
-        "Ø§Ù„Ø²Ø®Ø±Ù",
+        "الزخرف",
         89,
         "meccan",
         DifficultyTier.EASY,
@@ -593,7 +593,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     44: SurahInfo(
         44,
         "Ad-Dukhan",
-        "Ø§Ù„Ø¯Ø®Ø§Ù†",
+        "الدخان",
         59,
         "meccan",
         DifficultyTier.EASY,
@@ -605,7 +605,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     45: SurahInfo(
         45,
         "Al-Jathiyah",
-        "Ø§Ù„Ø¬Ø§Ø«ÙŠØ©",
+        "الجاثية",
         37,
         "meccan",
         DifficultyTier.EASY,
@@ -617,7 +617,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     46: SurahInfo(
         46,
         "Al-Ahqaf",
-        "Ø§Ù„Ø£Ø­Ù‚Ø§Ù",
+        "الأحقاف",
         35,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -629,7 +629,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     47: SurahInfo(
         47,
         "Muhammad",
-        "Ù…Ø­Ù…Ø¯",
+        "محمد",
         38,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -641,7 +641,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     48: SurahInfo(
         48,
         "Al-Fath",
-        "Ø§Ù„ÙØªØ­",
+        "الفتح",
         29,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -653,7 +653,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     49: SurahInfo(
         49,
         "Al-Hujurat",
-        "Ø§Ù„Ø­Ø¬Ø±Ø§Øª",
+        "الحجرات",
         18,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -665,7 +665,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     50: SurahInfo(
         50,
         "Qaf",
-        "Ù‚",
+        "ق",
         45,
         "meccan",
         DifficultyTier.EASY,
@@ -677,7 +677,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     51: SurahInfo(
         51,
         "Adh-Dhariyat",
-        "Ø§Ù„Ø°Ø§Ø±ÙŠØ§Øª",
+        "الذاريات",
         60,
         "meccan",
         DifficultyTier.EASY,
@@ -689,7 +689,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     52: SurahInfo(
         52,
         "At-Tur",
-        "Ø§Ù„Ø·ÙˆØ±",
+        "الطور",
         49,
         "meccan",
         DifficultyTier.EASY,
@@ -701,7 +701,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     53: SurahInfo(
         53,
         "An-Najm",
-        "Ø§Ù„Ù†Ø¬Ù…",
+        "النجم",
         62,
         "meccan",
         DifficultyTier.EASY,
@@ -713,7 +713,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     54: SurahInfo(
         54,
         "Al-Qamar",
-        "Ø§Ù„Ù‚Ù…Ø±",
+        "القمر",
         55,
         "meccan",
         DifficultyTier.EASY,
@@ -725,7 +725,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     55: SurahInfo(
         55,
         "Ar-Rahman",
-        "Ø§Ù„Ø±Ø­Ù…Ù†",
+        "الرحمن",
         78,
         "medinan",
         DifficultyTier.EASY,
@@ -737,7 +737,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     56: SurahInfo(
         56,
         "Al-Waqi'ah",
-        "Ø§Ù„ÙˆØ§Ù‚Ø¹Ø©",
+        "الواقعة",
         96,
         "meccan",
         DifficultyTier.EASY,
@@ -749,7 +749,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     57: SurahInfo(
         57,
         "Al-Hadid",
-        "Ø§Ù„Ø­Ø¯ÙŠØ¯",
+        "الحديد",
         29,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -761,7 +761,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     58: SurahInfo(
         58,
         "Al-Mujadila",
-        "Ø§Ù„Ù…Ø¬Ø§Ø¯Ù„Ø©",
+        "المجادلة",
         22,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -773,7 +773,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     59: SurahInfo(
         59,
         "Al-Hashr",
-        "Ø§Ù„Ø­Ø´Ø±",
+        "الحشر",
         24,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -785,7 +785,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     60: SurahInfo(
         60,
         "Al-Mumtahanah",
-        "Ø§Ù„Ù…Ù…ØªØ­Ù†Ø©",
+        "الممتحنة",
         13,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -795,12 +795,12 @@ _SURAH_DATA: dict[int, SurahInfo] = {
         "Testing faith and international relations",
     ),
     61: SurahInfo(
-        61, "As-Saff", "Ø§Ù„ØµÙ", 14, "medinan", DifficultyTier.EASY, 1.5, 28, 28, "Solid ranks, prophecy of Ahmad"
+        61, "As-Saff", "الصف", 14, "medinan", DifficultyTier.EASY, 1.5, 28, 28, "Solid ranks, prophecy of Ahmad"
     ),
     62: SurahInfo(
         62,
         "Al-Jumu'ah",
-        "Ø§Ù„Ø¬Ù…Ø¹Ø©",
+        "الجمعة",
         11,
         "medinan",
         DifficultyTier.EASY,
@@ -812,7 +812,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     63: SurahInfo(
         63,
         "Al-Munafiqun",
-        "Ø§Ù„Ù…Ù†Ø§ÙÙ‚ÙˆÙ†",
+        "المنافقون",
         11,
         "medinan",
         DifficultyTier.EASY,
@@ -824,7 +824,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     64: SurahInfo(
         64,
         "At-Taghabun",
-        "Ø§Ù„ØªØºØ§Ø¨Ù†",
+        "التغابن",
         18,
         "medinan",
         DifficultyTier.EASY,
@@ -836,7 +836,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     65: SurahInfo(
         65,
         "At-Talaq",
-        "Ø§Ù„Ø·Ù„Ø§Ù‚",
+        "الطلاق",
         12,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -848,7 +848,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     66: SurahInfo(
         66,
         "At-Tahrim",
-        "Ø§Ù„ØªØ­Ø±ÙŠÙ…",
+        "التحريم",
         12,
         "medinan",
         DifficultyTier.MEDIUM,
@@ -860,7 +860,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     67: SurahInfo(
         67,
         "Al-Mulk",
-        "Ø§Ù„Ù…Ù„Ùƒ",
+        "الملك",
         30,
         "meccan",
         DifficultyTier.EASY,
@@ -872,7 +872,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     68: SurahInfo(
         68,
         "Al-Qalam",
-        "Ø§Ù„Ù‚Ù„Ù…",
+        "القلم",
         52,
         "meccan",
         DifficultyTier.EASY,
@@ -884,7 +884,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     69: SurahInfo(
         69,
         "Al-Haqqah",
-        "Ø§Ù„Ø­Ø§Ù‚Ø©",
+        "الحاقة",
         52,
         "meccan",
         DifficultyTier.EASY,
@@ -896,7 +896,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     70: SurahInfo(
         70,
         "Al-Ma'arij",
-        "Ø§Ù„Ù…Ø¹Ø§Ø±Ø¬",
+        "المعارج",
         44,
         "meccan",
         DifficultyTier.EASY,
@@ -908,7 +908,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     71: SurahInfo(
         71,
         "Nuh",
-        "Ù†ÙˆØ­",
+        "نوح",
         28,
         "meccan",
         DifficultyTier.EASY,
@@ -920,7 +920,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     72: SurahInfo(
         72,
         "Al-Jinn",
-        "Ø§Ù„Ø¬Ù†",
+        "الجن",
         28,
         "meccan",
         DifficultyTier.MEDIUM,
@@ -932,7 +932,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     73: SurahInfo(
         73,
         "Al-Muzzammil",
-        "Ø§Ù„Ù…Ø²Ù…Ù„",
+        "المزمل",
         20,
         "meccan",
         DifficultyTier.EASY,
@@ -944,7 +944,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     74: SurahInfo(
         74,
         "Al-Muddaththir",
-        "Ø§Ù„Ù…Ø¯Ø«Ø±",
+        "المدثر",
         56,
         "meccan",
         DifficultyTier.EASY,
@@ -956,7 +956,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     75: SurahInfo(
         75,
         "Al-Qiyamah",
-        "Ø§Ù„Ù‚ÙŠØ§Ù…Ø©",
+        "القيامة",
         40,
         "meccan",
         DifficultyTier.EASY,
@@ -968,7 +968,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     76: SurahInfo(
         76,
         "Al-Insan",
-        "Ø§Ù„Ø¥Ù†Ø³Ø§Ù†",
+        "الإنسان",
         31,
         "medinan",
         DifficultyTier.EASY,
@@ -980,7 +980,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     77: SurahInfo(
         77,
         "Al-Mursalat",
-        "Ø§Ù„Ù…Ø±Ø³Ù„Ø§Øª",
+        "المرسلات",
         50,
         "meccan",
         DifficultyTier.EASY,
@@ -992,7 +992,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     78: SurahInfo(
         78,
         "An-Naba",
-        "Ø§Ù„Ù†Ø¨Ø£",
+        "النبأ",
         40,
         "meccan",
         DifficultyTier.EASY,
@@ -1004,7 +1004,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     79: SurahInfo(
         79,
         "An-Nazi'at",
-        "Ø§Ù„Ù†Ø§Ø²Ø¹Ø§Øª",
+        "النازعات",
         46,
         "meccan",
         DifficultyTier.EASY,
@@ -1016,7 +1016,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     80: SurahInfo(
         80,
         "'Abasa",
-        "Ø¹Ø¨Ø³",
+        "عبس",
         42,
         "meccan",
         DifficultyTier.EASY,
@@ -1028,7 +1028,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     81: SurahInfo(
         81,
         "At-Takwir",
-        "Ø§Ù„ØªÙƒÙˆÙŠØ±",
+        "التكوير",
         29,
         "meccan",
         DifficultyTier.EASY,
@@ -1040,7 +1040,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     82: SurahInfo(
         82,
         "Al-Infitar",
-        "Ø§Ù„Ø§Ù†ÙØ·Ø§Ø±",
+        "الانفطار",
         19,
         "meccan",
         DifficultyTier.EASY,
@@ -1052,7 +1052,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     83: SurahInfo(
         83,
         "Al-Mutaffifin",
-        "Ø§Ù„Ù…Ø·ÙÙÙŠÙ†",
+        "المطففين",
         36,
         "meccan",
         DifficultyTier.EASY,
@@ -1064,7 +1064,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     84: SurahInfo(
         84,
         "Al-Inshiqaq",
-        "Ø§Ù„Ø§Ù†Ø´Ù‚Ø§Ù‚",
+        "الانشقاق",
         25,
         "meccan",
         DifficultyTier.EASY,
@@ -1076,7 +1076,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     85: SurahInfo(
         85,
         "Al-Buruj",
-        "Ø§Ù„Ø¨Ø±ÙˆØ¬",
+        "البروج",
         22,
         "meccan",
         DifficultyTier.EASY,
@@ -1088,7 +1088,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     86: SurahInfo(
         86,
         "At-Tariq",
-        "Ø§Ù„Ø·Ø§Ø±Ù‚",
+        "الطارق",
         17,
         "meccan",
         DifficultyTier.EASY,
@@ -1100,7 +1100,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     87: SurahInfo(
         87,
         "Al-A'la",
-        "Ø§Ù„Ø£Ø¹Ù„Ù‰",
+        "الأعلى",
         19,
         "meccan",
         DifficultyTier.EASY,
@@ -1112,7 +1112,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     88: SurahInfo(
         88,
         "Al-Ghashiyah",
-        "Ø§Ù„ØºØ§Ø´ÙŠØ©",
+        "الغاشية",
         26,
         "meccan",
         DifficultyTier.EASY,
@@ -1124,7 +1124,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     89: SurahInfo(
         89,
         "Al-Fajr",
-        "Ø§Ù„ÙØ¬Ø±",
+        "الفجر",
         30,
         "meccan",
         DifficultyTier.EASY,
@@ -1136,7 +1136,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     90: SurahInfo(
         90,
         "Al-Balad",
-        "Ø§Ù„Ø¨Ù„Ø¯",
+        "البلد",
         20,
         "meccan",
         DifficultyTier.EASY,
@@ -1148,7 +1148,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     91: SurahInfo(
         91,
         "Ash-Shams",
-        "Ø§Ù„Ø´Ù…Ø³",
+        "الشمس",
         15,
         "meccan",
         DifficultyTier.EASY,
@@ -1160,7 +1160,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     92: SurahInfo(
         92,
         "Al-Layl",
-        "Ø§Ù„Ù„ÙŠÙ„",
+        "الليل",
         21,
         "meccan",
         DifficultyTier.EASY,
@@ -1172,7 +1172,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     93: SurahInfo(
         93,
         "Ad-Duha",
-        "Ø§Ù„Ø¶Ø­Ù‰",
+        "الضحى",
         11,
         "meccan",
         DifficultyTier.EASY,
@@ -1184,7 +1184,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     94: SurahInfo(
         94,
         "Ash-Sharh",
-        "Ø§Ù„Ø´Ø±Ø­",
+        "الشرح",
         8,
         "meccan",
         DifficultyTier.EASY,
@@ -1196,7 +1196,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     95: SurahInfo(
         95,
         "At-Tin",
-        "Ø§Ù„ØªÙŠÙ†",
+        "التين",
         8,
         "meccan",
         DifficultyTier.EASY,
@@ -1208,7 +1208,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     96: SurahInfo(
         96,
         "Al-'Alaq",
-        "Ø§Ù„Ø¹Ù„Ù‚",
+        "العلق",
         19,
         "meccan",
         DifficultyTier.EASY,
@@ -1220,7 +1220,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     97: SurahInfo(
         97,
         "Al-Qadr",
-        "Ø§Ù„Ù‚Ø¯Ø±",
+        "القدر",
         5,
         "meccan",
         DifficultyTier.EASY,
@@ -1232,7 +1232,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     98: SurahInfo(
         98,
         "Al-Bayyinah",
-        "Ø§Ù„Ø¨ÙŠÙ†Ø©",
+        "البينة",
         8,
         "medinan",
         DifficultyTier.EASY,
@@ -1244,7 +1244,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     99: SurahInfo(
         99,
         "Az-Zalzalah",
-        "Ø§Ù„Ø²Ù„Ø²Ù„Ø©",
+        "الزلزلة",
         8,
         "medinan",
         DifficultyTier.EASY,
@@ -1256,7 +1256,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     100: SurahInfo(
         100,
         "Al-'Adiyat",
-        "Ø§Ù„Ø¹Ø§Ø¯ÙŠØ§Øª",
+        "العاديات",
         11,
         "meccan",
         DifficultyTier.EASY,
@@ -1268,7 +1268,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     101: SurahInfo(
         101,
         "Al-Qari'ah",
-        "Ø§Ù„Ù‚Ø§Ø±Ø¹Ø©",
+        "القارعة",
         11,
         "meccan",
         DifficultyTier.EASY,
@@ -1280,7 +1280,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     102: SurahInfo(
         102,
         "At-Takathur",
-        "Ø§Ù„ØªÙƒØ§Ø«Ø±",
+        "التكاثر",
         8,
         "meccan",
         DifficultyTier.EASY,
@@ -1292,7 +1292,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     103: SurahInfo(
         103,
         "Al-'Asr",
-        "Ø§Ù„Ø¹ØµØ±",
+        "العصر",
         3,
         "meccan",
         DifficultyTier.EASY,
@@ -1304,7 +1304,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     104: SurahInfo(
         104,
         "Al-Humazah",
-        "Ø§Ù„Ù‡Ù…Ø²Ø©",
+        "الهمزة",
         9,
         "meccan",
         DifficultyTier.EASY,
@@ -1316,7 +1316,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     105: SurahInfo(
         105,
         "Al-Fil",
-        "Ø§Ù„ÙÙŠÙ„",
+        "الفيل",
         5,
         "meccan",
         DifficultyTier.EASY,
@@ -1328,7 +1328,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     106: SurahInfo(
         106,
         "Quraysh",
-        "Ù‚Ø±ÙŠØ´",
+        "قريش",
         4,
         "meccan",
         DifficultyTier.EASY,
@@ -1340,7 +1340,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     107: SurahInfo(
         107,
         "Al-Ma'un",
-        "Ø§Ù„Ù…Ø§Ø¹ÙˆÙ†",
+        "الماعون",
         7,
         "meccan",
         DifficultyTier.EASY,
@@ -1352,7 +1352,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     108: SurahInfo(
         108,
         "Al-Kawthar",
-        "Ø§Ù„ÙƒÙˆØ«Ø±",
+        "الكوثر",
         3,
         "meccan",
         DifficultyTier.EASY,
@@ -1364,7 +1364,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     109: SurahInfo(
         109,
         "Al-Kafirun",
-        "Ø§Ù„ÙƒØ§ÙØ±ÙˆÙ†",
+        "الكافرون",
         6,
         "meccan",
         DifficultyTier.EASY,
@@ -1376,7 +1376,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     110: SurahInfo(
         110,
         "An-Nasr",
-        "Ø§Ù„Ù†ØµØ±",
+        "النصر",
         3,
         "medinan",
         DifficultyTier.EASY,
@@ -1388,7 +1388,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     111: SurahInfo(
         111,
         "Al-Masad",
-        "Ø§Ù„Ù…Ø³Ø¯",
+        "المسد",
         5,
         "meccan",
         DifficultyTier.EASY,
@@ -1400,7 +1400,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     112: SurahInfo(
         112,
         "Al-Ikhlas",
-        "Ø§Ù„Ø¥Ø®Ù„Ø§Øµ",
+        "الإخلاص",
         4,
         "meccan",
         DifficultyTier.EASY,
@@ -1412,7 +1412,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     113: SurahInfo(
         113,
         "Al-Falaq",
-        "Ø§Ù„ÙÙ„Ù‚",
+        "الفلق",
         5,
         "meccan",
         DifficultyTier.EASY,
@@ -1424,7 +1424,7 @@ _SURAH_DATA: dict[int, SurahInfo] = {
     114: SurahInfo(
         114,
         "An-Nas",
-        "Ø§Ù„Ù†Ø§Ø³",
+        "الناس",
         6,
         "meccan",
         DifficultyTier.EASY,
@@ -1944,7 +1944,7 @@ class MemorizationPlannerEngine:
                 ]
             )
             encouragement = (
-                "Do not be disheartened. In the words of the Prophet ï·º: 'The one who recites the Quran "
+                "Do not be disheartened. In the words of the Prophet ﷺ: 'The one who recites the Quran "
                 "with difficulty, stammering over its verses, will receive a double reward.' (Sahih Muslim 798)."
             )
         elif strong_ratio >= 0.8 and req.days_missed == 0:
@@ -2002,7 +2002,7 @@ class MemorizationPlannerEngine:
             return MilestoneCelebration(
                 achieved=True,
                 milestone_title=f"Completed {surah_name}!",
-                badge="ðŸ† Surah Finisher",
+                badge="🏆 Surah Finisher",
                 celebration_message=f"Congratulations on fully memorizing {surah_name}! What an incredible spiritual achievement.",
                 authentic_citation="Sahih al-Bukhari 5027: 'The best among you are those who learn the Quran and teach it.'",
                 next_objective=f"Dedicate the next session to reciting {surah_name} in its entirety from memory before beginning the next chapter.",
@@ -2012,7 +2012,7 @@ class MemorizationPlannerEngine:
             return MilestoneCelebration(
                 achieved=True,
                 milestone_title="30-Day Unbroken Streak!",
-                badge="ðŸ”¥ Istiqamah (Steadfastness) Star",
+                badge="🔥 Istiqamah (Steadfastness) Star",
                 celebration_message="A full month of daily commitment to the Book of Allah! Your discipline is exemplary.",
                 authentic_citation="Sahih al-Bukhari 6464: 'The deeds most loved by Allah are those done regularly, even if small.'",
                 next_objective="Continue to protect your daily revision time as sacred.",
@@ -2022,7 +2022,7 @@ class MemorizationPlannerEngine:
             return MilestoneCelebration(
                 achieved=True,
                 milestone_title="Goal Completed! Khatm al-Hifz!",
-                badge="ðŸ‘‘ Hafiz Milestone",
+                badge="👑 Hafiz Milestone",
                 celebration_message="All praise is due to Allah! You have completed your memorization target.",
                 authentic_citation="Sunan Abi Dawud 1464: 'Recite and ascend in ranks, for your status is at the last verse you recite.'",
                 next_objective="Begin the permanent Manzil revision cycle: recite your entire memorized portion weekly or biweekly.",
@@ -2032,7 +2032,7 @@ class MemorizationPlannerEngine:
             return MilestoneCelebration(
                 achieved=True,
                 milestone_title="Halfway Mark Achieved (50%)",
-                badge="ðŸŒŸ Halfway Champion",
+                badge="🌟 Halfway Champion",
                 celebration_message="You have memorized over half of your designated goal! Keep this momentum.",
                 authentic_citation="Sahih Muslim 798: 'The one who recites the Quran skillfully is with the noble angels.'",
                 next_objective="Conduct a complete revision of the first half before advancing further.",
@@ -2041,7 +2041,7 @@ class MemorizationPlannerEngine:
         return MilestoneCelebration(
             achieved=False,
             milestone_title="In Progress",
-            badge="ðŸŒ± Active Learner",
+            badge="🌱 Active Learner",
             celebration_message=f"You have memorized {req.current_memorized_ayahs} ayahs so far. Every single letter holds ten rewards.",
             authentic_citation="Jami` at-Tirmidhi 2910: 'Whoever reads a letter from the Book of Allah gets a good deed multiplied tenfold.'",
             next_objective="Keep up your daily Sabaq and Sabqi revision.",
