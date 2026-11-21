@@ -58,6 +58,7 @@ from citations import (
     CitationExtraction,
     CitationStreamFilter,
     extract_citations,
+    validate_citations,
 )
 from concordance import router as concordance_router
 from confidence import (
@@ -1710,14 +1711,35 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 cached_message_id = _record_answer(chat_id, prompt, exact_cached["response"])
                 _finalize()
                 _succeeded = True
+                cached_citations = validate_citations(exact_cached.get("citations", []))
+                cached_meta = exact_cached.get("metadata", {})
+                fastapi_response.headers["X-Cached-Citations"] = str(len(cached_citations))
+                cached_confidence = None
+                if "confidence_score" in cached_meta and "confidence_band" in cached_meta:
+                    cached_confidence = ConfidenceAssessment(
+                        score=float(cached_meta["confidence_score"]),
+                        band=ConfidenceBand(cached_meta["confidence_band"]),
+                        abstained=bool(cached_meta.get("abstained", False)),
+                        queued=bool(cached_meta.get("queued", False)),
+                        signals_used=cached_meta.get("signals_used", []),
+                        signals=cached_meta.get("signals", {}),
+                    )
                 return ChatResponse(
                     response=exact_cached["response"],
                     chat_id=chat_id,
                     message_id=cached_message_id,
                     history=exact_cached["history"],
+                    moderation=Moderation(
+                        category_id=cached_meta.get("safety_category"),
+                        action=cached_meta.get("safety_action", "pass"),
+                    )
+                    if cached_meta.get("safety_category")
+                    else None,
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(exact_cached["response"]),
+                    confidence=cached_confidence,
                     language=effective_language,
+                    citations=cached_citations,
                 )
 
             # Semantic cache lookup (tier 2)
@@ -1742,14 +1764,35 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 cached_message_id = _record_answer(chat_id, prompt, cached.response)
                 _finalize()
                 _succeeded = True
+                cached_citations = validate_citations(cached.citations)
+                cached_meta = cached.metadata or {}
+                fastapi_response.headers["X-Cached-Citations"] = str(len(cached_citations))
+                cached_confidence = None
+                if "confidence_score" in cached_meta and "confidence_band" in cached_meta:
+                    cached_confidence = ConfidenceAssessment(
+                        score=float(cached_meta["confidence_score"]),
+                        band=ConfidenceBand(cached_meta["confidence_band"]),
+                        abstained=bool(cached_meta.get("abstained", False)),
+                        queued=bool(cached_meta.get("queued", False)),
+                        signals_used=cached_meta.get("signals_used", []),
+                        signals=cached_meta.get("signals", {}),
+                    )
                 return ChatResponse(
                     response=cached.response,
                     chat_id=chat_id,
                     message_id=cached_message_id,
                     history=cached.history,
+                    moderation=Moderation(
+                        category_id=cached_meta.get("safety_category"),
+                        action=cached_meta.get("safety_action", "pass"),
+                    )
+                    if cached_meta.get("safety_category")
+                    else None,
                     fiqh=fiqh_info,
                     hadith_references=annotate_hadith(cached.response),
+                    confidence=cached_confidence,
                     language=effective_language,
+                    citations=cached_citations,
                 )
         elif is_bypass:
             semantic_cache.bypasses += 1
@@ -1967,11 +2010,32 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 normalized = normalize_text(prompt)
                 embedding = embed_text(normalized)
 
+            cached_metadata = {
+                "model": telemetry.GEMINI_MODEL,
+                "language": effective_language,
+                "confidence_score": assessment.score,
+                "confidence_band": assessment.band.value,
+                "signals_used": assessment.signals_used,
+                "signals": assessment.signals,
+                "abstained": assessment.abstained,
+                "queued": assessment.queued,
+                "safety_category": safety_result.category_id if safety_result else None,
+                "safety_action": safety_result.action if safety_result else "pass",
+                "prompt_version": 1,
+                "created_at": time.time(),
+            }
+            cached_citations_dump = [c.model_dump() for c in citation_extraction.citations]
+
             # Write to exact-match cache (tier 1)
             exact_key = f"{cache_scope}:{normalized}"
             exact_cache.put(
                 exact_key,
-                {"response": response_text, "history": history},
+                {
+                    "response": response_text,
+                    "history": history,
+                    "citations": cached_citations_dump,
+                    "metadata": cached_metadata,
+                },
                 token_count=token_count,
             )
 
@@ -1983,6 +2047,9 @@ async def chat(body: ChatRequest, request: Request, fastapi_response: Response) 
                 history,
                 scope=cache_scope,
                 token_count=token_count,
+                version=2,
+                metadata=cached_metadata,
+                citations=cached_citations_dump,
             )
             logger.info("Two-tier cache WRITE for prompt: %s (scope: %s)", prompt[:80], cache_scope)
 
