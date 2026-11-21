@@ -212,3 +212,79 @@ def test_no_citation_markers_survive_into_any_visible_field(monkeypatch):
     marker = re.compile(r"<<<\s*/?\s*(END_)?CITATIONS\s*>>>")
     for field in rendered:
         assert not marker.search(field), f"citation marker leaked into: {field[:120]}"
+
+
+class TestCachedCitationsPreservation:
+    """Regression tests for [PROD-AUDIT AI-095] / Issue #871."""
+
+    def test_cached_hit_preserves_citations_and_provenance(self, monkeypatch):
+        import semantic_cache
+
+        monkeypatch.setattr(semantic_cache, "SEMANTIC_CACHE_ENABLED", True)
+        monkeypatch.setattr(main, "SEMANTIC_CACHE_ENABLED", True)
+        cache = semantic_cache.get_cache()
+        cache.clear()
+        exact_cache = semantic_cache.get_chat_exact_cache()
+        exact_cache.clear()
+
+        prompt = "What does the Quran say about patience and prayer?"
+        answer = "Seek help through patience and prayer." + block(
+            '{"citations": [{"type": "quran", "surah": 2, "ayah_start": 153}]}'
+        )
+        monkeypatch.setattr(main, "get_model", lambda: mock_model_returning(answer))
+
+        # Turn 1: Cache miss
+        resp1 = client.post("/chat", json={"prompt": prompt, "chat_id": "session-1"})
+        assert resp1.status_code == 200
+        assert resp1.headers.get("X-Semantic-Cache") in ("miss", None)
+        body1 = resp1.json()
+        assert len(body1["citations"]) == 1
+        assert body1["citations"][0]["surah"] == 2
+        assert body1["citations"][0]["ayah_start"] == 153
+        assert body1["citations"][0]["surah_name"] == "Al-Baqarah"
+
+        # Turn 2: Exact/semantic cache hit with new session (clean turn)
+        resp2 = client.post("/chat", json={"prompt": prompt, "chat_id": "session-2"})
+        assert resp2.status_code == 200
+        assert resp2.headers.get("X-Semantic-Cache") == "hit"
+        assert resp2.headers.get("X-Cached-Citations") == "1"
+        body2 = resp2.json()
+        # Citations are strictly preserved across cache hits
+        assert len(body2["citations"]) == 1
+        assert body2["citations"][0]["surah"] == 2
+        assert body2["citations"][0]["ayah_start"] == 153
+        assert body2["citations"][0]["surah_name"] == "Al-Baqarah"
+        # Content remains identical
+        assert body2["response"] == body1["response"]
+
+    def test_cache_bypass_re_queries_and_returns_citations(self, monkeypatch):
+        import semantic_cache
+
+        monkeypatch.setattr(semantic_cache, "SEMANTIC_CACHE_ENABLED", True)
+        monkeypatch.setattr(main, "SEMANTIC_CACHE_ENABLED", True)
+        cache = semantic_cache.get_cache()
+        cache.clear()
+        exact_cache = semantic_cache.get_chat_exact_cache()
+        exact_cache.clear()
+
+        prompt = "What does the Quran say about honesty?"
+        answer = "Be conscious of Allah and be with those who are true." + block(
+            '{"citations": [{"type": "quran", "surah": 9, "ayah_start": 119}]}'
+        )
+        monkeypatch.setattr(main, "get_model", lambda: mock_model_returning(answer))
+
+        # Turn 1: Cache miss & populate
+        client.post("/chat", json={"prompt": prompt, "chat_id": "session-bypass-1"})
+
+        # Turn 2: With X-Cache-Bypass header
+        resp = client.post(
+            "/chat",
+            json={"prompt": prompt, "chat_id": "session-bypass-2"},
+            headers={"X-Cache-Bypass": "1"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Semantic-Cache") == "bypass"
+        body = resp.json()
+        assert len(body["citations"]) == 1
+        assert body["citations"][0]["surah"] == 9
+        assert body["citations"][0]["ayah_start"] == 119

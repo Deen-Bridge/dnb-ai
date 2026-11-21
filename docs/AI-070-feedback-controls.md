@@ -1,5 +1,7 @@
 # Feedback abuse controls (AI-070)
 
+**Owner:** DeenBridge AI service maintainers (feedback API and persistence).
+
 ## Contract
 
 - A submission must reference a (chat_id, message_id) answer snapshot recorded by this process. The client cannot create feedback records by supplying prompt or answer text. Unknown or expired snapshots return HTTP 404 and are not stored.

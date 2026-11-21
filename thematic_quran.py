@@ -17,6 +17,7 @@ Features:
 - Thematic summaries
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -25,6 +26,12 @@ from enum import Enum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+UNCERTAINTY_NOTE = (
+    "Theme-to-verse mappings are a curated, non-exhaustive aid drawn from the classical tafsir "
+    "and concordance tradition; relevance scores are editorial estimates, not scholarly rulings. "
+    "An empty result means no curated mapping exists, not that the Quran is silent on the theme."
+)
 
 
 class RevelationPeriod(str, Enum):
@@ -521,15 +528,59 @@ class ThemeVerseStore:
         self._data_file: str = str(data_file or os.getenv("THEME_VERSE_DATA") or "./data/theme_verses.json")
         self._load_data()
 
+    @property
+    def manifest_file(self) -> str:
+        """Path of the version manifest that sits beside the data file."""
+        base, _ = os.path.splitext(self._data_file)
+        return base + ".meta.json"
+
+    def _load_manifest(self) -> dict[str, Any]:
+        """Read the version manifest; an absent/corrupt one yields an empty dict."""
+        try:
+            with open(self.manifest_file, encoding="utf-8") as f:
+                manifest = json.load(f)
+            return manifest if isinstance(manifest, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as e:
+            logger.warning("Failed to read theme verse manifest: %s", e)
+            return {}
+
+    @staticmethod
+    def _valid_item(item: Any) -> bool:
+        """True when a raw mapping record is well-formed and within Quran bounds."""
+        if not isinstance(item, dict):
+            return False
+        surah, ayah, theme_id = item.get("surah"), item.get("ayah"), item.get("theme_id")
+        if isinstance(surah, bool) or isinstance(ayah, bool):
+            return False
+        if not isinstance(surah, int) or not isinstance(ayah, int) or not isinstance(theme_id, str) or not theme_id:
+            return False
+        if not 1 <= surah <= 114 or ayah < 1:
+            return False
+        score = item.get("relevance_score", 1.0)
+        if isinstance(score, bool) or not isinstance(score, int | float) or not 0.0 <= score <= 1.0:
+            return False
+        return True
+
     def _load_data(self) -> None:
-        """Load mappings from file."""
+        """Load mappings from file, recording version and provenance."""
+        self._skipped = 0
+        self._content_sha256: str | None = None
+        self._manifest: dict[str, Any] = {}
         if not os.path.exists(self._data_file):
             logger.info("No theme verse data file found; starting empty")
             return
         try:
-            with open(self._data_file) as f:
-                data = json.load(f)
+            with open(self._data_file, "rb") as f:
+                raw = f.read()
+            self._content_sha256 = hashlib.sha256(raw).hexdigest()
+            data = json.loads(raw.decode("utf-8"))
+            self._manifest = self._load_manifest()
             for item in data.get("mappings", []):
+                if not self._valid_item(item):
+                    self._skipped += 1
+                    continue
                 mapping = VerseThemeMapping(
                     surah=item["surah"],
                     ayah=item["ayah"],
@@ -540,9 +591,25 @@ class ThemeVerseStore:
                     context_type=item.get("context_type", "primary"),
                 )
                 self.add_mapping(mapping)
+            if self._skipped:
+                logger.warning("Skipped %d malformed theme-verse mappings", self._skipped)
             logger.info("Loaded %d theme-verse mappings", len(self._mappings))
         except Exception as e:
             logger.warning("Failed to load theme verse data: %s", e)
+
+    def dataset_info(self) -> dict[str, Any]:
+        """Version/provenance of the loaded mapping data, safe to expose to clients."""
+        manifest = self._manifest
+        return {
+            "dataset_version": manifest.get("dataset_version", "unversioned"),
+            "schema_version": manifest.get("schema_version"),
+            "source": manifest.get("source", "unknown"),
+            "curation": manifest.get("curation"),
+            "content_sha256": self._content_sha256,
+            "mapping_count": len(self._mappings),
+            "skipped_invalid": self._skipped,
+            "uncertainty_note": UNCERTAINTY_NOTE,
+        }
 
     def add_mapping(self, mapping: VerseThemeMapping) -> None:
         """Add a verse-theme mapping."""
@@ -730,6 +797,7 @@ class ThematicRetriever:
             "children": [c.to_dict() for c in children],
             "related": [r.to_dict() for r in related],
             "total_verses": len(self.verse_store.get_verses_for_theme(theme_id)),
+            "provenance": self.verse_store.dataset_info(),
         }
 
     def search_themes(self, query: str) -> list[dict[str, Any]]:

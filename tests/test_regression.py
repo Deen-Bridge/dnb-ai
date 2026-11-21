@@ -85,6 +85,33 @@ class TestRegressionRunner:
         assert comp["degraded"] is False
         assert "OK" in comp["alert"]
 
+    def test_baseline_metadata_required_together(self, tmp_path: Path):
+        runner = RegressionRunner(baseline_path=tmp_path / "b.json")
+        with pytest.raises(ValueError):
+            runner.save_baseline({"mean_composite_score": 0.9}, owner="team")
+        assert runner.baseline_metadata_errors() == ["baseline file missing"]
+        runner.save_baseline({"mean_composite_score": 0.9}, owner="team", version="1", rollback_plan="restore .prev")
+        assert runner.baseline_metadata_errors() == []
+
+    def test_rollback_restores_previous_baseline(self, tmp_path: Path):
+        runner = RegressionRunner(baseline_path=tmp_path / "b.json")
+        assert runner.rollback_baseline() is False
+        runner.save_baseline({"mean_composite_score": 0.9})
+        runner.save_baseline({"mean_composite_score": 0.5})
+        assert runner.load_baseline()["mean_composite_score"] == 0.5
+        assert runner.rollback_baseline() is True
+        assert runner.load_baseline()["mean_composite_score"] == 0.9
+
+    def test_domain_and_pass_rate_thresholds(self, tmp_path: Path):
+        runner = RegressionRunner(baseline_path=tmp_path / "b.json")
+        runner.save_baseline({"mean_composite_score": 0.9, "pass_rate": 1.0, "domain_scores": {"a": 0.9, "b": 0.9}})
+        cur = {"mean_composite_score": 0.9, "pass_rate": 0.8, "domain_scores": {"a": 0.95, "b": 0.7}}
+        assert runner.compare_with_baseline(cur)["degraded"] is False
+        comp = runner.compare_with_baseline(cur, domain_tolerance=0.1, pass_rate_tolerance=0.1)
+        assert comp["degraded"] is True
+        assert len(comp["reasons"]) == 2
+        assert "domain b" in comp["alert"]
+
     def test_baseline_comparison_detects_regression(self, sample_dataset: Path, tmp_path: Path):
         baseline_file = tmp_path / "baseline.json"
         runner = RegressionRunner(dataset_path=sample_dataset, baseline_path=baseline_file)

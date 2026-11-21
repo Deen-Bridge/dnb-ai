@@ -89,6 +89,20 @@ class TestSQLiteStore:
         assert len(remaining) == 1
         assert remaining[0].chat_id == "chat-b"
 
+    def test_arabic_and_english_feedback_context_roundtrips(self, store):
+        record = make_record(
+            prompt="ما معنى الصبر؟",
+            answer="Patience (الصبر) means steadfastness.",
+            comment="The Arabic and English explanation is clear.",
+        )
+
+        store.create_if_absent(record)
+        loaded = store.get(record.chat_id, record.message_id)
+
+        assert loaded is not None
+        assert loaded.prompt == record.prompt
+        assert loaded.answer == record.answer
+        assert loaded.comment == record.comment
     def test_get_missing_returns_none(self, store):
         assert store.get("nope", "nope") is None
 
