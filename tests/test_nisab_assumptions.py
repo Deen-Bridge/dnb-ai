@@ -17,9 +17,8 @@ test is the pure arithmetic layer that never reaches the network. The
 from __future__ import annotations
 
 import asyncio
-import os
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -28,12 +27,12 @@ from nisab import (
     DEFAULT_NISAB_USD,
     FALLBACK_SOURCE,
     GRAMS_PER_TROY_OUNCE,
-    MIN_PLAUSIBLE_OUNCE_USD,
     MAX_PLAUSIBLE_OUNCE_USD,
+    MIN_PLAUSIBLE_OUNCE_USD,
     NISAB_GOLD_GRAMS,
+    PRIMARY_SOURCE,
     NisabAssumptions,
     NisabQuote,
-    PRIMARY_SOURCE,
     get_nisab,
     nisab_from_ounce_price,
     override_quote,

@@ -11,7 +11,7 @@ Storage backends (selected at import time):
   - SQLite  — fallback for local dev and free-tier Render
 
 Abuse resistance:
-  - One record per (chat_id, message_id): resubmission overwrites (idempotent)
+  - One record per (chat_id, message_id): first submission wins; retries are idempotent
   - comment capped at COMMENT_MAX_CHARS characters (validated server-side)
   - categories validated against FEEDBACK_TAXONOMY
   - per-IP rate limiting via an in-process sliding-window counter
@@ -211,6 +211,12 @@ class FeedbackStore:
     """Abstract interface — concrete implementations below."""
 
     def upsert(self, record: FeedbackRecord) -> None:
+        raise NotImplementedError
+
+    def create_if_absent(self, record: FeedbackRecord) -> FeedbackRecord:
+        raise NotImplementedError
+
+    def delete_chat(self, chat_id: str) -> None:
         raise NotImplementedError
 
     def get(self, chat_id: str, message_id: str) -> FeedbackRecord | None:
@@ -490,6 +496,38 @@ class SQLiteFeedbackStore(FeedbackStore):
         self._prune(conn)
         conn.commit()
 
+    def create_if_absent(self, record: FeedbackRecord) -> FeedbackRecord:
+        conn = self._conn()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO feedback
+                (feedback_id, chat_id, message_id, rating, categories, comment,
+                 prompt, answer, model_name, generation_config, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.feedback_id,
+                record.chat_id,
+                record.message_id,
+                record.rating,
+                json.dumps(record.categories),
+                record.comment,
+                record.prompt,
+                record.answer,
+                record.model_name,
+                json.dumps(record.generation_config) if record.generation_config else None,
+                record.created_at,
+            ),
+        )
+        self._prune(conn)
+        conn.commit()
+        return self.get(record.chat_id, record.message_id) or record
+
+    def delete_chat(self, chat_id: str) -> None:
+        conn = self._conn()
+        conn.execute("DELETE FROM feedback WHERE chat_id=?", (chat_id,))
+        conn.commit()
+
     def get(self, chat_id: str, message_id: str) -> FeedbackRecord | None:
         conn = self._conn()
         row = conn.execute(
@@ -621,6 +659,59 @@ class RedisFeedbackStore(FeedbackStore):
             pipe.zadd(f"{self._PREFIX}:index:cat:{cat}", {key: ts})
         pipe.zadd(f"{self._PREFIX}:index:model:{record.model_name or 'unknown'}", {key: ts})
         pipe.execute()
+
+    def create_if_absent(self, record: FeedbackRecord) -> FeedbackRecord:
+        """Keep the first Redis submission for an answer, including concurrent retries."""
+        key = self._record_key(record.chat_id, record.message_id)
+        lock_key = f"{key}:submission-lock"
+        acquired = bool(self._r.set(lock_key, "1", nx=True, ex=5))
+        if acquired:
+            try:
+                if not self._r.exists(key):
+                    data = record.to_dict()
+                    data["categories"] = json.dumps(data["categories"])
+                    data["generation_config"] = (
+                        json.dumps(data["generation_config"]) if data["generation_config"] else ""
+                    )
+                    pipe = self._r.pipeline()
+                    pipe.hset(key, mapping={k: (v if v is not None else "") for k, v in data.items()})
+                    pipe.expire(key, REDIS_TTL_SECONDS)
+                    timestamp = time.time()
+                    pipe.zadd(f"{self._PREFIX}:index:rating:{record.rating}", {key: timestamp})
+                    for category in record.categories:
+                        pipe.zadd(f"{self._PREFIX}:index:cat:{category}", {key: timestamp})
+                    pipe.zadd(f"{self._PREFIX}:index:model:{record.model_name or 'unknown'}", {key: timestamp})
+                    pipe.execute()
+            finally:
+                self._r.delete(lock_key)
+        else:
+            # Another request owns the short lock. Wait for its atomic write;
+            # fail closed if it stalls instead of returning a made-up ID.
+            for _ in range(50):
+                existing = self.get(record.chat_id, record.message_id)
+                if existing is not None:
+                    return existing
+                time.sleep(0.01)
+            raise RuntimeError("Timed out waiting for duplicate feedback submission")
+        return self.get(record.chat_id, record.message_id) or record
+
+    def delete_chat(self, chat_id: str) -> None:
+        prefix = f"{self._PREFIX}:{chat_id}:"
+        for raw in self._r.scan_iter(match=f"{prefix}*"):
+            key = raw.decode() if isinstance(raw, bytes) else str(raw)
+            message_id = key[len(prefix) :]
+            if message_id.endswith(":submission-lock"):
+                continue
+            record = self.get(chat_id, message_id)
+            if record is None:
+                continue
+            pipe = self._r.pipeline()
+            pipe.delete(key)
+            pipe.zrem(f"{self._PREFIX}:index:rating:{record.rating}", key)
+            for category in record.categories:
+                pipe.zrem(f"{self._PREFIX}:index:cat:{category}", key)
+            pipe.zrem(f"{self._PREFIX}:index:model:{record.model_name or 'unknown'}", key)
+            pipe.execute()
 
     def get(self, chat_id: str, message_id: str) -> FeedbackRecord | None:
         data = self._r.hgetall(self._record_key(chat_id, message_id))

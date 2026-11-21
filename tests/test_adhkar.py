@@ -16,7 +16,6 @@ import re
 import tempfile
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from adhkar import AdhkarCorpus

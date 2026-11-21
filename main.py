@@ -978,9 +978,7 @@ class FeedbackRequest(BaseModel):
     # At most one tag per taxonomy category; a caller cannot pad the list.
     categories: list[str] | None = Field(None, max_length=len(FEEDBACK_TAXONOMY))
     comment: str | None = Field(None, max_length=COMMENT_MAX_CHARS)
-    # Supplied by the client when the snapshot is gone (restart). Bounded so an
-    # anonymous caller cannot fill the store with multi-megabyte bodies - the
-    # rate limiter caps request count, not request size.
+    # Kept for legacy request parsing; server-side snapshots are authoritative.
     prompt: str | None = Field(None, max_length=8000)
     answer: str | None = Field(None, max_length=16000)
 
@@ -998,8 +996,8 @@ class FeedbackRequest(BaseModel):
                     "message_id": "b31f6d0a-2c44-4f9b-8a77-90de5f1c2b34",
                     "rating": "down",
                     "categories": ["incorrect_information"],
-                    "prompt": "Original question (supplied when the server snapshot is gone)",
-                    "answer": "Original answer (supplied when the server snapshot is gone)",
+
+
                 },
             ]
         }
@@ -2817,6 +2815,7 @@ async def delete_chat(
             answer_snapshots.pop((chat_id, message_id), None)
         # Remove from persistent store
         await session_store.delete_session(chat_id)
+        await run_in_threadpool(feedback_store.delete_chat, chat_id)
         if user_id:
             await session_store.remove_user_chat(user_id, chat_id)
         if existed:
@@ -2925,32 +2924,25 @@ def _client_ip(request: Request) -> str:
     summary="Rate one model answer up or down",
     description=(
         "Attaches a rating and optional failure categories to a single answer identified by "
-        "`(chat_id, message_id)`. The prompt/answer snapshot is resolved server-side from "
-        "what the user was shown; if the snapshot has been evicted, the request MUST include "
-        "`prompt` and `answer` or it is rejected with 422. Rate-limited to 20 submissions per "
-        "minute per IP (429 with `Retry-After`). Idempotent: resubmitting the same "
-        "`(chat_id, message_id)` overwrites the earlier record."
+        "(chat_id, message_id). Prompt and answer are taken from the server-held answer "
+        "snapshot; missing or expired snapshots return 404 and client-supplied text is ignored. "
+        "Rate-limited to 20 submissions per minute per IP (429 with Retry-After). The first "
+        "submission wins; retries return the original feedback ID."
     ),
     tags=["feedback"],
     responses={
         200: {
-            "description": "Feedback stored (or overwritten).",
+            "description": "Feedback stored, or an existing feedback ID returned for a duplicate retry.",
             "content": {
                 "application/json": {"example": {"status": "ok", "feedback_id": "3f1d9c74-0a5e-4f2b-9d88-71c6b0e2a4d1"}}
             },
         },
-        422: _json_error(
-            "Schema validation failed, or the answer snapshot is gone and prompt/answer were not supplied.",
+        422: _validation_error_response(),
+        404: _json_error(
+            "The answer snapshot is unavailable or expired.",
             {
-                "detail": (
-                    "This answer is no longer in memory. Please supply 'prompt' and "
-                    "'answer' in the request body so the feedback has context."
-                ),
-                "hint": (
-                    "Supply both 'prompt' and 'answer' string fields in the JSON body "
-                    "(e.g. {'chat_id': '...', 'message_id': '...', 'rating': 'up', "
-                    "'prompt': '...', 'answer': '...'})."
-                ),
+                "detail": "The referenced answer is unavailable or has expired.",
+                "hint": "Submit feedback only for an answer returned by this service in the current session.",
             },
         ),
         429: _json_error(
@@ -2968,15 +2960,11 @@ def _client_ip(request: Request) -> str:
     },
 )
 async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, Any]:
-    """Attach a rating and optional failure categories to one model answer.
+    """Attach feedback to a server-held answer snapshot.
 
-    The prompt/answer snapshot is resolved server-side from what the user was
-    shown for that (chat_id, message_id). If the snapshot is gone - a free-tier
-    restart evicts it - the client MUST supply prompt and answer, or the
-    request is rejected with 422.
-
-    Rate-limited per IP (in-process sliding window). Idempotent: resubmitting
-    for the same (chat_id, message_id) overwrites the earlier record.
+    Missing or expired snapshots return 404; client-supplied prompt and answer
+    text is ignored. The first submission for each pair wins, and retries
+    return its original feedback ID.
     """
     if not rate_limiter.is_allowed(_client_ip(request)):
         raise APIException(
@@ -2986,21 +2974,14 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
         )
 
     snapshot = answer_snapshots.get((body.chat_id, body.message_id))
-    prompt_text = snapshot["prompt"] if snapshot else body.prompt
-    answer_text = snapshot["answer"] if snapshot else body.answer
-
-    if snapshot is None and (not prompt_text or not answer_text):
+    if snapshot is None:
         raise APIException(
-            status_code=422,
-            detail=(
-                "This answer is no longer in memory. Please supply 'prompt' and "
-                "'answer' in the request body so the feedback has context."
-            ),
-            hint=(
-                "Supply both 'prompt' and 'answer' string fields in the JSON body "
-                "(e.g. {'chat_id': '...', 'message_id': '...', 'rating': 'up', 'prompt': '...', 'answer': '...'})."
-            ),
+            status_code=404,
+            detail="The referenced answer is unavailable or has expired.",
+            hint="Submit feedback only for an answer returned by this service in the current session.",
         )
+    prompt_text = snapshot["prompt"]
+    answer_text = snapshot["answer"]
 
     record = FeedbackRecord(
         feedback_id=str(uuid.uuid4()),
@@ -3018,7 +2999,7 @@ async def submit_feedback(request: Request, body: FeedbackRequest) -> dict[str, 
 
     try:
         # SQLite/Redis I/O is synchronous; keep it off the event loop.
-        await run_in_threadpool(feedback_store.upsert, record)
+        record = await run_in_threadpool(feedback_store.create_if_absent, record)
     except Exception as exc:
         logger.error("Failed to store feedback: %s", exc)
         raise APIException(
