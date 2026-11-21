@@ -59,6 +59,9 @@ jobs:
       - name: Run audio hadith verification tests
         run: pytest -q tests/test_audio_hadith.py
 
+      - name: Run extracted-content trust boundary and video analysis tests (#858)
+        run: pytest -q tests/test_extracted_content_boundary.py tests/test_video_analysis.py
+
       - name: Run hadith research agent tests
         run: pytest -q tests/test_hadith_research.py
 
