@@ -385,6 +385,56 @@ def extract_citations(text: str | None) -> tuple[str, CitationExtraction]:
     return text, CitationExtraction()
 
 
+def validate_citation(citation: Any) -> Citation | None:
+    """Validate a single citation (dict, model instance, or raw payload).
+
+    Re-verifies against the 114-surah index (tafsir), canonical Hadith collections,
+    or scholarly reference bounds. Returns the validated Citation instance, or
+    None if the reference is fabricated, out of bounds, or unrecognized.
+    """
+    if citation is None:
+        return None
+    raw: dict[str, Any]
+    if hasattr(citation, "model_dump"):
+        raw = citation.model_dump()
+    elif isinstance(citation, dict):
+        raw = dict(citation)
+    else:
+        return None
+
+    kind = str(raw.get("type") or "").strip().lower()
+    if not kind or kind not in _BUILDERS:
+        kind = _infer_type(raw)
+
+    builder = _BUILDERS.get(kind)
+    if not builder:
+        return None
+
+    built, _ = builder(raw)
+    return built
+
+
+def validate_citations(citations: list[Any] | None) -> list[Citation]:
+    """Validate a list of citations (e.g. replayed from the semantic cache).
+
+    Guarantees that cached citations cannot be silently fabricated and that
+    only verified citations matching index bounds survive. Deduplicates identical
+    citations.
+    """
+    if not citations:
+        return []
+    result: list[Citation] = []
+    seen: set[str] = set()
+    for item in citations:
+        validated = validate_citation(item)
+        if validated is not None:
+            fp = json.dumps(validated.model_dump(), sort_keys=True)
+            if fp not in seen:
+                seen.add(fp)
+                result.append(validated)
+    return result
+
+
 _CLAIM_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 

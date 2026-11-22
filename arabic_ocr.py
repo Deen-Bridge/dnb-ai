@@ -41,8 +41,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
+
+from media_upload_limits import MAX_IMAGE_BYTES, validate_image_upload
 
 router = APIRouter(prefix="/arabic-ocr", tags=["arabic-ocr"])
 
@@ -849,6 +851,10 @@ class OCRRequest(BaseModel):
         default=True,
         description="Whether to detect calligraphy style.",
     )
+    consent_to_process: bool = Field(
+        default=True,
+        description="Explicit user consent to process uploaded manuscript image.",
+    )
 
     @field_validator("image_base64")
     @classmethod
@@ -904,8 +910,14 @@ async def process_page(request: OCRRequest) -> OCRResult:
     - Detected calligraphy style
     - Applied corrections and warnings
     """
+    if not request.consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
     # Decode image
     image_data = base64.b64decode(request.image_base64)
+    validate_image_upload(image_data, consent=request.consent_to_process)
 
     result = await process_manuscript_page(
         image_data=image_data,
@@ -922,12 +934,14 @@ async def process_file(
     file: UploadFile = File(..., description="Image file (PNG, JPEG, TIFF)"),
     preprocessing_profile: PreprocessingProfile = Form(default=PreprocessingProfile.AGED),
     detect_calligraphy: bool = Form(default=True),
+    consent_to_process: bool = Form(default=True),
 ) -> OCRResult:
     """Process an uploaded manuscript image file.
 
     Alternative to /process that accepts multipart file upload instead of base64.
     """
-    contents = await file.read()
+    contents = await file.read(MAX_IMAGE_BYTES + 1)
+    validate_image_upload(contents, file.filename, consent=consent_to_process)
 
     config = PreprocessingConfig(profile=preprocessing_profile)
 

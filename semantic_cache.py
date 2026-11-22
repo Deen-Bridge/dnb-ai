@@ -207,6 +207,7 @@ class CacheEntry:
         "token_count",
         "version",
         "metadata",
+        "citations",
     )
 
     def __init__(
@@ -218,8 +219,9 @@ class CacheEntry:
         expires_at: float,
         scope: str = "public",
         token_count: int = 0,
-        version: int = 1,
+        version: int = 2,
         metadata: dict | None = None,
+        citations: list[Any] | None = None,
     ) -> None:
         self.embedding = embedding
         self.response = response
@@ -230,6 +232,7 @@ class CacheEntry:
         self.token_count = token_count
         self.version = version
         self.metadata = metadata or {}
+        self.citations = [c.model_dump() if hasattr(c, "model_dump") else c for c in (citations or [])]
 
     @property
     def expired(self) -> bool:
@@ -276,8 +279,9 @@ class SemanticCache:
         history: list[Any],
         scope: str = "public",
         token_count: int = 0,
-        version: int = 1,
+        version: int = 2,
         metadata: dict | None = None,
+        citations: list[Any] | None = None,
     ) -> None:
         if not SEMANTIC_CACHE_ENABLED:
             return
@@ -292,6 +296,7 @@ class SemanticCache:
             token_count=token_count,
             version=version,
             metadata=metadata,
+            citations=citations,
         )
         self._entries.append(entry)
         self._access_times.append(time.time())
@@ -368,6 +373,7 @@ class SemanticCache:
             token_count=entry.token_count,
             version=entry.version,
             metadata=dict(entry.metadata),
+            citations=list(getattr(entry, "citations", [])),
         )
         self._entries.append(shared_entry)
         self._access_times.append(time.time())

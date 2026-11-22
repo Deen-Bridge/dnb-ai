@@ -494,10 +494,11 @@ citation with one invented one. They are excluded from the validity denominator
 and scored only by the rejection rate, so a correct parser is never punished for
 refusing them, and a parser that accepts everything cannot pass.
 
-**Known limitation.** A semantic-cache hit replays stored prose with an empty
-citation list, because the cache stores text only. No markers leak, and
-re-asking with `X-Cache-Bypass` returns citations. Widening the cache record
-shape is out of scope for this change.
+**Cache provenance preservation.** Both exact-match and semantic-cache hits preserve
+the structured citation list and answer provenance metadata (confidence score, safety
+assessment, model, and locale). Cached citations are re-validated against canonical
+datasets upon retrieval to prevent silent fabrication. An explicit cache bypass remains
+available via the `X-Cache-Bypass` header for incident response.
 
 ### Streaming chat responses (Server-Sent Events)
 

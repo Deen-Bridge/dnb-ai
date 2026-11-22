@@ -13,14 +13,14 @@ likely misquotations when the transcript drifts too far from any known text.
 
 Scope and honest limitations
 ----------------------------
-This is a deterministic, dependency-free heuristic layer — **not** a trained
+This is a deterministic, dependency-free heuristic layer - **not** a trained
 speech model and **not** an exhaustive hadith database. It ships no real ASR;
 audio is represented by its transcript, and a small pluggable ``Transcriber``
 interface lets a real recognizer be injected later without changing callers.
 The same pluggable interface also backs the video-lecture transcript pipeline
 below: a ``VideoTranscriber`` extracts audio from MP4/MOV/AVI/WebM files and
 produces a diarized, timestamped, topic-segmented transcript with Quranic and
-hadith citation detection. No real media decoding or ASR is bundled — the
+hadith citation detection. No real media decoding or ASR is bundled - the
 default implementation is deterministic and dependency-free, and a real
 recognizer/decoder can be injected without changing callers.
 The bundled corpus holds only a handful of famous narrations for demonstration
@@ -56,7 +56,7 @@ MAX_TRANSCRIPT_LENGTH = 20_000
 # Text normalization
 # ---------------------------------------------------------------------------
 
-# Arabic combining diacritics (tashkeel) — stripped before matching so that a
+# Arabic combining diacritics (tashkeel) - stripped before matching so that a
 # recognizer that drops or adds harakat still lines up with the corpus.
 _ARABIC_DIACRITICS = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭ]")
 _NON_WORD = re.compile(r"[^\w\s]", re.UNICODE)
@@ -121,6 +121,48 @@ _STOPWORDS = frozenset(
         "from",
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# Prompt-injection hardening for untrusted transcripts
+# ---------------------------------------------------------------------------
+
+# Transcripts come from speech recognition of arbitrary audio, so they are
+# untrusted data. They are never executed or interpreted as instructions here,
+# but they may be forwarded to downstream LLM steps, so instruction-like
+# content is flagged and neutralized.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏‪-‮⁠-⁤﻿]")
+_INJECTION_PATTERNS = (
+    re.compile(
+        r"\b(?:ignore|disregard|forget|override)\b[^.\n]{0,40}\b(?:previous|prior|above|earlier|all|system)\b"
+        r"[^.\n]{0,40}\b(?:instructions?|prompts?|rules?|context)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:system|developer)\s+(?:prompt|message|instructions?)\b", re.IGNORECASE),
+    re.compile(r"\byou\s+are\s+now\b", re.IGNORECASE),
+    re.compile(r"\b(?:act|behave|respond)\s+as\s+(?:if|an?|the)\b", re.IGNORECASE),
+    re.compile(r"\b(?:reveal|print|show|leak)\b[^.\n]{0,30}\b(?:prompt|secrets?|api[ _-]?keys?|tokens?)\b", re.IGNORECASE),
+    re.compile(r"\bmark\s+(?:this|it)\s+as\s+(?:verified|sahih|authentic)\b", re.IGNORECASE),
+    re.compile(r"</?\s*(?:system|assistant|user|instructions?)\s*>", re.IGNORECASE),
+    re.compile(r"\bBEGIN\s+(?:SYSTEM|INSTRUCTIONS?)\b", re.IGNORECASE),
+)
+
+
+def sanitize_transcript(text: str) -> tuple[str, list[str]]:
+    """Strip control/invisible characters and remove instruction-like spans.
+
+    Returns ``(clean_text, flags)``; ``flags`` is empty when nothing suspicious
+    was found. The removed spans are never echoed back.
+    """
+    flags: list[str] = []
+    cleaned = _CONTROL_CHARS.sub("", text)
+    if cleaned != text:
+        flags.append("control_characters_removed")
+    for idx, pattern in enumerate(_INJECTION_PATTERNS):
+        if pattern.search(cleaned):
+            flags.append(f"instruction_like_content_{idx}")
+            cleaned = pattern.sub(" ", cleaned)
+    return cleaned, flags
 
 
 def strip_arabic_diacritics(text: str) -> str:
@@ -453,29 +495,41 @@ class VerifyResponse(BaseModel):
     isnad: list[NarratorInfo]
     flagged_misquotation: bool
     note: str
+    injection_flags: list[str] = Field(default_factory=list)
 
 
 def verify_transcript(transcript: str, language: str = "en") -> VerifyResponse:
     """Match a narration transcript against the corpus and assemble a verdict."""
+    transcript, injection_flags = sanitize_transcript(transcript)
     candidates = find_matches(transcript)
     best = candidates[0] if candidates and candidates[0].score > 0 else None
     isnad = [NarratorInfo(name=n.name, bio=n.bio) for n in extract_isnad(transcript)]
 
     confidence = best.score if best else 0.0
     verified = best is not None and confidence >= MATCH_THRESHOLD
+    # Safe fallback: a transcript carrying instruction-like content is never
+    # auto-verified; it needs human review.
+    suspicious = any(f.startswith("instruction_like_content") for f in injection_flags)
+    if suspicious:
+        verified = False
     grade = best.grade if (verified and best is not None) else None
 
     # A misquotation is a partial-but-weak match: the transcript clearly
     # gestures at a known hadith yet does not line up cleanly with it.
     flagged_misquotation = best is not None and 0.2 <= confidence < STRONG_MATCH_THRESHOLD
 
-    if verified and best is not None:
+    if suspicious:
+        note = (
+            "The transcript contained instruction-like content, which was ignored and removed. "
+            "It was not verified; review it manually against a full hadith reference."
+        )
+    elif verified and best is not None:
         note = (
             f"Matched {best.reference} ({best.grade}) with confidence "
             f"{confidence:.2f}. Confirm against a full hadith reference before relying on it."
         )
         if flagged_misquotation:
-            note += " Wording differs from the authenticated text — possible misquotation; verify the exact narration."
+            note += " Wording differs from the authenticated text - possible misquotation; verify the exact narration."
     else:
         note = (
             "No authenticated narration in the bundled corpus matched this transcript with "
@@ -492,6 +546,7 @@ def verify_transcript(transcript: str, language: str = "en") -> VerifyResponse:
         isnad=isnad,
         flagged_misquotation=flagged_misquotation,
         note=note,
+        injection_flags=injection_flags,
     )
 
 
@@ -681,7 +736,7 @@ def _summarize(segments: list[TranscriptSegment], topics: list[TopicSegment]) ->
         f"Lecture with {len(segments)} utterances across {len(topics)} topic(s) "
         f"and {len(speakers)} speaker(s): {', '.join(speakers)}."
     )
-    takeaways = [f"{t.title} ({t.start:.0f}s–{t.end:.0f}s)" for t in topics[:5]]
+    takeaways = [f"{t.title} ({t.start:.0f}s-{t.end:.0f}s)" for t in topics[:5]]
     return summary, takeaways
 
 
@@ -714,6 +769,10 @@ class LectureRequest(BaseModel):
         description="Video file reference or pre-segmented transcript text.",
     )
     language: str = Field("en", description="ISO code of the lecture language.")
+    consent_to_process: bool = Field(True, description="Explicit user consent to process uploaded media.")
+    duration_seconds: float | None = Field(
+        None, gt=0, le=1800, description="Optional clip duration in seconds (max 1800s / 30 mins)."
+    )
 
 
 class LectureResponse(BaseModel):
@@ -725,14 +784,27 @@ class LectureResponse(BaseModel):
     summary: str
     key_takeaways: list[str]
     searchable_text: str
+    injection_flags: list[str] = Field(default_factory=list)
 
 
 def extract_lecture_transcript(
     video_ref: str,
     language: str = "en",
     transcriber: VideoTranscriber | None = None,
+    consent_to_process: bool = True,
+    duration_seconds: float | None = None,
 ) -> LectureResponse:
     """Run the full video-lecture transcript pipeline."""
+    if not consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
+    if duration_seconds is not None and duration_seconds > 1800:
+        raise HTTPException(
+            status_code=422,
+            detail="Video duration exceeds maximum allowed limit of 1800 seconds (30 minutes).",
+        )
     fmt = _detect_format(video_ref)
     if fmt and fmt not in SUPPORTED_VIDEO_FORMATS:
         raise HTTPException(
@@ -741,6 +813,15 @@ def extract_lecture_transcript(
         )
     engine = transcriber or PassthroughVideoTranscriber()
     segments = engine.transcribe(video_ref, language)
+    injection_flags: list[str] = []
+    safe_segments: list[TranscriptSegment] = []
+    for seg in segments:
+        clean, flags = sanitize_transcript(seg.text)
+        injection_flags.extend(f for f in flags if f not in injection_flags)
+        clean = clean.strip()
+        if clean:
+            safe_segments.append(TranscriptSegment(seg.start, seg.end, seg.speaker, clean))
+    segments = safe_segments
     topics = _segment_topics(segments)
     citations = _detect_citations(segments)
     summary, takeaways = _summarize(segments, topics)
@@ -754,12 +835,23 @@ def extract_lecture_transcript(
         summary=summary,
         key_takeaways=takeaways,
         searchable_text=searchable,
+        injection_flags=injection_flags,
     )
 
 
 @router.post("/lecture-transcript", response_model=LectureResponse)
 async def lecture_transcript(request: LectureRequest) -> LectureResponse:
     """Extract a diarized, topic-segmented transcript from a video lecture."""
+    if not request.consent_to_process:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
     if not request.video_ref.strip():
         raise HTTPException(status_code=422, detail="Video reference must not be empty.")
-    return extract_lecture_transcript(request.video_ref, request.language)
+    return extract_lecture_transcript(
+        request.video_ref,
+        request.language,
+        consent_to_process=request.consent_to_process,
+        duration_seconds=request.duration_seconds,
+    )

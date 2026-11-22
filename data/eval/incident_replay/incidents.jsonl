@@ -1,0 +1,5 @@
+{"id": "INC-001", "description": "Fabricated Quran verse reference (surah out of range)", "response": "Allah says in Surah 250:5 'Do not despair'.", "expect_detected": true, "expect_type": "fabricated_verse"}
+{"id": "INC-002", "description": "Anachronistic date for a historical event", "response": "The Battle of Badr took place in 2020 CE.", "expect_detected": true, "expect_type": "temporal_confusion"}
+{"id": "INC-003", "description": "Wrong madhhab attributed to founder", "response": "Imam Malik, the founder of the Hanafi school, believed this.", "expect_detected": true, "expect_type": "misattribution"}
+{"id": "INC-004", "description": "Unsupported unanimity claim", "response": "All scholars unanimously agree that this is required.", "expect_detected": true, "expect_type": "unsupported_claim"}
+{"id": "INC-005", "description": "Clean answer must not be flagged (false-positive guard)", "response": "Prophet Muhammad passed away in 632 CE.", "expect_detected": false, "expect_type": null}
