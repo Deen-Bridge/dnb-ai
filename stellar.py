@@ -47,12 +47,12 @@ from soroban import (
     is_soroban_auth_question,
     router as soroban_router,
 )
+from stellar_contract_state import evaluate_provider_freshness, validate_contract_request
 from stellar_error_codes import (
     build_stellar_tool_error,
     map_transport_exception_to_error_envelope,
     to_api_exception,
 )
-from stellar_contract_state import evaluate_provider_freshness, validate_contract_request
 from telemetry import registry as telemetry_registry
 
 logger = logging.getLogger(__name__)
@@ -335,10 +335,15 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
             telemetry_registry.record_stellar_contract_check("invalid_evidence")
             raise APIException(status_code=503, detail="Stellar ledger evidence is unavailable.") from None
         if not freshness.ok:
-            outcome = "stale_ledger" if freshness.reason in {
-                "STALE_LEDGER_EVIDENCE",
-                "FUTURE_LEDGER_EVIDENCE",
-            } else "invalid_evidence"
+            outcome = (
+                "stale_ledger"
+                if freshness.reason
+                in {
+                    "STALE_LEDGER_EVIDENCE",
+                    "FUTURE_LEDGER_EVIDENCE",
+                }
+                else "invalid_evidence"
+            )
             telemetry_registry.record_stellar_contract_check(outcome)
             logger.warning("Stellar provider freshness check failed: %s", freshness.reason)
             raise APIException(status_code=503, detail="Stellar ledger data is not fresh enough to use.")

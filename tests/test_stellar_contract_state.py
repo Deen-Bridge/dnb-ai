@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from errors import APIException
 import stellar
+from errors import APIException
 from stellar_contract_state import evaluate_provider_freshness, validate_contract_request
 
 NOW = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
@@ -82,10 +82,7 @@ def test_account_lookup_uses_configured_network_and_issuer(network: str) -> None
                 }
             ]
         }
-        assert (
-            stellar.fetch_usdc_balance("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5")
-            == Decimal("12.5")
-        )
+        assert stellar.fetch_usdc_balance("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5") == Decimal("12.5")
         provider.assert_called_once_with(stellar.HORIZON_URLS[network])
 
 
