@@ -207,6 +207,11 @@ class TestFetchBalance:
         from stellar_sdk.exceptions import NotFoundError
 
         server = MagicMock()
+        server.root.return_value.call.return_value = {
+            "history_latest_ledger": 12,
+            "history_latest_ledger_closed_at": datetime.now(UTC).isoformat(),
+            "network_passphrase": "Test SDF Network ; September 2015",
+        }
         server.accounts.return_value.account_id.return_value.call.side_effect = NotFoundError(MagicMock())
         with patch.object(stellar, "Server", return_value=server):
             with pytest.raises(HTTPException) as exc:

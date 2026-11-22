@@ -1,5 +1,6 @@
 """Tests verifying that API error responses include actionable guidance, hints, and examples."""
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -154,6 +155,11 @@ async def test_memory_not_found_includes_hint(client):
 async def test_stellar_account_not_found_includes_hint(client):
     valid_key = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
     server = MagicMock()
+    server.root.return_value.call.return_value = {
+        "history_latest_ledger": 12,
+        "history_latest_ledger_closed_at": datetime.now(UTC).isoformat(),
+        "network_passphrase": "Test SDF Network ; September 2015",
+    }
     server.accounts.return_value.account_id.return_value.call.side_effect = NotFoundError(MagicMock())
 
     with patch.object(stellar, "Server", return_value=server):
