@@ -19,6 +19,7 @@ private keys. Authentication and the existing safety pipeline are unchanged.
 | Condition | Behavior |
 |---|---|
 | Unsupported/mismatched network, invalid public key, or noncanonical USDC | Reject before provider access |
+| Horizon network passphrase does not match configured `STELLAR_NETWORK` | Reject before account lookup; record `invalid_evidence` |
 | Missing/malformed/zero ledger evidence | Return sanitized service-unavailable error |
 | Ledger close time in the future or older than the freshness limit | Return sanitized stale-data conflict (`STELLAR_LEDGER_STALE`) |
 | Horizon account not found | Preserve the existing not-found response |

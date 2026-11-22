@@ -11,6 +11,10 @@ from errors import APIException
 from stellar_contract_state import evaluate_provider_freshness, validate_contract_request
 
 NOW = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+PASSPHRASES = {
+    "testnet": "Test SDF Network ; September 2015",
+    "public": "Public Global Stellar Network ; September 2015",
+}
 
 
 @pytest.mark.parametrize("network", ["testnet", "public"])
@@ -55,10 +59,11 @@ def test_request_contract_rejects_untrusted_inputs_before_provider_access(overri
 def test_fresh_provider_evidence_is_accepted_on_both_networks(network: str) -> None:
     result = evaluate_provider_freshness(
         {
-            "network": network,
+            "network_passphrase": PASSPHRASES[network],
             "history_latest_ledger": 1200501,
             "history_latest_ledger_closed_at": (NOW - timedelta(seconds=10)).isoformat(),
         },
+        network=network,
         now=NOW,
     )
     assert result.ok
@@ -72,6 +77,7 @@ def test_account_lookup_uses_configured_network_and_issuer(network: str) -> None
         server.root.return_value.call.return_value = {
             "history_latest_ledger": 1200501,
             "history_latest_ledger_closed_at": datetime.now(UTC).isoformat(),
+            "network_passphrase": PASSPHRASES[network],
         }
         server.accounts.return_value.account_id.return_value.call.return_value = {
             "balances": [
@@ -92,7 +98,7 @@ def test_account_lookup_uses_configured_network_and_issuer(network: str) -> None
         ({}, "MISSING_LEDGER_EVIDENCE"),
         (
             {
-                "network": "public",
+                "network_passphrase": PASSPHRASES["public"],
                 "history_latest_ledger": 1200501,
                 "history_latest_ledger_closed_at": (NOW + timedelta(seconds=1)).isoformat(),
             },
@@ -100,7 +106,7 @@ def test_account_lookup_uses_configured_network_and_issuer(network: str) -> None
         ),
         (
             {
-                "network": "testnet",
+                "network_passphrase": PASSPHRASES["testnet"],
                 "history_latest_ledger": "bad",
                 "history_latest_ledger_closed_at": NOW.isoformat(),
             },
@@ -109,18 +115,19 @@ def test_account_lookup_uses_configured_network_and_issuer(network: str) -> None
     ],
 )
 def test_provider_freshness_fails_closed(evidence, reason) -> None:
-    assert not evaluate_provider_freshness(evidence, now=NOW).ok
-    assert evaluate_provider_freshness(evidence, now=NOW).reason == reason
+    network = "public" if evidence.get("network_passphrase") == PASSPHRASES["public"] else "testnet"
+    assert not evaluate_provider_freshness(evidence, network=network, now=NOW).ok
+    assert evaluate_provider_freshness(evidence, network=network, now=NOW).reason == reason
 
 
 @pytest.mark.parametrize("network", ["testnet", "public"])
 def test_stale_provider_freshness_fails_closed_on_both_networks(network: str) -> None:
     evidence = {
-        "network": network,
+        "network_passphrase": PASSPHRASES[network],
         "history_latest_ledger": 1200501,
         "history_latest_ledger_closed_at": (NOW - timedelta(seconds=31)).isoformat(),
     }
-    result = evaluate_provider_freshness(evidence, now=NOW)
+    result = evaluate_provider_freshness(evidence, network=network, now=NOW)
     assert not result.ok
     assert result.reason == "STALE_LEDGER_EVIDENCE"
 
@@ -139,6 +146,7 @@ def test_stale_latest_ledger_prevents_account_lookup(monkeypatch) -> None:
         server.root.return_value.call.return_value = {
             "history_latest_ledger": 1200501,
             "history_latest_ledger_closed_at": "2020-01-01T00:00:00+00:00",
+            "network_passphrase": PASSPHRASES["testnet"],
         }
         with pytest.raises(APIException) as error:
             stellar.fetch_usdc_balance("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5")
@@ -156,3 +164,31 @@ def test_provider_failure_prevents_account_lookup(monkeypatch) -> None:
         server.accounts.assert_not_called()
     assert error.value.status_code == 503
     assert "synthetic timeout" not in str(error.value.detail)
+
+
+@pytest.mark.parametrize("network", ["testnet", "public"])
+def test_provider_network_passphrase_mismatch_fails_closed(network: str) -> None:
+    other_network = "public" if network == "testnet" else "testnet"
+    evidence = {
+        "network_passphrase": PASSPHRASES[other_network],
+        "history_latest_ledger": 1200501,
+        "history_latest_ledger_closed_at": NOW.isoformat(),
+    }
+    result = evaluate_provider_freshness(evidence, network=network, now=NOW)
+    assert not result.ok
+    assert result.reason == "NETWORK_PASSPHRASE_MISMATCH"
+
+
+@pytest.mark.parametrize("network", ["testnet", "public"])
+def test_provider_network_mismatch_prevents_account_lookup(network: str) -> None:
+    other_network = "public" if network == "testnet" else "testnet"
+    with patch.object(stellar, "STELLAR_NETWORK", network), patch.object(stellar, "Server") as provider:
+        server = provider.return_value
+        server.root.return_value.call.return_value = {
+            "history_latest_ledger": 1200501,
+            "history_latest_ledger_closed_at": datetime.now(UTC).isoformat(),
+            "network_passphrase": PASSPHRASES[other_network],
+        }
+        with pytest.raises(APIException):
+            stellar.fetch_usdc_balance("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5")
+        server.accounts.assert_not_called()

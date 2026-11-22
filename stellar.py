@@ -332,10 +332,8 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
         try:
             max_age_seconds = int(os.getenv("STELLAR_MAX_LEDGER_AGE_SECONDS", "30"))
             freshness = evaluate_provider_freshness(
-                {
-                    **latest_ledger,
-                    "network": STELLAR_NETWORK,
-                },
+                latest_ledger,
+                network=STELLAR_NETWORK,
                 now=datetime.now(UTC),
                 max_age_seconds=max_age_seconds,
             )

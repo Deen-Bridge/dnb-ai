@@ -48,10 +48,11 @@ def run() -> dict[str, object]:
 
     fresh = evaluate_provider_freshness(
         {
-            "network": "public",
+            "network_passphrase": "Public Global Stellar Network ; September 2015",
             "history_latest_ledger": 51200001,
             "history_latest_ledger_closed_at": (now - timedelta(seconds=5)).isoformat(),
         },
+        network="public",
         now=now,
     )
     checks += 1
@@ -59,14 +60,27 @@ def run() -> dict[str, object]:
 
     stale = evaluate_provider_freshness(
         {
-            "network": "testnet",
+            "network_passphrase": "Test SDF Network ; September 2015",
             "history_latest_ledger": 1200501,
             "history_latest_ledger_closed_at": (now - timedelta(seconds=31)).isoformat(),
         },
+        network="testnet",
         now=now,
     )
     checks += 1
     failures += stale.reason != "STALE_LEDGER_EVIDENCE"
+
+    mismatched_network = evaluate_provider_freshness(
+        {
+            "network_passphrase": "Test SDF Network ; September 2015",
+            "history_latest_ledger": 51200001,
+            "history_latest_ledger_closed_at": (now - timedelta(seconds=5)).isoformat(),
+        },
+        network="public",
+        now=now,
+    )
+    checks += 1
+    failures += mismatched_network.reason != "NETWORK_PASSPHRASE_MISMATCH"
     return {
         "suite": "stellar_production_contract",
         "network": "offline",
