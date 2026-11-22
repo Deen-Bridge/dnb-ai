@@ -1002,10 +1002,13 @@ The versioned policy lives in [`safety/policy.yaml`](safety/policy.yaml), with
 review guidance in [`safety/POLICY.md`](safety/POLICY.md). Run the API-key-free
 red-team suite with `pytest -q tests/redteam`. A manual live classifier audit is
 available with `SAFETY_LIVE_TESTS=1 GEMINI_API_KEY=... pytest -q tests/redteam/test_live.py`.
+This live audit is a **release gate** when the model, provider SDK or safety
+policy changes: see [`safety/LIVE_EVAL.md`](safety/LIVE_EVAL.md) for the budget,
+failure thresholds, retained report and rollback procedure.
 
 ## ☁️ Deployment
 
-Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI runs lint and syntax checks on every PR (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Deployed on [Render](https://render.com) via [`render.yaml`](render.yaml). CI runs lint and syntax checks on every PR (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Release candidates that can change provider behavior must also pass the live safety suite and attach its redacted report and decision record ([`safety/LIVE_EVAL.md`](safety/LIVE_EVAL.md)).
 
 ### Render keep-alive
 

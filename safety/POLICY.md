@@ -37,8 +37,10 @@ classification candidates; a strict-JSON classifier makes the policy decision.
 ## Red-team operation
 
 `pytest -q tests/redteam` is fully offline and is required in CI. Set
-`SAFETY_LIVE_TESTS=1` with `GEMINI_API_KEY` to opt into a manual live audit;
-live results are intentionally not a merge gate because model behavior can vary.
+`SAFETY_LIVE_TESTS=1` with `GEMINI_API_KEY` to run the live audit. It is not a
+per-PR merge gate, but it **is a release gate** for candidates where provider or
+model behavior can change; see [`LIVE_EVAL.md`](LIVE_EVAL.md) for budget,
+thresholds, retention and rollback.
 
 ## Known limitations
 
