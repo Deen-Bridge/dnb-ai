@@ -162,6 +162,7 @@ from tafsir import (
 )
 from video_analysis import router as video_analysis_router
 from vocabulary import router as vocabulary_router
+from worship import router as worship_router
 
 logger = logging.getLogger(__name__)
 
@@ -631,6 +632,8 @@ app.include_router(misinformation_router)
 # as a book id.
 app.include_router(book_moderation_admin_router)
 app.include_router(book_moderation_public_router)
+# Prayer times and Hijri calendar: timezone-safe, stateless, offline (AI-060)
+app.include_router(worship_router)
 
 from adhkar import corpus as adhkar_corpus
 
@@ -661,9 +664,7 @@ class AdhkarProvenance(BaseModel):
     data_version: str = Field(..., description="Semantic version of the bundled adhkar data file.")
     schema_version: int = Field(..., description="Integer schema revision of the data file format.")
     source: str = Field(..., description="Human-readable description of the upstream source(s).")
-    data_last_updated: str = Field(
-        ..., description="ISO-8601 date the corpus content was last reviewed or changed."
-    )
+    data_last_updated: str = Field(..., description="ISO-8601 date the corpus content was last reviewed or changed.")
     loaded_at: str = Field(
         ...,
         description="UTC ISO-8601 timestamp at which the corpus was loaded into memory.",

@@ -17,3 +17,7 @@ moviepy>=1.0.3
 pyannote.audio>=3.1.0
 torch>=2.0.0
 torchaudio>=2.0.0
+# Umm al-Qura Hijri tables and the IANA tz database, pinned so calendar and
+# prayer-time output is reproducible (worship.py, AI-060).
+hijridate==2.5.0
+tzdata==2026.6
