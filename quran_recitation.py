@@ -28,6 +28,24 @@ model. It ships no ASR, no voice fingerprinting and no pitch analysis, so:
 * the bundled Mushaf covers only a few short surahs. Everything is advisory;
   verify against a printed Mushaf and a qualified teacher of tajwid.
 
+Calibration and scholar review boundary
+---------------------------------------
+``verification`` and ``accuracy`` only measure how well the *transcript* matches
+the bundled Mushaf text. They say nothing about tajwid (makharij, sifat, madd,
+ghunnah, idgham, qalqalah, waqf), which needs a trained listener. Two things
+keep the two from being confused:
+
+* ``calibrated_confidence`` = text accuracy x ASR confidence. When the caller
+  does not report ASR confidence, the score is multiplied by
+  ``UNKNOWN_ASR_PRIOR`` instead, so an unmeasured transcript can never reach the
+  ``high`` band. The band uses the thresholds every multimodal endpoint shares
+  (``media_upload_limits.evaluate_confidence_and_fallback``).
+* ``scholar_review`` says exactly what was and was not assessed, and lists
+  machine-readable reasons whenever the result needs a qualified teacher before
+  it is relied on.
+
+See ``docs/RECITATION_CALIBRATION.md``.
+
 A pluggable ``Transcriber`` lets a real recognizer be injected later without
 changing callers. The module has no import-time side effects and needs no
 network.
@@ -43,6 +61,8 @@ from difflib import SequenceMatcher, get_close_matches
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from media_upload_limits import evaluate_confidence_and_fallback
+
 router = APIRouter(prefix="/quran-recitation", tags=["quran-recitation"])
 
 MAX_TRANSCRIPT_LENGTH = 20_000
@@ -54,6 +74,43 @@ MIN_COVERAGE = 0.3
 SNAP_CUTOFF_CLEAN = 0.85
 SNAP_CUTOFF_NOISY = 0.75
 NOISY_ASR_CONFIDENCE = 0.6
+
+# Calibration (see module docstring). Bump the version whenever the formula,
+# the prior or the review reasons change, so stored results stay comparable.
+CALIBRATION_VERSION = "recitation-calibration/v1"
+# Stand-in for an unreported ASR confidence. It sits below the shared 0.75
+# "high" threshold on purpose: an unmeasured transcript is never high confidence.
+UNKNOWN_ASR_PRIOR = 0.70
+HIGH_ASR_CONFIDENCE = 0.75
+LOW_ASR_CONFIDENCE = 0.40
+
+# What this module can and cannot judge. Returned on every response.
+ASSESSED_SCOPE: tuple[str, ...] = (
+    "surah_and_ayah_identification",
+    "word_level_text_match_against_bundled_hafs_mushaf",
+    "riwayah_textual_variants_listed_in_module",
+)
+NOT_ASSESSED_SCOPE: tuple[str, ...] = (
+    "tajwid_rules",  # makharij, sifat, madd, ghunnah, idgham, ikhfa, qalqalah
+    "waqf_and_ibtida",
+    "pronunciation_and_articulation",
+    "reciter_identity_from_voice",
+    "maqam_from_pitch",
+    "ijazah_or_certification",
+)
+SCHOLAR_REVIEW_BOUNDARY = (
+    "Automated text-alignment result only. It does not assess tajwid, pronunciation, "
+    "waqf or melody, and cannot certify a recitation or grant ijazah. A qualified "
+    "teacher of tajwid must confirm any correction before it is relied on."
+)
+
+# Review reason codes, in the order they are reported.
+REVIEW_UNIDENTIFIED = "unidentified"
+REVIEW_ASR_UNKNOWN = "asr_confidence_unknown"
+REVIEW_ASR_LOW = "asr_confidence_below_high"
+REVIEW_TEXT_DEVIATIONS = "text_deviations"
+REVIEW_NON_HAFS = "non_hafs_reading"
+REVIEW_RIWAYAH_CONFLICT = "riwayah_hint_conflict"
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +473,17 @@ class RiwayahInfo(BaseModel):
     name: str
     basis: str  # text_variant | hint | default
     note: str
+    hint_conflict: bool = False
+
+
+class ScholarReview(BaseModel):
+    """Where automated analysis stops and a qualified teacher must take over."""
+
+    required: bool
+    reasons: list[str] = Field(default_factory=list, description="Machine-readable review reason codes.")
+    assessed: list[str] = Field(default_factory=lambda: list(ASSESSED_SCOPE))
+    not_assessed: list[str] = Field(default_factory=lambda: list(NOT_ASSESSED_SCOPE))
+    boundary: str = SCHOLAR_REVIEW_BOUNDARY
 
 
 class ReciterInfo(BaseModel):
@@ -470,9 +538,12 @@ class AnalyzeResponse(BaseModel):
     reciter: ReciterInfo | None
     maqam: str | None
     note: str
-    confidence_band: str = "high"
-    fallback_recommended: bool = False
+    confidence_band: str = "low"
+    calibrated_confidence: float = 0.0
+    calibration_version: str = CALIBRATION_VERSION
+    fallback_recommended: bool = True
     review_required: bool = False
+    scholar_review: ScholarReview = Field(default_factory=lambda: ScholarReview(required=False))
 
 
 # ---------------------------------------------------------------------------
@@ -488,9 +559,10 @@ def _riwayah(alignment: _Alignment, hint: str | None) -> RiwayahInfo:
             readers = _RIWAYAH_VARIANTS[mushaf][heard]
         name = hinted if hinted in readers else readers[0]
         note = "Short-vowel reading of 'Maliki' (1:4), shared by " + ", ".join(readers) + "; not Hafs."
-        if hinted and hinted not in readers:
+        conflict = bool(hinted and hinted not in readers)
+        if conflict:
             note += f" The hinted riwayah ({hinted}) reads it with a long mim, so the hint conflicts."
-        return RiwayahInfo(name=name, basis="text_variant", note=note)
+        return RiwayahInfo(name=name, basis="text_variant", note=note, hint_conflict=conflict)
     surah_words = alignment.surah.words
     covers_14 = alignment.surah.number == 1 and any(
         surah_words[w][:2] == (4, 1) for w in alignment.token_to_word if w is not None
@@ -499,9 +571,10 @@ def _riwayah(alignment: _Alignment, hint: str | None) -> RiwayahInfo:
         names = ", ".join(_LONG_MIM_RIWAYAT)
         chosen = hinted if hinted in _LONG_MIM_RIWAYAT else _LONG_MIM_RIWAYAT[0]
         note = f"Long-mim 'Maliki' (1:4) is consistent with {names}."
-        if hinted and hinted not in _LONG_MIM_RIWAYAT:
+        conflict = bool(hinted and hinted not in _LONG_MIM_RIWAYAT)
+        if conflict:
             note += f" The hinted riwayah ({hinted}) differs, so the hint conflicts."
-        return RiwayahInfo(name=chosen, basis="text_variant", note=note)
+        return RiwayahInfo(name=chosen, basis="text_variant", note=note, hint_conflict=conflict)
     if hinted:
         return RiwayahInfo(
             name=hinted,
@@ -513,6 +586,33 @@ def _riwayah(alignment: _Alignment, hint: str | None) -> RiwayahInfo:
         basis="default",
         note="Assumed: the bundled Mushaf follows Hafs and this passage has no distinguishing variant.",
     )
+
+
+def calibrate_confidence(accuracy: float, asr_confidence: float | None) -> float:
+    """Combine text accuracy with ASR confidence into one score in [0, 1]."""
+    asr_factor = UNKNOWN_ASR_PRIOR if asr_confidence is None else asr_confidence
+    return round(max(0.0, min(1.0, accuracy * asr_factor)), 4)
+
+
+def scholar_review_reasons(
+    verification: str,
+    asr_confidence: float | None,
+    riwayah: RiwayahInfo | None,
+) -> list[str]:
+    """Why an identified result must be confirmed by a qualified teacher (empty if not)."""
+    reasons: list[str] = []
+    if asr_confidence is None:
+        reasons.append(REVIEW_ASR_UNKNOWN)
+    elif asr_confidence < HIGH_ASR_CONFIDENCE:
+        reasons.append(REVIEW_ASR_LOW)
+    if verification != "accurate":
+        reasons.append(REVIEW_TEXT_DEVIATIONS)
+    if riwayah is not None:
+        if riwayah.basis == "text_variant" and riwayah.name not in _LONG_MIM_RIWAYAT:
+            reasons.append(REVIEW_NON_HAFS)
+        if riwayah.hint_conflict:
+            reasons.append(REVIEW_RIWAYAH_CONFLICT)
+    return reasons
 
 
 def _empty_response(note: str, timing_source: str = "none") -> AnalyzeResponse:
@@ -534,6 +634,11 @@ def _empty_response(note: str, timing_source: str = "none") -> AnalyzeResponse:
         reciter=None,
         maqam=None,
         note=note,
+        confidence_band="low",
+        calibrated_confidence=0.0,
+        fallback_recommended=True,
+        review_required=False,
+        scholar_review=ScholarReview(required=False, reasons=[REVIEW_UNIDENTIFIED]),
     )
 
 
@@ -677,20 +782,18 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
     if timing_source == "estimated":
         note += " Timestamps are estimated from clip duration, not measured."
 
-    confidence_band = "high"
-    fallback_recommended = False
-    review_required = False
-    if request.asr_confidence is not None:
-        if request.asr_confidence >= 0.75:
-            confidence_band = "high"
-        elif request.asr_confidence >= 0.40:
-            confidence_band = "medium"
-            review_required = True
-        else:
-            confidence_band = "low"
-            fallback_recommended = True
-            review_required = True
+    riwayah = _riwayah(alignment, request.riwayah_hint)
+    calibrated = calibrate_confidence(accuracy, request.asr_confidence)
+    band, fallback_recommended, band_review = evaluate_confidence_and_fallback(calibrated)
+    reasons = scholar_review_reasons(verification, request.asr_confidence, riwayah)
+    review_required = band_review or bool(reasons)
+    if fallback_recommended:
+        if request.asr_confidence is not None and request.asr_confidence < LOW_ASR_CONFIDENCE:
             note += " Low ASR confidence detected; safe fallback mode recommended."
+        else:
+            note += " Low calibrated confidence; safe fallback mode recommended."
+    if review_required:
+        note += " Scholar review required before relying on this result."
 
     return AnalyzeResponse(
         identified=True,
@@ -712,13 +815,15 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
         trailing_content=trailing,
         basmalah_detected=basmalah,
         timing_source=timing_source,
-        riwayah=_riwayah(alignment, request.riwayah_hint),
+        riwayah=riwayah,
         reciter=reciter,
         maqam=_resolve_alias(request.maqam_hint, MAQAMAT),
         note=note,
-        confidence_band=confidence_band,
+        confidence_band=band.value,
+        calibrated_confidence=calibrated,
         fallback_recommended=fallback_recommended,
         review_required=review_required,
+        scholar_review=ScholarReview(required=review_required, reasons=reasons),
     )
 
 

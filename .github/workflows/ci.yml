@@ -56,6 +56,12 @@ jobs:
       - name: Run hadith grading tests
         run: pytest -q tests/test_hadith.py
 
+      - name: Run Quran recitation calibration and scholar-review tests (#856)
+        run: pytest -q tests/test_quran_recitation.py tests/test_recitation_calibration.py tests/test_media_upload_limits.py
+
+      - name: Evaluate recitation calibration, latency and cost (#856)
+        run: python -m scripts.eval_recitation_calibration
+
       - name: Run audio hadith verification tests
         run: pytest -q tests/test_audio_hadith.py
 
