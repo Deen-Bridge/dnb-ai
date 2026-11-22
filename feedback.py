@@ -19,6 +19,21 @@ Abuse resistance:
   - SQLite bounded by SQLITE_MAX_RECORDS; Redis keys carry a TTL
 
 Admin endpoints are protected by ADMIN_TOKEN (stopgap).
+
+Privacy governance (issue #874 / audit AI-098)
+----------------------------------------------
+Feedback is governed data, not an indefinite operational log:
+
+  - ``FEEDBACK_FIELD_POLICY`` classifies every stored field (sensitivity,
+    purpose, retention, deletion behaviour). See ``docs/feedback-privacy.md``.
+  - ``redact_text`` / ``redact_record`` strip PII and secrets *before*
+    persistence and again before export.
+  - ``FEEDBACK_RETENTION_DAYS`` bounds retention; ``purge_expired`` deletes
+    expired records from both back-ends (Redis TTL is aligned to it).
+  - ``delete_chat_feedback`` implements user deletion requests, including
+    derived evaluation candidates (``feedback:evalset:*``).
+  - ``export_eval_candidates`` is the single export path; it redacts, applies
+    retention, and writes an audit record for every export.
 """
 
 from __future__ import annotations
@@ -26,11 +41,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -75,15 +92,184 @@ def env_int(name: str, default: int, minimum: int = 1) -> int:
     return value
 
 
-# Redis TTL for feedback records (30 days).
-REDIS_TTL_SECONDS = 60 * 60 * 24 * 30
+# ---------------------------------------------------------------------------
+# Privacy governance (issue #874 / audit AI-098)
+# ---------------------------------------------------------------------------
+
+# Retention window for feedback records, in days. Records older than this are
+# deleted by ``purge_expired`` and are never exported. Redis TTL is aligned to
+# this value so both back-ends expire on the same schedule.
+FEEDBACK_RETENTION_DAYS = env_int("FEEDBACK_RETENTION_DAYS", 30)
+
+# Derived evaluation candidates inherit the same retention window.
+EVAL_CANDIDATE_RETENTION_DAYS = env_int("EVAL_CANDIDATE_RETENTION_DAYS", FEEDBACK_RETENTION_DAYS)
+
+# Redis TTL for feedback records, aligned with the retention window.
+REDIS_TTL_SECONDS = FEEDBACK_RETENTION_DAYS * 60 * 60 * 24
 
 # SQLite cap — oldest records are pruned when this is exceeded.
 SQLITE_MAX_RECORDS = 50_000
 
+# Field classification: sensitivity, purpose, retention, deletion behaviour.
+# This is the machine-readable half of docs/feedback-privacy.md; the docs and
+# this table must stay in sync (a test asserts the documented fields exist).
+FEEDBACK_FIELD_POLICY: dict[str, dict[str, str]] = {
+    "feedback_id": {
+        "sensitivity": "internal",
+        "purpose": "idempotency and audit correlation",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record",
+    },
+    "chat_id": {
+        "sensitivity": "pseudonymous_identifier",
+        "purpose": "group feedback per conversation; user deletion requests",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record; used as the deletion key",
+    },
+    "message_id": {
+        "sensitivity": "pseudonymous_identifier",
+        "purpose": "idempotent upsert per answer",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record",
+    },
+    "rating": {
+        "sensitivity": "low",
+        "purpose": "answer-quality measurement",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record",
+    },
+    "categories": {
+        "sensitivity": "low",
+        "purpose": "failure taxonomy for quality measurement",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record",
+    },
+    "comment": {
+        "sensitivity": "high (free text; may contain personal or religious content)",
+        "purpose": "explain a rating for quality review",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record; redacted before persistence",
+    },
+    "prompt": {
+        "sensitivity": "high (user-authored; may contain personal or religious content)",
+        "purpose": "context for quality review and eval candidates",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record and with derived eval candidates",
+    },
+    "answer": {
+        "sensitivity": "medium (model output derived from the prompt)",
+        "purpose": "context for quality review and eval candidates",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record and with derived eval candidates",
+    },
+    "model_name": {
+        "sensitivity": "low",
+        "purpose": "per-model quality measurement",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record",
+    },
+    "generation_config": {
+        "sensitivity": "low",
+        "purpose": "reproducibility of the rated answer",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record",
+    },
+    "created_at": {
+        "sensitivity": "low",
+        "purpose": "retention expiry and trend reporting",
+        "retention": "feedback retention window",
+        "deletion": "deleted with the record",
+    },
+}
+
+# Fields that must never be persisted or exported verbatim.
+REDACTED_FIELDS = ("comment", "prompt", "answer")
+
+REDACTION_PLACEHOLDER = "[REDACTED]"
+
+# Patterns for secrets and personal data. Order matters: secrets first so a
+# token embedded in an email-like string is removed as a token.
+_REDACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # API keys / bearer tokens / JWTs
+    ("secret", re.compile(r"\b(?:sk|pk|rk|ghp|gho|xox[baprs])[-_][A-Za-z0-9_\-]{8,}\b")),
+    ("secret", re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{8,}", re.IGNORECASE)),
+    ("secret", re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b")),
+    ("secret", re.compile(r"\b(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*\S+", re.IGNORECASE)),
+    # Email addresses
+    ("email", re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")),
+    # Phone numbers (international-ish, 9+ digits with optional separators)
+    ("phone", re.compile(r"(?<!\d)(?:\+\d{1,3}[\s\-.]?)?(?:\(?\d{2,4}\)?[\s\-.]?){2,4}\d{2,4}(?!\d)")),
+    # Long digit runs (card/account/ID numbers)
+    ("identifier", re.compile(r"(?<!\d)\d{9,}(?!\d)")),
+    # IPv4 addresses
+    ("ip_address", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
+)
+
+
+def redact_text(text: str | None) -> str | None:
+    """Return *text* with secrets and personal data replaced by a placeholder.
+
+    Applied before persistence and again before export so a record written by
+    an older build (or a client-supplied fallback) cannot leak on the way out.
+    """
+    if not text:
+        return text
+    redacted = text
+    for _label, pattern in _REDACTION_PATTERNS:
+        redacted = pattern.sub(REDACTION_PLACEHOLDER, redacted)
+    return redacted
+
+
+def redact_record(record: FeedbackRecord) -> FeedbackRecord:
+    """Return a copy of *record* with every redactable field sanitised."""
+    return FeedbackRecord(
+        feedback_id=record.feedback_id,
+        chat_id=record.chat_id,
+        message_id=record.message_id,
+        rating=record.rating,
+        categories=list(record.categories),
+        comment=redact_text(record.comment),
+        prompt=redact_text(record.prompt),
+        answer=redact_text(record.answer),
+        model_name=record.model_name,
+        generation_config=record.generation_config,
+        created_at=record.created_at,
+    )
+
+
+def retention_cutoff_iso(days: int | None = None, now: datetime | None = None) -> str:
+    """ISO-8601 UTC timestamp before which records are expired."""
+    window = FEEDBACK_RETENTION_DAYS if days is None else days
+    reference = now or datetime.now(timezone.utc)  # noqa: UP017
+    return (reference - timedelta(days=window)).isoformat()
+
+
+def is_expired(created_at: str, days: int | None = None, now: datetime | None = None) -> bool:
+    """True when *created_at* falls outside the retention window.
+
+    Unparseable timestamps are treated as expired: an ungoverned record must
+    not survive retention enforcement.
+    """
+    if not created_at:
+        return True
+    try:
+        created = datetime.fromisoformat(created_at)
+    except (TypeError, ValueError):
+        return True
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)  # noqa: UP017
+    window = FEEDBACK_RETENTION_DAYS if days is None else days
+    reference = now or datetime.now(timezone.utc)  # noqa: UP017
+    return created < reference - timedelta(days=window)
+
+
 # Rate limiting: max submissions per IP per window.
 RATE_LIMIT_MAX = env_int("FEEDBACK_RATE_LIMIT_MAX", 20)
 RATE_LIMIT_WINDOW_SECONDS = env_int("FEEDBACK_RATE_LIMIT_WINDOW", 60)
+
+# Rate limiting for admin/export access (per admin identity).
+ADMIN_RATE_LIMIT_MAX = env_int("FEEDBACK_ADMIN_RATE_LIMIT_MAX", 30)
+ADMIN_RATE_LIMIT_WINDOW_SECONDS = env_int("FEEDBACK_ADMIN_RATE_LIMIT_WINDOW", 60)
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +323,13 @@ class RateLimiter:
 
 
 rate_limiter = RateLimiter()
+
+# Admin/export access is rate-limited per admin identity (token fingerprint),
+# not per IP: a shared NAT must not let one operator exhaust another's budget.
+admin_rate_limiter = RateLimiter(
+    max_calls=ADMIN_RATE_LIMIT_MAX,
+    window_seconds=ADMIN_RATE_LIMIT_WINDOW_SECONDS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +418,20 @@ class FeedbackStore:
         raise NotImplementedError
 
     def stats(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    # -- governance (issue #874) -------------------------------------------
+
+    def purge_expired(self, days: int | None = None, now: datetime | None = None) -> int:
+        """Delete records outside the retention window; return the count."""
+        raise NotImplementedError
+
+    def delete_chat(self, chat_id: str) -> int:
+        """Delete every record for *chat_id* (user deletion request)."""
+        raise NotImplementedError
+
+    def export_records(self, chat_id: str | None = None, limit: int = 2000) -> list[FeedbackRecord]:
+        """Records eligible for export: unexpired, redacted, optionally per chat."""
         raise NotImplementedError
 
 
@@ -522,8 +729,7 @@ class SQLiteFeedbackStore(FeedbackStore):
     def stats(self) -> dict[str, Any]:
         conn = self._conn()
 
-        total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
-        up = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='up'").fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]        up = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='up'").fetchone()[0]
         down = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='down'").fetchone()[0]
 
         cat_counts: dict[str, dict[str, int]] = {}
@@ -571,6 +777,36 @@ class SQLiteFeedbackStore(FeedbackStore):
             "by_model": model_counts,
             "by_day": by_day,
         }
+
+    # -- governance (issue #874) -------------------------------------------
+
+    def purge_expired(self, days: int | None = None, now: datetime | None = None) -> int:
+        """Delete rows older than the retention window; return the count."""
+        cutoff = retention_cutoff_iso(days, now)
+        conn = self._conn()
+        cur = conn.execute("DELETE FROM feedback WHERE created_at < ?", (cutoff,))
+        conn.commit()
+        return cur.rowcount or 0
+
+    def delete_chat(self, chat_id: str) -> int:
+        """Delete every row for *chat_id*; return the count."""
+        conn = self._conn()
+        cur = conn.execute("DELETE FROM feedback WHERE chat_id=?", (chat_id,))
+        conn.commit()
+        return cur.rowcount or 0
+
+    def export_records(self, chat_id: str | None = None, limit: int = 2000) -> list[FeedbackRecord]:
+        """Unexpired, redacted records for export (optionally one chat)."""
+        conn = self._conn()
+        sql = "SELECT * FROM feedback WHERE created_at >= ?"
+        params: list = [retention_cutoff_iso()]
+        if chat_id:
+            sql += " AND chat_id=?"
+            params.append(chat_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
+        return [redact_record(FeedbackRecord.from_dict(dict(r))) for r in rows]
 
 
 # -- Redis store ------------------------------------------------------------
@@ -690,6 +926,60 @@ class RedisFeedbackStore(FeedbackStore):
             "by_day": {},
         }
 
+    # -- governance (issue #874) -------------------------------------------
+
+    def _all_record_keys(self) -> list[str]:
+        """Every feedback record key known to the rating indexes."""
+        keys: list[str] = []
+        seen: set = set()
+        for rating in ("up", "down"):
+            for key in self._r.zrange(f"{self._PREFIX}:index:rating:{rating}", 0, -1):
+                if key not in seen:
+                    seen.add(key)
+                    keys.append(key)
+        return keys
+
+    def _delete_keys(self, keys: list[str]) -> int:
+        """Delete record hashes and every index membership; return the count."""
+        deleted = 0
+        for key in keys:
+            data = self._r.hgetall(key)
+            pipe = self._r.pipeline()
+            if data:
+                try:
+                    record = FeedbackRecord.from_dict(data)
+                except (KeyError, TypeError):
+                    record = None
+                if record is not None:
+                    pipe.zrem(f"{self._PREFIX}:index:rating:{record.rating}", key)
+                    for cat in record.categories:
+                        pipe.zrem(f"{self._PREFIX}:index:cat:{cat}", key)
+                    pipe.zrem(f"{self._PREFIX}:index:model:{record.model_name or 'unknown'}", key)
+            pipe.delete(key)
+            pipe.execute()
+            deleted += 1
+        return deleted
+
+    def purge_expired(self, days: int | None = None, now: datetime | None = None) -> int:
+        """Delete records past the retention window (Redis TTL is a backstop)."""
+        keys = self._all_record_keys()
+        expired = [key for key, record in zip(keys, self._fetch_records(keys)) if is_expired(record.created_at, days, now)]
+        return self._delete_keys(expired)
+
+    def delete_chat(self, chat_id: str) -> int:
+        """Delete every record for *chat_id*; return the count."""
+        prefix = f"{self._PREFIX}:{chat_id}:"
+        return self._delete_keys([k for k in self._all_record_keys() if k.startswith(prefix)])
+
+    def export_records(self, chat_id: str | None = None, limit: int = 2000) -> list[FeedbackRecord]:
+        """Unexpired, redacted records for export (optionally one chat)."""
+        keys = self._all_record_keys()
+        if chat_id:
+            prefix = f"{self._PREFIX}:{chat_id}:"
+            keys = [k for k in keys if k.startswith(prefix)]
+        records = self._fetch_records(keys[:limit])
+        return [redact_record(r) for r in records if not is_expired(r.created_at)]
+
 
 # ---------------------------------------------------------------------------
 # Backend selection
@@ -727,3 +1017,90 @@ def build_store() -> FeedbackStore:
 
 
 store: FeedbackStore = build_store()
+
+
+# ---------------------------------------------------------------------------
+# Export, deletion, and audit (issue #874)
+# ---------------------------------------------------------------------------
+
+# Derived evaluation candidates live beside the feedback records so a user
+# deletion request can reach them. Key layout:
+#   feedback:evalset:<chat_id>:<message_id> -> JSON candidate
+_EVALSET_PREFIX = "feedback:evalset"
+
+
+def _audit_log_path() -> str:
+    return os.getenv("FEEDBACK_AUDIT_LOG_PATH", "feedback_audit.log")
+
+
+def audit_event(event: str, actor: str, **fields: Any) -> dict[str, Any]:
+    """Append a redacted audit record for a governed feedback operation.
+
+    Audit records never contain prompt/answer/comment text — only identifiers,
+    counts, and the actor fingerprint — so the audit trail itself is not a
+    second copy of the personal data it governs.
+    """
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
+        "event": event,
+        "actor": actor,
+        **{k: v for k, v in fields.items() if k not in REDACTED_FIELDS},
+    }
+    logger.info("feedback_audit %s", json.dumps(entry, sort_keys=True))
+    try:
+        with open(_audit_log_path(), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, sort_keys=True) + "\n")
+    except OSError as exc:  # pragma: no cover - audit sink unavailable
+        logger.warning("Could not write feedback audit record: %s", exc)
+    return entry
+
+
+def delete_chat_feedback(chat_id: str, actor: str = "system", store_: FeedbackStore | None = None) -> dict[str, int]:
+    """Fulfil a user deletion request for *chat_id*.
+
+    Deletes the feedback records *and* any derived evaluation candidates, then
+    writes an audit record. Returns per-store deletion counts.
+    """
+    target = store_ or store
+    deleted = target.delete_chat(chat_id)
+    evalset_deleted = 0
+    redis_client = getattr(target, "_r", None)
+    if redis_client is not None:
+        prefix = f"{_EVALSET_PREFIX}:{chat_id}:"
+        keys = list(redis_client.scan_iter(match=f"{prefix}*"))
+        if keys:
+            evalset_deleted = redis_client.delete(*keys)
+    audit_event(
+        "feedback.delete",
+        actor,
+        chat_id=chat_id,
+        records_deleted=deleted,
+        eval_candidates_deleted=evalset_deleted,
+    )
+    return {"records_deleted": deleted, "eval_candidates_deleted": evalset_deleted}
+
+
+def export_eval_candidates(
+    store_: FeedbackStore | None = None,
+    actor: str = "system",
+    chat_id: str | None = None,
+    limit: int = 2000,
+) -> list[FeedbackRecord]:
+    """The single governed export path for evaluation candidates.
+
+    Applies retention (expired records are purged, never exported), redacts
+    PII/secrets, and writes an audit record. Callers must have already
+    authenticated and authorized the actor.
+    """
+    target = store_ or store
+    purged = target.purge_expired()
+    records = target.export_records(chat_id=chat_id, limit=limit)
+    audit_event(
+        "feedback.export",
+        actor,
+        chat_id=chat_id,
+        exported=len(records),
+        purged=purged,
+        retention_days=FEEDBACK_RETENTION_DAYS,
+    )
+    return records

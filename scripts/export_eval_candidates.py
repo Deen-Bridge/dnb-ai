@@ -49,6 +49,7 @@ from feedback import (  # noqa: E402
     FeedbackStore,
     SQLiteFeedbackStore,
     build_store,
+    export_eval_candidates,
 )
 
 _WS = re.compile(r"\s+")
@@ -130,10 +131,16 @@ def export(
     min_categories: int = 0,
     limit: int = 2000,
     db_path: str | None = None,
+    actor: str = "cli",
 ) -> int:
-    """Run the export; return the number of candidates written."""
+    """Run the export; return the number of candidates written.
+
+    Reads through ``feedback.export_eval_candidates`` so retention expiry,
+    PII/secrets redaction, and the audit record are applied to every export
+    (issue #874). Only down-rated, unexpired records are considered.
+    """
     store = _select_store(db_path)
-    records = store.list_records(rating="down", limit=limit)
+    records = [r for r in export_eval_candidates(store, actor=actor, limit=limit) if r.rating == "down"]
     candidates = build_candidates(records, min_categories=min_categories)
 
     out = open(output_path, "w", encoding="utf-8") if output_path else sys.stdout
