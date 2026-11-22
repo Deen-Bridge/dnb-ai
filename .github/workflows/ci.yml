@@ -80,6 +80,9 @@ jobs:
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
 
+      - name: Run cross-reference graph consistency tests (#840)
+        run: pytest -q tests/test_cross_reference_graph.py
+
       - name: Run reasoning chain tests
         run: pytest -q tests/test_reasoning_chains.py
 

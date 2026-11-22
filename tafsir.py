@@ -37,6 +37,7 @@ introducing a second cache system.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -48,11 +49,11 @@ from enum import Enum
 from functools import lru_cache
 from itertools import combinations
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from errors import APIException
 from semantic_cache import get_keyed_cache
@@ -399,7 +400,7 @@ SEED_CROSS_REFERENCES: list[CrossReference] = [
     CrossReference(
         source="2:255",
         target="3:2",
-        reference_type=ReferenceType.REPEATED_STORY,
+        reference_type=ReferenceType.THEMATIC_PARALLEL,
         context="Ayat al-Kursi and Aal Imran open with the same divine self-description.",
         commentary="Both verses are linked by the theme of Allah's eternal self-subsistence.",
         source_work="Tafsir al-Tabari",
@@ -408,27 +409,261 @@ SEED_CROSS_REFERENCES: list[CrossReference] = [
 
 CROSS_REFERENCE_DATA_PATH = Path(__file__).resolve().parent / "data" / "quran" / "cross_references.json"
 
+# Bumped whenever the validation rules below change meaning, so a report from
+# one deployment can be compared with another.
+CROSS_REFERENCE_SCHEMA_VERSION = "cross-reference-graph/v1"
 
-def _load_cross_references() -> list[CrossReference]:
-    """Load cross-references from an external JSON file, falling back to the seed list."""
-    if CROSS_REFERENCE_DATA_PATH.exists():
-        with CROSS_REFERENCE_DATA_PATH.open(encoding="utf-8") as f:
-            try:
-                raw = json.load(f)
-                return [CrossReference(**item) for item in raw]
-            except (json.JSONDecodeError, TypeError, ValueError):
-                logger.warning("Could not parse cross-reference database; using seed.")
-                return list(SEED_CROSS_REFERENCES)
-    return list(SEED_CROSS_REFERENCES)
+# ``\d`` deliberately matches any Unicode decimal digit, so keys written with
+# Arabic-Indic (٢:٢٥٥) or Persian (۲:۲۵۵) digits are recognised and folded onto
+# the canonical ASCII key instead of silently never matching a lookup.
+_AYAH_KEY_PATTERN = re.compile(r"^\s*(\d{1,3})\s*:\s*(\d{1,3})\s*$")
 
 
-CROSS_REFERENCES: list[CrossReference] = _load_cross_references()
+class GraphIssue(BaseModel):
+    """One consistency finding about the cross-reference graph.
 
-# Index references by ayah key for O(1) lookup.
-_REFERENCE_INDEX: dict[str, list[CrossReference]] = {}
-for _ref in CROSS_REFERENCES:
-    _REFERENCE_INDEX.setdefault(_ref.source, []).append(_ref)
-    _REFERENCE_INDEX.setdefault(_ref.target, []).append(_ref)
+    ``error`` findings reject the edge (it is never served); ``warning``
+    findings keep the edge but are surfaced in the integrity report.
+    """
+
+    code: str
+    severity: Literal["error", "warning"]
+    edge: int | None = Field(None, description="Position of the edge in the raw data; None for file-level issues.")
+    detail: str
+
+
+class CrossReferenceGraphReport(BaseModel):
+    """Integrity report for the cross-reference graph currently being served."""
+
+    schema_version: str
+    data_source: Literal["file", "seed", "seed_fallback"]
+    data_version: str = Field(..., description="Content hash of the accepted edges; changes whenever the data does.")
+    consistent: bool = Field(..., description="True when no edge or file-level error was found.")
+    total_edges: int
+    accepted_edges: int
+    rejected_edges: int
+    issues: list[GraphIssue]
+
+
+class CrossReferenceGraph(BaseModel):
+    """The validated, indexed graph plus the report describing how it was built."""
+
+    references: list[CrossReference]
+    index: dict[str, list[CrossReference]]
+    report: CrossReferenceGraphReport
+
+
+def canonical_ayah_key(raw: object) -> tuple[str | None, str | None]:
+    """Return ``(canonical_key, None)`` for a real ayah, or ``(None, reason)``.
+
+    Leading zeros, surrounding whitespace and non-ASCII decimal digits are
+    folded onto ``"surah:ayah"``. Ranges (``"1:1-7"``) are rejected: graph nodes
+    are single ayat, and a range key would never match a lookup.
+    """
+    if not isinstance(raw, str):
+        return None, "Ayah key must be a string of the form 'surah:ayah'."
+    match = _AYAH_KEY_PATTERN.match(raw)
+    if match is None:
+        return None, f"{raw!r} is not a single 'surah:ayah' key."
+    surah_num, ayah_num = int(match.group(1)), int(match.group(2))
+    surah = surah_by_number(surah_num)
+    if surah is None:
+        return None, f"Surah {surah_num} does not exist (1-114)."
+    if not 1 <= ayah_num <= surah.ayah_count:
+        return None, f"Ayah {ayah_num} is out of range for Surah {surah.name} (1-{surah.ayah_count})."
+    return f"{surah_num}:{ayah_num}", None
+
+
+def validate_cross_reference_graph(items: list[Any]) -> tuple[list[CrossReference], list[GraphIssue]]:
+    """Check every edge of a raw cross-reference list and return the safe subset.
+
+    Rejected (``error``): records that do not fit the schema, malformed or
+    out-of-range ayah keys, self-references, empty context, and duplicate
+    edges — including the same pair stored in both directions, since the index
+    already serves every edge from both ends.
+
+    Kept with a ``warning``: keys that needed canonicalising, missing
+    commentary, missing provenance (``source_work``), and the same pair stored
+    with a different reference type.
+    """
+    accepted: list[CrossReference] = []
+    issues: list[GraphIssue] = []
+    seen_edges: dict[tuple[str, str, ReferenceType], int] = {}
+    seen_pairs: dict[tuple[str, str], tuple[ReferenceType, int]] = {}
+
+    for position, item in enumerate(items):
+        if not isinstance(item, dict):
+            issues.append(GraphIssue(code="invalid_record", severity="error", edge=position, detail="Not an object."))
+            continue
+        try:
+            ref = CrossReference.model_validate(item)
+        except ValidationError as exc:
+            fields = sorted({".".join(str(p) for p in err["loc"]) for err in exc.errors()})
+            issues.append(
+                GraphIssue(
+                    code="invalid_record",
+                    severity="error",
+                    edge=position,
+                    detail=f"Schema validation failed for: {', '.join(fields)}.",
+                )
+            )
+            continue
+
+        endpoints: list[str] = []
+        for side, raw_key in (("source", ref.source), ("target", ref.target)):
+            key, reason = canonical_ayah_key(raw_key)
+            if key is None:
+                issues.append(GraphIssue(code=f"invalid_{side}", severity="error", edge=position, detail=reason or ""))
+                continue
+            if key != raw_key:
+                issues.append(
+                    GraphIssue(
+                        code="non_canonical_key",
+                        severity="warning",
+                        edge=position,
+                        detail=f"{side} {raw_key!r} was normalised to {key!r}.",
+                    )
+                )
+            endpoints.append(key)
+        if len(endpoints) != 2:
+            continue
+        source, target = endpoints
+
+        if source == target:
+            issues.append(
+                GraphIssue(code="self_reference", severity="error", edge=position, detail=f"{source} links to itself.")
+            )
+            continue
+        if not ref.context.strip():
+            issues.append(GraphIssue(code="missing_context", severity="error", edge=position, detail="Empty context."))
+            continue
+
+        pair = (min(source, target), max(source, target))
+        edge_key = (*pair, ref.reference_type)
+        if edge_key in seen_edges:
+            issues.append(
+                GraphIssue(
+                    code="duplicate_edge",
+                    severity="error",
+                    edge=position,
+                    detail=(
+                        f"{source} <-> {target} ({ref.reference_type.value}) duplicates edge {seen_edges[edge_key]}."
+                    ),
+                )
+            )
+            continue
+        if pair in seen_pairs and seen_pairs[pair][0] != ref.reference_type:
+            other_type, other_position = seen_pairs[pair]
+            issues.append(
+                GraphIssue(
+                    code="conflicting_type",
+                    severity="warning",
+                    edge=position,
+                    detail=(
+                        f"{source} <-> {target} is typed {ref.reference_type.value} here "
+                        f"but {other_type.value} in edge {other_position}."
+                    ),
+                )
+            )
+
+        if not ref.commentary.strip():
+            issues.append(
+                GraphIssue(code="missing_commentary", severity="warning", edge=position, detail="Empty commentary.")
+            )
+        if not (ref.source_work and ref.source_work.strip()):
+            issues.append(
+                GraphIssue(
+                    code="missing_provenance",
+                    severity="warning",
+                    edge=position,
+                    detail="No source_work: the link is not attributed to a named tafsir.",
+                )
+            )
+
+        seen_edges[edge_key] = position
+        seen_pairs.setdefault(pair, (ref.reference_type, position))
+        accepted.append(ref.model_copy(update={"source": source, "target": target}))
+
+    return accepted, issues
+
+
+def _read_cross_reference_items(
+    path: Path,
+) -> tuple[list[Any], Literal["file", "seed", "seed_fallback"], list[GraphIssue]]:
+    """Read raw edges from ``path``; fall back to the bundled seed if it is absent or unreadable."""
+    seed = [ref.model_dump() for ref in SEED_CROSS_REFERENCES]
+    if not path.exists():
+        return seed, "seed", []
+    try:
+        with path.open(encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        issue = GraphIssue(code="unreadable_file", severity="error", detail=f"{type(exc).__name__}; using seed data.")
+        return seed, "seed_fallback", [issue]
+    if not isinstance(raw, list):
+        issue = GraphIssue(
+            code="not_a_list", severity="error", detail="Top-level JSON must be a list; using seed data."
+        )
+        return seed, "seed_fallback", [issue]
+    return raw, "file", []
+
+
+def build_cross_reference_graph(path: Path | None = None) -> CrossReferenceGraph:
+    """Load, validate and index the cross-reference graph (uncached)."""
+    items, data_source, issues = _read_cross_reference_items(path or CROSS_REFERENCE_DATA_PATH)
+    accepted, edge_issues = validate_cross_reference_graph(items)
+    issues.extend(edge_issues)
+
+    if data_source == "file" and items and not accepted:
+        # Serving an empty graph would look like "no links exist"; the reviewed
+        # seed is the safer degraded state.
+        issues.append(
+            GraphIssue(code="no_valid_edges", severity="error", detail="Every edge was rejected; using seed data.")
+        )
+        data_source = "seed_fallback"
+        items = [ref.model_dump() for ref in SEED_CROSS_REFERENCES]
+        accepted, _ = validate_cross_reference_graph(items)
+
+    index: dict[str, list[CrossReference]] = {}
+    for ref in accepted:
+        index.setdefault(ref.source, []).append(ref)
+        index.setdefault(ref.target, []).append(ref)
+
+    canonical = json.dumps([ref.model_dump(mode="json") for ref in accepted], sort_keys=True, ensure_ascii=False)
+    report = CrossReferenceGraphReport(
+        schema_version=CROSS_REFERENCE_SCHEMA_VERSION,
+        data_source=data_source,
+        data_version=hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16],
+        consistent=not any(issue.severity == "error" for issue in issues),
+        total_edges=len(items),
+        accepted_edges=len(accepted),
+        rejected_edges=len(items) - len(accepted),
+        issues=issues,
+    )
+    if issues:
+        counts: dict[str, int] = defaultdict(int)
+        for issue in issues:
+            counts[issue.code] += 1
+        logger.warning(
+            "Cross-reference graph %s (%s): %d/%d edges accepted; issues=%s",
+            report.data_version,
+            data_source,
+            report.accepted_edges,
+            report.total_edges,
+            dict(sorted(counts.items())),
+        )
+    return CrossReferenceGraph(references=accepted, index=index, report=report)
+
+
+@lru_cache(maxsize=1)
+def get_cross_reference_graph() -> CrossReferenceGraph:
+    """The process-wide graph, built once on first use.
+
+    Built lazily (not at import) so the surah index is available for bounds
+    checks; call ``get_cross_reference_graph.cache_clear()`` after replacing the
+    data file to reload it.
+    """
+    return build_cross_reference_graph()
 
 
 def find_cross_references(
@@ -437,11 +672,14 @@ def find_cross_references(
     target_surah: int | None = None,
 ) -> list[CrossReference]:
     """Return all references linked to `ayah_key`, with optional filters."""
+    key, _ = canonical_ayah_key(ayah_key)
+    if key is None:
+        return []
     results = []
-    for ref in _REFERENCE_INDEX.get(ayah_key, []):
+    for ref in get_cross_reference_graph().index.get(key, []):
         if reference_type is not None and ref.reference_type != reference_type:
             continue
-        counterpart = ref.target if ref.source == ayah_key else ref.source
+        counterpart = ref.target if ref.source == key else ref.source
         counterpart_number = int(counterpart.split(":")[0])
         if target_surah is not None and counterpart_number != target_surah:
             continue
@@ -475,14 +713,20 @@ def get_cross_references(
     - reference_type: filter by `repeated_story`, `related_ruling`, etc.
     - target_surah: limit results to references pointing into that surah.
     """
-    _validate_ayah_key(ayah_key)
+    surah_num, ayah_num = _validate_ayah_key(ayah_key)
     ref_type: ReferenceType | None = None
     if reference_type:
         try:
             ref_type = ReferenceType(reference_type)
         except ValueError:
             raise APIException(400, f"Unknown reference_type: {reference_type}") from None
-    return find_cross_references(ayah_key, ref_type, target_surah)
+    return find_cross_references(f"{surah_num}:{ayah_num}", ref_type, target_surah)
+
+
+@router.get("/cross-reference-graph/report", response_model=CrossReferenceGraphReport)
+def cross_reference_graph_report() -> CrossReferenceGraphReport:
+    """Integrity report for the served graph: data version, source, and every rejected or flagged edge."""
+    return get_cross_reference_graph().report
 
 
 @router.get("/cross-reference-network")
@@ -494,7 +738,7 @@ def cross_reference_network(target_surah: int | None = None) -> dict[str, list]:
     """
     nodes: set[str] = set()
     edges: list[dict[str, str]] = []
-    for ref in CROSS_REFERENCES:
+    for ref in get_cross_reference_graph().references:
         source_number = int(ref.source.split(":")[0])
         target_number = int(ref.target.split(":")[0])
         if target_surah is not None and source_number != target_surah and target_number != target_surah:
