@@ -16,9 +16,9 @@ import os
 import random
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from errors import APIException
@@ -297,6 +297,16 @@ class StudyGenerateRequest(BaseModel):
         default=False,
         description="Explicit opt-in to track user mastery and adapt future content.",
     )
+
+    @field_validator("user_id")
+    @classmethod
+    def _blank_user_id_is_anonymous(cls, value: str | None) -> str | None:
+        # A whitespace-only ID would otherwise become one shared storage key for
+        # every such caller (#848: user-scoped data must stay isolated).
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class QuizQuestion(BaseModel):
@@ -820,8 +830,13 @@ async def generate_study_content(request: StudyGenerateRequest):
     return response
 
 
+# Opaque learner IDs: 1-128 characters with no leading or trailing whitespace,
+# so two different path values can never resolve to the same storage key.
+UserIdPath = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^\S(?:.*\S)?$")]
+
+
 @router.get("/study/users/{user_id}/progress", response_model=UserStudyRecord)
-async def get_user_study_progress(user_id: str):
+async def get_user_study_progress(user_id: UserIdPath):
     """Retrieve study progress and discipline mastery for an opted-in learner."""
     progress = await study_store.get_progress(user_id)
     if progress is None:
@@ -833,7 +848,7 @@ async def get_user_study_progress(user_id: str):
 
 
 @router.delete("/study/users/{user_id}")
-async def reset_user_study_progress(user_id: str):
+async def reset_user_study_progress(user_id: UserIdPath):
     """Permanently erase all user-scoped study progress and personalization data (opt-out / reset)."""
     existed = await study_store.reset_user(user_id)
     return {

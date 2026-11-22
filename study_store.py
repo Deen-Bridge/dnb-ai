@@ -7,6 +7,7 @@ for local development and Redis for production persistence.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -58,7 +59,10 @@ class StudyStore:
             logger.info("StudyStore initialized with in-memory backend")
 
     def _format_key(self, user_id: str) -> str:
-        clean_id = user_id.strip()
+        clean_id = (user_id or "").strip()
+        if not clean_id:
+            # Every blank ID would share one key, mixing different learners' data.
+            raise ValueError("user_id must not be blank")
         return f"study:user:{clean_id}"
 
     async def get_progress(self, user_id: str) -> UserStudyRecord | None:
@@ -77,10 +81,10 @@ class StudyStore:
                 logger.error("Redis read error in StudyStore.get_progress: %s", exc)
 
         # In-memory fallback
-        record = self._memory_cache.get(key)
-        if record:
+        cached = self._memory_cache.get(key)
+        if cached:
             self._memory_cache.move_to_end(key)
-            return record if record.opt_in else None
+            return cached if cached.opt_in else None
         return None
 
     async def record_progress(
@@ -150,7 +154,8 @@ class StudyStore:
             del self._memory_cache[key]
             existed = True
 
-        logger.info("Study progress reset for user hash %s", user_id[:8] if len(user_id) >= 8 else user_id)
+        user_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+        logger.info("Study progress reset for user hash %s (existed=%s)", user_hash, existed)
         return existed
 
 
