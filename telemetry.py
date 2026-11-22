@@ -277,6 +277,22 @@ class MetricsRegistry:
         self._handler_latencies: list[float] = []
         self._model_latencies: list[float] = []
         self._by_model: dict[str, dict[str, float]] = {}
+        self._stellar_contract_checks: dict[str, int] = {}
+
+    def record_stellar_contract_check(self, outcome: str) -> None:
+        """Record bounded, content-free Stellar freshness outcomes."""
+        allowed = {
+            "success",
+            "not_found",
+            "invalid_request",
+            "stale_ledger",
+            "provider_error",
+            "invalid_evidence",
+        }
+        if outcome not in allowed:
+            raise ValueError("Unsupported Stellar contract-check outcome")
+        with self._lock:
+            self._stellar_contract_checks[outcome] = self._stellar_contract_checks.get(outcome, 0) + 1
 
     def record_call(self, call: LlmCall) -> None:
         with self._lock:
@@ -334,6 +350,7 @@ class MetricsRegistry:
                     }
                     for model, b in self._by_model.items()
                 },
+                "stellar_contract_checks": dict(self._stellar_contract_checks),
             }
 
     def reset(self) -> None:
@@ -351,6 +368,7 @@ class MetricsRegistry:
             self._handler_latencies.clear()
             self._model_latencies.clear()
             self._by_model.clear()
+            self._stellar_contract_checks.clear()
 
 
 # Process-wide registry the app records into and /metrics reads from.

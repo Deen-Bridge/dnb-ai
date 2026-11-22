@@ -2,6 +2,12 @@
 
 Deen Bridge AI Service exposes a Prometheus-compatible `/metrics` endpoint for comprehensive real-time monitoring, metrics collection, and alerting.
 
+The `/metrics/json` snapshot (under the existing metrics access controls) also includes bounded-dimension
+`stellar_contract_checks` counters (`success`, `not_found`, `invalid_request`,
+`stale_ledger`, `provider_error`, `invalid_evidence`). They contain no wallet
+identifiers, balances, or provider payloads and are in-memory aggregates that
+reset on process restart, matching the existing telemetry retention model.
+
 ---
 
 ## 1. Overview

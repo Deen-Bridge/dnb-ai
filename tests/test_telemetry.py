@@ -131,6 +131,20 @@ class TestRegistry:
         # this registry; the registry must not emit a misleading zeroed block.
         assert "cache" not in fresh_registry.snapshot()
 
+    def test_stellar_contract_outcomes_are_bounded_and_reset(self, fresh_registry):
+        fresh_registry.record_stellar_contract_check("stale_ledger")
+        fresh_registry.record_stellar_contract_check("success")
+        fresh_registry.record_stellar_contract_check("not_found")
+        assert fresh_registry.snapshot()["stellar_contract_checks"] == {
+            "stale_ledger": 1,
+            "success": 1,
+            "not_found": 1,
+        }
+        with pytest.raises(ValueError):
+            fresh_registry.record_stellar_contract_check("wallet-address")
+        fresh_registry.reset()
+        assert fresh_registry.snapshot()["stellar_contract_checks"] == {}
+
     def test_reset_clears_state_and_preserves_lock(self, fresh_registry):
         record_model_call(_FakeResponse(100, 50, 150), MODEL, 10.0)
         fresh_registry.record_request(10.0, error=True)

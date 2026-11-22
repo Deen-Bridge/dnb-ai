@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import re
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, overload
 
@@ -51,6 +52,8 @@ from stellar_error_codes import (
     map_transport_exception_to_error_envelope,
     to_api_exception,
 )
+from stellar_contract_state import evaluate_provider_freshness, validate_contract_request
+from telemetry import registry as telemetry_registry
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +271,18 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
 
     Raises HTTPException(404) if the account does not exist on this network.
     """
+    request_error = validate_contract_request(
+        network=STELLAR_NETWORK,
+        configured_network=STELLAR_NETWORK,
+        asset_code="USDC",
+        asset_issuer=usdc_issuer(),
+        expected_issuer=USDC_ISSUERS.get(STELLAR_NETWORK, ""),
+        public_key_valid=StrKey.is_valid_ed25519_public_key(public_key),
+    )
+    if request_error:
+        telemetry_registry.record_stellar_contract_check("invalid_request")
+        raise APIException(status_code=503, detail="Stellar account checks are unavailable.")
+
     if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
         latency_ms = int(os.getenv("MOCK_HORIZON_LATENCY_MS", "25"))
         if latency_ms:
@@ -277,7 +292,9 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
         if public_key == os.getenv(
             "MOCK_UNKNOWN_ACCOUNT_KEY", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
         ):
+            telemetry_registry.record_stellar_contract_check("not_found")
             raise HTTPException(status_code=404, detail="Account not found on the Stellar testnet network.")
+        telemetry_registry.record_stellar_contract_check("success")
         return Decimal(os.getenv("MOCK_USDC_BALANCE", "100"))
 
     from stellar_network_guard import validate_asset_issuer_pair_for_provider
@@ -295,8 +312,49 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
 
     server = Server(horizon_url())
     try:
-        account = server.accounts().account_id(public_key).call()
+        try:
+            latest_ledger = server.root().call()
+        except Exception:
+            telemetry_registry.record_stellar_contract_check("provider_error")
+            logger.warning("Stellar provider latest-ledger request failed.")
+            raise APIException(
+                status_code=503,
+                detail="Stellar provider is unavailable; account data was not used.",
+            ) from None
+        try:
+            max_age_seconds = int(os.getenv("STELLAR_MAX_LEDGER_AGE_SECONDS", "30"))
+            freshness = evaluate_provider_freshness(
+                {
+                    **latest_ledger,
+                    "network": STELLAR_NETWORK,
+                },
+                now=datetime.now(UTC),
+                max_age_seconds=max_age_seconds,
+            )
+        except (TypeError, ValueError):
+            telemetry_registry.record_stellar_contract_check("invalid_evidence")
+            raise APIException(status_code=503, detail="Stellar ledger evidence is unavailable.") from None
+        if not freshness.ok:
+            outcome = "stale_ledger" if freshness.reason in {
+                "STALE_LEDGER_EVIDENCE",
+                "FUTURE_LEDGER_EVIDENCE",
+            } else "invalid_evidence"
+            telemetry_registry.record_stellar_contract_check(outcome)
+            logger.warning("Stellar provider freshness check failed: %s", freshness.reason)
+            raise APIException(status_code=503, detail="Stellar ledger data is not fresh enough to use.")
+        try:
+            account = server.accounts().account_id(public_key).call()
+        except NotFoundError:
+            raise
+        except Exception:
+            telemetry_registry.record_stellar_contract_check("provider_error")
+            logger.warning("Stellar provider account request failed.")
+            raise APIException(
+                status_code=503,
+                detail="Stellar provider is unavailable; account data was not used.",
+            ) from None
     except NotFoundError:
+        telemetry_registry.record_stellar_contract_check("not_found")
         raise APIException(
             status_code=404,
             detail=f"Account not found on the Stellar {STELLAR_NETWORK} network.",
@@ -307,7 +365,9 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
         ) from None
     for balance in account.get("balances", []):
         if balance.get("asset_code") == "USDC" and balance.get("asset_issuer") == usdc_issuer():
+            telemetry_registry.record_stellar_contract_check("success")
             return Decimal(balance["balance"])
+    telemetry_registry.record_stellar_contract_check("success")
     return None
 
 

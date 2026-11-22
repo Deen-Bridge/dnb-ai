@@ -40,6 +40,12 @@ jobs:
       - name: Run full test suite
         run: pytest -q tests/
 
+      - name: Verify Stellar production contract (offline)
+        run: pytest -q tests/test_stellar_contract_state.py tests/test_stellar_ledger_freshness_guard.py tests/test_zakat.py
+
+      - name: Report sanitized Stellar verification result
+        run: python scripts/eval_stellar_contract.py
+
       - name: Verify retrieval backfill is idempotent (offline demo)
         run: |
           python scripts/build_index.py --index-path /tmp/ci-index.db --fake-embeddings

@@ -229,6 +229,7 @@ services:
 | `MEMORY_TTL_DAYS` | Time-to-live for stored user profiles and chat summaries in days | `90` |
 | `MEMORY_EXTRACTION_ENABLED` | Background memory extraction from conversation turns | `true` |
 | `STELLAR_NETWORK` | Stellar network for zakat lookups (`testnet` or `public`) | `testnet` |
+| `STELLAR_MAX_LEDGER_AGE_SECONDS` | Maximum age accepted for Horizon's latest-ledger evidence; stale/missing evidence fails closed | `30` |
 | `ZAKAT_NISAB_USD` | Fallback nisab when no gold price can be fetched | `6000` |
 | `NISAB_CACHE_TTL_SECONDS` | How long a fetched gold price is reused | `21600` (6h) |
 | `GOLD_PRICE_TIMEOUT` | Gold price request timeout in seconds | `8` |
@@ -667,6 +668,10 @@ curl -X POST http://localhost:8000/tafsir/compare \
 ```
 
 ### Zakat (on-chain, with a live nisab)
+
+Production freshness contract, failure behavior, observability, retention, and
+rollback guidance are documented in
+[`docs/stellar-production-contract.md`](docs/stellar-production-contract.md).
 
 `POST /zakat` computes zakat on a wallet's on-chain USDC balance — 2.5% of the
 whole balance once it reaches the nisab, nothing below it.

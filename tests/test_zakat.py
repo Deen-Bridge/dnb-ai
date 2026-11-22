@@ -5,6 +5,7 @@ no Stellar network call is made. No API keys needed.
 """
 
 import asyncio
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -178,6 +179,10 @@ class TestKeyValidation:
 class TestFetchBalance:
     def _server_returning(self, payload):
         server = MagicMock()
+        server.root.return_value.call.return_value = {
+            "history_latest_ledger": 12,
+            "history_latest_ledger_closed_at": datetime.now(UTC).isoformat(),
+        }
         server.accounts.return_value.account_id.return_value.call.return_value = payload
         return server
 
