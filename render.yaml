@@ -10,3 +10,13 @@ services:
         sync: false
       - key: SERVICE_API_KEY
         sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: MODERATION_STRICT_DURABILITY
+        value: "true"
+      - key: MODERATION_FALLBACK_FILE
+        value: /var/data/moderation_store.json
+      - key: PROVIDER_TIMEOUT_SECONDS
+        value: "30"

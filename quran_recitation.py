@@ -39,11 +39,42 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher, get_close_matches
+from enum import Enum
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from untrusted_content import sanitize_untrusted_text, wrap_untrusted_content
+
 router = APIRouter(prefix="/quran-recitation", tags=["quran-recitation"])
+
+CONFIDENCE_MODEL_VERSION = "1.0.0"
+CONFIDENCE_THRESHOLD_CONFIRMED = 0.85
+CONFIDENCE_THRESHOLD_NEEDS_REVIEW = 0.50
+
+
+class RecitationMatchStatus(str, Enum):
+    CONFIRMED = "confirmed"
+    NEEDS_REVIEW = "needs_review"
+    ABSTAIN = "abstain"
+
+
+class ConfidenceDimensions(BaseModel):
+    audio_quality: float = Field(..., ge=0.0, le=1.0, description="Estimated audio/ASR signal quality.")
+    transcription_alignment: float = Field(..., ge=0.0, le=1.0, description="Word-level acoustic alignment fidelity.")
+    verse_boundary: float = Field(..., ge=0.0, le=1.0, description="Verse boundary precision.")
+    matching_score: float = Field(..., ge=0.0, le=1.0, description="Text match ratio against Mushaf.")
+
+
+class RecitationConfidenceReport(BaseModel):
+    model_version: str = CONFIDENCE_MODEL_VERSION
+    status: RecitationMatchStatus
+    calibrated_confidence: float = Field(..., ge=0.0, le=1.0)
+    dimensions: ConfidenceDimensions
+    safe_explanation: str
+    abstain_reason: str | None = None
+    evidence_boundaries: dict[str, Any] | None = None
 
 MAX_TRANSCRIPT_LENGTH = 20_000
 MAX_WORD_TIMINGS = 5_000
@@ -455,7 +486,7 @@ class AnalyzeRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     identified: bool
     surah: SurahIdentification | None
-    verification: str  # accurate | minor_deviations | inaccurate | unidentified
+    verification: str  # accurate | minor_deviations | inaccurate | unidentified | abstain
     accuracy: float
     coverage: float
     partial: bool
@@ -473,6 +504,8 @@ class AnalyzeResponse(BaseModel):
     confidence_band: str = "high"
     fallback_recommended: bool = False
     review_required: bool = False
+    confidence_report: RecitationConfidenceReport | None = None
+    untrusted_content: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -516,6 +549,19 @@ def _riwayah(alignment: _Alignment, hint: str | None) -> RiwayahInfo:
 
 
 def _empty_response(note: str, timing_source: str = "none") -> AnalyzeResponse:
+    confidence_report = RecitationConfidenceReport(
+        model_version=CONFIDENCE_MODEL_VERSION,
+        status=RecitationMatchStatus.ABSTAIN,
+        calibrated_confidence=0.0,
+        dimensions=ConfidenceDimensions(
+            audio_quality=0.0,
+            transcription_alignment=0.0,
+            verse_boundary=0.0,
+            matching_score=0.0,
+        ),
+        safe_explanation=note,
+        abstain_reason="no_match_or_empty_transcript",
+    )
     return AnalyzeResponse(
         identified=False,
         surah=None,
@@ -534,12 +580,16 @@ def _empty_response(note: str, timing_source: str = "none") -> AnalyzeResponse:
         reciter=None,
         maqam=None,
         note=note,
+        confidence_report=confidence_report,
+        untrusted_content=wrap_untrusted_content("", source="quran_recitation"),
     )
 
 
 def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
     """Identify, align and verify a recitation transcript against the bundled Mushaf."""
     transcript = request.transcript
+    if transcript:
+        transcript = sanitize_untrusted_text(transcript)
     if not (transcript and transcript.strip()) and request.word_timings:
         transcript = " ".join(t.word for t in request.word_timings)
     tokens = tokenize(transcript or "")
@@ -692,6 +742,75 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
             review_required = True
             note += " Low ASR confidence detected; safe fallback mode recommended."
 
+    # Multi-dimensional confidence computation
+    audio_quality = round(max(0.0, min(1.0, request.asr_confidence if request.asr_confidence is not None else 0.90)), 4)
+    exact_ratio = exact_count / max(len(tokens), 1)
+    transcription_alignment = round(max(0.0, min(1.0, exact_ratio)), 4)
+    if not partial:
+        verse_boundary = 1.0
+    elif all(a.complete for a in ayat):
+        verse_boundary = 0.85
+    else:
+        verse_boundary = 0.60
+    matching_score = round(max(0.0, min(1.0, accuracy * coverage)), 4)
+
+    calibrated_confidence = round(
+        0.20 * audio_quality + 0.25 * transcription_alignment + 0.15 * verse_boundary + 0.40 * matching_score,
+        4,
+    )
+
+    # Check for ambiguity against other surahs
+    candidates = [_align(tokens, s, cutoff) for s in _SURAHS.values() if s.number != surah.number]
+    is_ambiguous = any(c.matched >= 2 and c.matched == alignment.matched and alignment.matched <= 3 for c in candidates)
+
+    if audio_quality < 0.40 or calibrated_confidence < CONFIDENCE_THRESHOLD_NEEDS_REVIEW:
+        status = RecitationMatchStatus.ABSTAIN
+        abstain_reason = "low_audio_quality_or_insufficient_confidence"
+        safe_explanation = (
+            "The confidence in this recitation match is insufficient to verify. "
+            "The system abstains from confirming this verse to prevent misattribution. "
+            "Please verify against a printed Mushaf or with a qualified teacher."
+        )
+    elif is_ambiguous:
+        status = RecitationMatchStatus.NEEDS_REVIEW
+        abstain_reason = "ambiguous_parallel_passage"
+        safe_explanation = (
+            "Recitation matches multiple short Quranic passages with similar fidelity. "
+            "Manual review by an instructor or scholar is required."
+        )
+    elif calibrated_confidence >= CONFIDENCE_THRESHOLD_CONFIRMED and accuracy >= 0.85:
+        status = RecitationMatchStatus.CONFIRMED
+        abstain_reason = None
+        safe_explanation = "High confidence recitation match confirmed against the bundled Hafs Mushaf text."
+    else:
+        status = RecitationMatchStatus.NEEDS_REVIEW
+        abstain_reason = None
+        safe_explanation = "Recitation matched with moderate confidence or minor deviations. Verification recommended."
+
+    evidence_boundaries = {
+        "surah_number": surah.number,
+        "surah_name": surah.name,
+        "ayah_start": ayah_start,
+        "ayah_end": ayah_end,
+        "token_count": len(tokens),
+        "matched_word_count": len(matched_idx),
+    }
+
+    confidence_report = RecitationConfidenceReport(
+        model_version=CONFIDENCE_MODEL_VERSION,
+        status=status,
+        calibrated_confidence=calibrated_confidence,
+        dimensions=ConfidenceDimensions(
+            audio_quality=audio_quality,
+            transcription_alignment=transcription_alignment,
+            verse_boundary=verse_boundary,
+            matching_score=matching_score,
+        ),
+        safe_explanation=safe_explanation,
+        abstain_reason=abstain_reason,
+        evidence_boundaries=evidence_boundaries if status != RecitationMatchStatus.ABSTAIN else None,
+    )
+
     return AnalyzeResponse(
         identified=True,
         surah=SurahIdentification(
@@ -719,6 +838,8 @@ def analyze_recitation(request: AnalyzeRequest) -> AnalyzeResponse:
         confidence_band=confidence_band,
         fallback_recommended=fallback_recommended,
         review_required=review_required,
+        confidence_report=confidence_report,
+        untrusted_content=wrap_untrusted_content(transcript or "", source="quran_recitation"),
     )
 
 

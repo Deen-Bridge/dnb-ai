@@ -37,8 +37,11 @@ from book_moderation.platform import (
 from book_moderation.policy import Purchase, Viewer, decide_access
 from book_moderation.service import BookModerationService
 from book_moderation.store import (
+    DurableFileBookModerationStore,
     InMemoryBookModerationStore,
+    ModerationStoreOutageError,
     RedisBookModerationStore,
+    ResilientBookModerationStore,
     build_store,
 )
 
@@ -947,3 +950,179 @@ class TestLearnerRoutes:
 
         response = client.get("/books/catalog", headers={"Authorization": "Basic abc"})
         assert [book["_id"] for book in response.json()["books"]] == ["b2"]
+
+
+# ---------------------------------------------------------------------------
+# Outage, Durability, and Reconciliation Tests (Issue #881)
+# ---------------------------------------------------------------------------
+
+
+class _FailingPrimaryStore(InMemoryBookModerationStore):
+    """Simulates a Redis cluster outage."""
+
+    def __init__(self, failure_exception: Exception | None = None) -> None:
+        super().__init__()
+        self.should_fail = True
+        self.exception = failure_exception or ConnectionError("Connection to Redis lost")
+
+    async def get(self, book_id: str) -> BookModeration | None:
+        if self.should_fail:
+            raise self.exception
+        return await super().get(book_id)
+
+    async def save(self, record: BookModeration) -> None:
+        if self.should_fail:
+            raise self.exception
+        await super().save(record)
+
+    async def delete(self, book_id: str) -> bool:
+        if self.should_fail:
+            raise self.exception
+        return await super().delete(book_id)
+
+    async def list_all(self) -> list[BookModeration]:
+        if self.should_fail:
+            raise self.exception
+        return await super().list_all()
+
+
+class _FailingRedisCache:
+    """Simulates Redis catalog cache outage."""
+
+    def __init__(self) -> None:
+        self.should_fail = True
+        self.deleted_patterns: list[str] = []
+
+    async def scan_iter(self, match: str):
+        if self.should_fail:
+            raise ConnectionError("Redis cache cluster unreachable")
+        for key in [f"books:catalog:{match}", f"books:detail:{match}"]:
+            yield key
+
+    async def delete(self, *keys: str) -> int:
+        if self.should_fail:
+            raise ConnectionError("Redis cache cluster unreachable")
+        self.deleted_patterns.extend(keys)
+        return len(keys)
+
+
+class TestModerationOutageAndDurability:
+    @pytest.mark.asyncio
+    async def test_durable_file_store_survives_restart(self, tmp_path):
+        file_path = tmp_path / "moderation_wal.json"
+        store1 = DurableFileBookModerationStore(file_path)
+        record = BookModeration(book_id="book-100", status=BookStatus.TAKEN_DOWN, reason=TakeDownReason.DMCA)
+        await store1.save(record)
+
+        # Simulate process restart by instantiating a fresh store pointing to the same file
+        store2 = DurableFileBookModerationStore(file_path)
+        recovered = await store2.get("book-100")
+        assert recovered is not None
+        assert recovered.book_id == "book-100"
+        assert recovered.status == BookStatus.TAKEN_DOWN
+        assert recovered.reason == TakeDownReason.DMCA
+
+    @pytest.mark.asyncio
+    async def test_write_during_redis_outage_uses_durable_fallback(self, tmp_path, caplog):
+        primary = _FailingPrimaryStore()
+        fallback = DurableFileBookModerationStore(tmp_path / "fallback.json")
+        resilient = ResilientBookModerationStore(primary=primary, fallback=fallback)
+
+        record = BookModeration(
+            book_id="book-outage-1",
+            status=BookStatus.TAKEN_DOWN,
+            reason=TakeDownReason.CONTENT_VIOLATION,
+            note="Sensitive content explanation",
+        )
+
+        with caplog.at_level("ERROR"):
+            await resilient.save(record)
+
+        # Verified preserved in fallback
+        persisted = await fallback.get("book-outage-1")
+        assert persisted is not None
+        assert persisted.status == BookStatus.TAKEN_DOWN
+        assert "book-outage-1" in resilient.pending_sync_ids
+
+        # Verify alert emitted without leaking note or content
+        alert_logs = [r.message for r in caplog.records if "MODERATION_ALERT" in r.message]
+        assert len(alert_logs) >= 1
+        assert "affected_count=1" in alert_logs[0]
+        assert "book-outage-1" in alert_logs[0]
+        assert "Sensitive content explanation" not in alert_logs[0]
+
+    @pytest.mark.asyncio
+    async def test_reconciliation_syncs_pending_records_after_recovery(self, tmp_path):
+        primary = _FailingPrimaryStore()
+        fallback = DurableFileBookModerationStore(tmp_path / "fallback.json")
+        resilient = ResilientBookModerationStore(primary=primary, fallback=fallback)
+
+        record = BookModeration(book_id="book-sync-1", status=BookStatus.TAKEN_DOWN)
+        await resilient.save(record)
+        assert "book-sync-1" in resilient.pending_sync_ids
+
+        # Recover primary Redis
+        primary.should_fail = False
+        synced_count = await resilient.reconcile_pending()
+        assert synced_count == 1
+        assert resilient.pending_sync_ids == []
+
+        # Verify primary now contains the synced record
+        primary_record = await primary.get("book-sync-1")
+        assert primary_record is not None
+        assert primary_record.status == BookStatus.TAKEN_DOWN
+
+    @pytest.mark.asyncio
+    async def test_strict_mode_fails_closed_without_fallback(self):
+        primary = _FailingPrimaryStore()
+        resilient = ResilientBookModerationStore(primary=primary, fallback=None, strict_durability=True)
+        record = BookModeration(book_id="book-strict-fail", status=BookStatus.TAKEN_DOWN)
+
+        with pytest.raises(ModerationStoreOutageError) as exc_info:
+            await resilient.save(record)
+        assert "book-strict-fail" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_multi_replica_read_consistency_during_outage(self, tmp_path):
+        shared_file = tmp_path / "shared_cluster_moderation.json"
+        primary = _FailingPrimaryStore()
+        replica_a = ResilientBookModerationStore(primary=primary, fallback=DurableFileBookModerationStore(shared_file))
+        replica_b = ResilientBookModerationStore(primary=primary, fallback=DurableFileBookModerationStore(shared_file))
+
+        record = BookModeration(book_id="book-shared-replica", status=BookStatus.TAKEN_DOWN)
+        await replica_a.save(record)
+
+        # Replica B reads during Redis outage and observes identical state
+        read_b = await replica_b.get("book-shared-replica")
+        assert read_b is not None
+        assert read_b.status == BookStatus.TAKEN_DOWN
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidation_failure_and_reconciliation(self, caplog):
+        fake_cache = _FailingRedisCache()
+        invalidator = BookCacheInvalidator(client=fake_cache)
+
+        with caplog.at_level("WARNING"):
+            with pytest.raises(ConnectionError):
+                await invalidator.invalidate(book_id="book-stale-1")
+
+        assert invalidator.pending_count == 1
+        assert invalidator.pending_book_ids == ["book-stale-1"]
+
+        # Alert emitted without content leakage
+        assert any("MODERATION_ALERT" in r.message and "book-stale-1" in r.message for r in caplog.records)
+
+        # Recovery
+        fake_cache.should_fail = False
+        deleted = await invalidator.reconcile()
+        assert deleted > 0
+        assert invalidator.pending_count == 0
+
+    def test_admin_reconcile_api_route(self, client):
+        headers = {"X-Admin-Token": ADMIN_TOKEN}
+        response = client.post("/books/moderation/reconcile", headers=headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["reconciliation"]["status"] == "reconciled"
+

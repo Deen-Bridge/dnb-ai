@@ -27,6 +27,7 @@ from media_upload_limits import (
     BoundedJobManager,
     validate_video_upload,
 )
+from untrusted_content import sanitize_untrusted_text, wrap_untrusted_content
 
 router = APIRouter(prefix="/video-analysis", tags=["video-analysis"])
 
@@ -141,16 +142,19 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
         audio, frames = extract_media(video_path, Path(directory))
         timestamps: list[dict[str, Any]]
         if transcript.strip():
-            transcript, timestamps = transcript.strip(), []
+            transcript, timestamps = sanitize_untrusted_text(transcript.strip()), []
         else:
-            transcript, timestamps = transcribe_audio(audio)
+            raw_transcript, timestamps = transcribe_audio(audio)
+            transcript = sanitize_untrusted_text(raw_transcript)
         for frame in frames:
-            frame["text"] = ocr_frame(Path(frame["path"]))
+            frame["text"] = sanitize_untrusted_text(ocr_frame(Path(frame["path"])))
         visual_text = " ".join(frame["text"] for frame in frames if frame["text"])
         combined = " ".join(part for part in (transcript, visual_text) if part)
         topics = segment_topics(combined, timestamps)
         key_points = [
-            {"timestamp_seconds": item["start"], "text": item["text"]} for item in timestamps if item.get("text")
+            {"timestamp_seconds": item["start"], "text": sanitize_untrusted_text(item["text"])}
+            for item in timestamps
+            if item.get("text")
         ][:20]
         return {
             "transcript": transcript,
@@ -165,6 +169,7 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
             "hadith_references": extract_hadith_references(combined),
             "frames": [{k: v for k, v in frame.items() if k != "path"} for frame in frames],
             "search_index": build_search_index(combined, frames),
+            "untrusted_content": wrap_untrusted_content(combined, source="video_analysis"),
             "capabilities": {
                 "ffmpeg": audio is not None or bool(frames),
                 "asr": bool(transcript),
@@ -198,7 +203,8 @@ async def _process(job_id: str, payload: bytes, suffix: str, transcript: str) ->
             job_id,
             status="failed",
             error="Video analysis processing encountered an error.",
-            error_details=str(error),
+            error_details="Processing failure: media decoding or provider timeout",
+            error_code="PROVIDER_PROCESSING_ERROR",
         )
 
 

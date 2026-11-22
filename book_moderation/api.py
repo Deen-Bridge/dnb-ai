@@ -149,6 +149,23 @@ async def moderation_state(
     return {"success": True, "moderation": record.model_dump(mode="json") if record else None}
 
 
+@admin_router.post(
+    "/reconcile",
+    dependencies=[Depends(require_admin)],
+    summary="Reconcile moderation state and catalog caches after outage recovery (admin)",
+    description=(
+        "Syncs any moderation records saved to durable fallback storage back to primary storage "
+        "and purges stale catalog cache keys. Requires the `X-Admin-Token` header."
+    ),
+)
+async def reconcile_outage(
+    service: BookModerationService = Depends(get_book_moderation_service),
+) -> dict:
+    """Reconcile moderation state and repair stale catalog caches."""
+    report = await service.reconcile_outage()
+    return {"success": True, "reconciliation": report}
+
+
 # -- learners ---------------------------------------------------------------
 
 

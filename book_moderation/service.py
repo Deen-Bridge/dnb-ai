@@ -25,7 +25,7 @@ from book_moderation.platform import (
     book_identifier,
 )
 from book_moderation.policy import AccessDecision, Viewer, decide_access
-from book_moderation.store import BookModerationStore, build_store
+from book_moderation.store import BookModerationStore, ModerationStoreOutageError, build_store
 from errors import APIException
 
 logger = logging.getLogger(__name__)
@@ -92,8 +92,15 @@ class BookModerationService:
             restored_at=None,
             author_id=author_id or (record.author_id if record is not None else None),
         )
-        await self._store.save(updated)
-        await self._invalidate_caches()
+        try:
+            await self._store.save(updated)
+        except ModerationStoreOutageError as exc:
+            raise APIException(
+                503,
+                f"Moderation store outage: unable to persist take-down for book {book_id}.",
+                hint="Check storage status and retry.",
+            ) from exc
+        await self._invalidate_caches(book_id)
         logger.info("Book %s taken down by %s (%s).", book_id, actor or "unknown", reason.value)
         return updated
 
@@ -124,8 +131,15 @@ class BookModerationService:
                 "restored_at": self._clock(),
             }
         )
-        await self._store.save(restored)
-        await self._invalidate_caches()
+        try:
+            await self._store.save(restored)
+        except ModerationStoreOutageError as exc:
+            raise APIException(
+                503,
+                f"Moderation store outage: unable to persist restore for book {book_id}.",
+                hint="Check storage status and retry.",
+            ) from exc
+        await self._invalidate_caches(book_id)
         logger.info("Book %s restored by %s.", book_id, actor or "unknown")
         return restored
 
@@ -274,13 +288,32 @@ class BookModerationService:
             )
         return book_author_id(book)
 
-    async def _invalidate_caches(self) -> None:
+    async def _invalidate_caches(self, book_id: str | None = None) -> None:
         if self._cache_invalidator is None:
             return
         try:
-            await self._cache_invalidator.invalidate()
+            await self._cache_invalidator.invalidate(book_id)
         except Exception as exc:  # noqa: BLE001 - a cache failure must not undo a moderation change
             logger.warning("Catalog cache invalidation failed (%s).", exc)
+
+    async def reconcile_outage(self) -> dict[str, Any]:
+        """Repair stale cache entries and sync pending fallback records after outage recovery."""
+        synced_records = 0
+        if hasattr(self._store, "reconcile_pending"):
+            synced_records = await self._store.reconcile_pending()
+
+        invalidated_keys = 0
+        if self._cache_invalidator is not None:
+            try:
+                invalidated_keys = await self._cache_invalidator.reconcile()
+            except Exception as exc:
+                logger.warning("Cache reconciliation failed (%s).", exc)
+
+        return {
+            "synced_records": synced_records,
+            "invalidated_cache_keys": invalidated_keys,
+            "status": "reconciled",
+        }
 
 
 def _viewer_of(account: Account | None) -> Viewer:

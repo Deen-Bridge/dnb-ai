@@ -196,30 +196,90 @@ class BookCacheInvalidator:
     def __init__(self, redis_url: str | None = None, *, client: Any | None = None) -> None:
         self._redis_url = redis_url if redis_url is not None else os.getenv("REDIS_URL", "")
         self._client = client
+        self._pending_invalidations: set[str] = set()
 
-    async def invalidate(self) -> int:
+    @property
+    def pending_count(self) -> int:
+        return len(self._pending_invalidations)
+
+    @property
+    def pending_book_ids(self) -> list[str]:
+        return sorted(self._pending_invalidations)
+
+    async def invalidate(self, book_id: str | None = None) -> int:
         """Delete the cached catalog entries; returns the number of keys removed."""
         client = self._client
         if client is None:
             if not self._redis_url:
                 logger.info("REDIS_URL is not configured; the catalog caches are left untouched.")
+                if book_id:
+                    self._pending_invalidations.add(book_id)
                 return 0
             try:
                 import redis.asyncio as aioredis
             except ImportError:  # pragma: no cover - redis is a hard dependency
                 logger.warning("redis package is not installed; the catalog caches are left untouched.")
+                if book_id:
+                    self._pending_invalidations.add(book_id)
                 return 0
-            client = aioredis.from_url(self._redis_url, decode_responses=True)
-            self._client = client
+            try:
+                client = aioredis.from_url(self._redis_url, decode_responses=True)
+                self._client = client
+            except Exception as exc:
+                if book_id:
+                    self._pending_invalidations.add(book_id)
+                logger.warning(
+                    "MODERATION_ALERT: Catalog cache client initialization failed (%s). Queued for reconciliation. affected_count=%d book_ids=%s",
+                    exc,
+                    len(self._pending_invalidations),
+                    list(self._pending_invalidations),
+                )
+                raise
 
         deleted = 0
-        for pattern in BOOK_CACHE_PATTERNS:
-            keys = [key async for key in client.scan_iter(match=pattern)]
-            if keys:
-                await client.delete(*keys)
-                deleted += len(keys)
-        logger.info("Invalidated %d catalog cache keys after a moderation change.", deleted)
-        return deleted
+        try:
+            for pattern in BOOK_CACHE_PATTERNS:
+                keys = [key async for key in client.scan_iter(match=pattern)]
+                if keys:
+                    await client.delete(*keys)
+                    deleted += len(keys)
+            logger.info("Invalidated %d catalog cache keys after a moderation change.", deleted)
+            if book_id:
+                self._pending_invalidations.discard(book_id)
+            return deleted
+        except Exception as exc:
+            if book_id:
+                self._pending_invalidations.add(book_id)
+            logger.warning(
+                "MODERATION_ALERT: Catalog cache invalidation failed (%s). Queued for reconciliation. affected_count=%d book_ids=%s",
+                exc,
+                len(self._pending_invalidations),
+                list(self._pending_invalidations),
+            )
+            raise
+
+    async def reconcile(self) -> int:
+        """Repair stale cache entries after recovery by executing pending invalidations."""
+        if not self._pending_invalidations:
+            return 0
+        reconciled_ids = list(self._pending_invalidations)
+        try:
+            deleted = await self.invalidate()
+            self._pending_invalidations.clear()
+            logger.info(
+                "MODERATION_RECONCILIATION: Repaired stale catalog cache entries after recovery. Reconciled %d books, dropped %d keys.",
+                len(reconciled_ids),
+                deleted,
+            )
+            return deleted
+        except Exception as exc:
+            logger.error(
+                "MODERATION_ALERT: Cache reconciliation failed (%s). affected_count=%d book_ids=%s",
+                exc,
+                len(reconciled_ids),
+                reconciled_ids,
+            )
+            raise
 
 
 def book_identifier(book: dict[str, Any]) -> str | None:

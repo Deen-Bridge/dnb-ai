@@ -45,6 +45,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from media_upload_limits import MAX_IMAGE_BYTES, validate_image_upload
+from untrusted_content import sanitize_untrusted_text, wrap_untrusted_content
 
 router = APIRouter(prefix="/arabic-ocr", tags=["arabic-ocr"])
 
@@ -346,6 +347,10 @@ class OCRResult(BaseModel):
     corrections_applied: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     image_hash: str = Field(..., description="SHA-256 hash of input image.")
+    untrusted_content: dict[str, Any] | None = Field(
+        default=None,
+        description="Untrusted content isolation metadata to prevent prompt injection.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +621,23 @@ async def call_ocr_engine(
     # This demonstrates the expected structure
 
     # Simulated OCR output for development/testing
+    if engine_config.api_endpoint:
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    engine_config.api_endpoint,
+                    content=image_data,
+                    headers={"Content-Type": "application/octet-stream"},
+                )
+                if resp.status_code >= 500:
+                    raise HTTPException(status_code=503, detail="OCR engine provider outage or unavailable.")
+                data = resp.json()
+                return data.get("text", ""), []
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=f"OCR engine provider unreachable: {type(exc).__name__}") from exc
+
     sample_text = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ"
 
     lines = [
@@ -795,9 +817,11 @@ async def process_manuscript_page(
 
     # Step 3: Run OCR
     raw_text, lines = await call_ocr_engine(processed_image, ocr_config, style_hint)
+    raw_text = sanitize_untrusted_text(raw_text)
 
     # Step 4: Post-process
     corrected_text, corrected_lines, corrections = apply_post_processing(raw_text, lines)
+    corrected_text = sanitize_untrusted_text(corrected_text)
 
     # Step 5: Calculate confidence
     confidence = calculate_confidence_metrics(corrected_lines)
@@ -814,6 +838,8 @@ async def process_manuscript_page(
             "Vowel markings may be inaccurate."
         )
 
+    untrusted_meta = wrap_untrusted_content(corrected_text, source="arabic_ocr")
+
     return OCRResult(
         text=corrected_text,
         text_normalized=text_normalized,
@@ -824,6 +850,7 @@ async def process_manuscript_page(
         corrections_applied=corrections,
         warnings=warnings,
         image_hash=image_hash,
+        untrusted_content=untrusted_meta,
     )
 
 
