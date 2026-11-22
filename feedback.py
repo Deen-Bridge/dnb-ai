@@ -729,7 +729,8 @@ class SQLiteFeedbackStore(FeedbackStore):
     def stats(self) -> dict[str, Any]:
         conn = self._conn()
 
-        total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]        up = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='up'").fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
+        up = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='up'").fetchone()[0]
         down = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='down'").fetchone()[0]
 
         cat_counts: dict[str, dict[str, int]] = {}
