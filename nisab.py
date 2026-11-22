@@ -284,14 +284,11 @@ class NisabAssumptions(BaseModel):
     version: str = Field(..., description="Monotone version of this assumption set")
     nisab_gold_grams: str = Field(..., description="Classical 85 g gold weight used as nisab")
     grams_per_troy_ounce: str = Field(..., description="NIST conversion factor (exact)")
-    nisab_in_troy_ounces: str = Field(
-        ..., description="85 g expressed in troy ounces (derived, not independently set)"
-    )
+    nisab_in_troy_ounces: str = Field(..., description="85 g expressed in troy ounces (derived, not independently set)")
     example_nisab_at_2000_usd_oz: str = Field(
         ...,
         description=(
-            "Nisab in USD when spot gold is exactly 2000 USD/troy oz — "
-            "a stable reference point for regression tests"
+            "Nisab in USD when spot gold is exactly 2000 USD/troy oz — a stable reference point for regression tests"
         ),
     )
     example_nisab_at_3000_usd_oz: str = Field(
@@ -362,7 +359,11 @@ def validate_nisab_assumptions() -> NisabAssumptions:
 
     # --- Plausibility bounds for the default --------------------------------
 
-    if not (MIN_PLAUSIBLE_OUNCE_USD <= DEFAULT_NISAB_USD <= MAX_PLAUSIBLE_OUNCE_USD * NISAB_GOLD_GRAMS / GRAMS_PER_TROY_OUNCE):
+    if not (
+        MIN_PLAUSIBLE_OUNCE_USD
+        <= DEFAULT_NISAB_USD
+        <= MAX_PLAUSIBLE_OUNCE_USD * NISAB_GOLD_GRAMS / GRAMS_PER_TROY_OUNCE
+    ):
         errors.append(
             f"DEFAULT_NISAB_USD ({DEFAULT_NISAB_USD}) is outside a plausible nisab range. "
             "Check the ZAKAT_NISAB_USD environment variable."
