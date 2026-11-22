@@ -13,7 +13,9 @@ lint:
 	flake8 main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py hadith_research.py --max-line-length=120 --ignore=E501,W503
 
 test:
-	pytest -q tests/redteam tests/test_study.py tests/test_semantic_cache.py tests/test_fiqh.py tests/test_hadith.py tests/test_hadith_research.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py
+	pytest -q tests/redteam tests/test_study.py tests/test_semantic_cache.py tests/test_fiqh.py tests/test_hadith.py tests/test_hadith_research.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py \
+		tests/test_page_analysis.py tests/test_page_citation_eval.py tests/test_arabic_ocr.py \
+		tests/test_manuscript_page_api.py tests/test_media_upload_limits.py
 
 coverage:
 	pytest -q --cov --cov-report=term-missing
