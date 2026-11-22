@@ -30,6 +30,7 @@ from review_store import (
     ReviewItem,
     ReviewStatus,
     ReviewStore,
+    ReviewStoreUnavailable,
     Verdict,
 )
 
@@ -200,6 +201,32 @@ class ExplodingRedis:
         raise ConnectionError("redis is unreachable")
 
 
+class AtomicRedis:
+    """Redis stand-in for the atomic verdict script contract."""
+
+    def __init__(self):
+        self.items = {}
+        self.pending = set()
+        self.reviewed = {}
+        self.fail_eval = False
+
+    async def get(self, key):
+        return self.items.get(key)
+
+    async def eval(self, script, key_count, item_key, pending_key, reviewed_key, item_id, payload, score):
+        if self.fail_eval:
+            raise ConnectionError("redis is unreachable")
+        raw = self.items.get(item_key)
+        if raw is None:
+            return 0
+        if ReviewItem(**json.loads(raw)).status is not ReviewStatus.PENDING:
+            return 2
+        self.items[item_key] = payload
+        self.pending.discard(item_id)
+        self.reviewed[item_id] = float(score)
+        return 1
+
+
 @pytest.fixture
 def redis_down(store):
     store._use_redis = True
@@ -233,6 +260,71 @@ class TestRedisOutage:
     def test_healthy_store_is_not_marked_degraded(self, store):
         run(store.add(make_item()))
         assert store._degraded is False
+
+
+class TestRedisVerdictTransition:
+    def test_atomic_verdict_updates_item_and_indexes(self, store):
+        item = make_item()
+        redis = AtomicRedis()
+        redis.items[review_store.ITEM_KEY.format(item_id=item.id)] = item.model_dump_json()
+        redis.pending.add(item.id)
+        store._use_redis = True
+        store._redis = redis
+
+        decided = run(store.record_verdict(item.id, Verdict.APPROVE, reviewer="Scholar"))
+
+        assert decided.status is ReviewStatus.APPROVED
+        assert item.id not in redis.pending
+        assert item.id in redis.reviewed
+        saved = ReviewItem(**json.loads(redis.items[review_store.ITEM_KEY.format(item_id=item.id)]))
+        assert saved.status is ReviewStatus.APPROVED
+
+    def test_two_redis_backed_stores_cannot_overwrite_a_verdict(self, store):
+        item = make_item()
+        redis = AtomicRedis()
+        redis.items[review_store.ITEM_KEY.format(item_id=item.id)] = item.model_dump_json()
+        redis.pending.add(item.id)
+        store._use_redis = True
+        store._redis = redis
+        second_store = ReviewStore()
+        second_store._use_redis = True
+        second_store._redis = redis
+
+        async def decide():
+            return await asyncio.gather(
+                store.record_verdict(item.id, Verdict.APPROVE),
+                second_store.record_verdict(item.id, Verdict.REJECT),
+                return_exceptions=True,
+            )
+
+        results = run(decide())
+
+        assert sum(isinstance(result, ReviewItem) for result in results) == 1
+        assert sum(isinstance(result, AlreadyReviewedError) for result in results) == 1
+        saved = ReviewItem(**json.loads(redis.items[review_store.ITEM_KEY.format(item_id=item.id)]))
+        assert saved.verdict in {Verdict.APPROVE, Verdict.REJECT}
+
+    def test_missing_pending_index_can_be_repaired_by_verdict(self, store):
+        item = make_item()
+        redis = AtomicRedis()
+        redis.items[review_store.ITEM_KEY.format(item_id=item.id)] = item.model_dump_json()
+        store._use_redis = True
+        store._redis = redis
+
+        assert run(store.record_verdict(item.id, Verdict.REJECT)).status is ReviewStatus.REJECTED
+        assert item.id in redis.reviewed
+
+    def test_ambiguous_redis_failure_is_not_reported_as_success(self, store):
+        item = make_item()
+        redis = AtomicRedis()
+        redis.items[review_store.ITEM_KEY.format(item_id=item.id)] = item.model_dump_json()
+        redis.fail_eval = True
+        store._use_redis = True
+        store._redis = redis
+
+        with pytest.raises(ReviewStoreUnavailable):
+            run(store.record_verdict(item.id, Verdict.APPROVE))
+        assert store._degraded is True
 
 
 # ---------------------------------------------------------------------------

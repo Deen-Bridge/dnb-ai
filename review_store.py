@@ -44,6 +44,17 @@ ITEM_KEY = "review:item:{item_id}"
 PENDING_INDEX = "review:pending"
 REVIEWED_INDEX = "review:reviewed"
 
+_RECORD_VERDICT_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local item = cjson.decode(raw)
+if item.status ~= 'pending' then return 2 end
+redis.call('SET', KEYS[1], ARGV[2])
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1])
+return 1
+"""
+
 try:
     import redis.asyncio as aioredis
 
@@ -62,6 +73,10 @@ class AlreadyReviewedError(Exception):
     def __init__(self, item: ReviewItem) -> None:
         super().__init__(f"Review item {item.id} was already reviewed")
         self.item = item
+
+
+class ReviewStoreUnavailable(Exception):
+    """Raised when a Redis verdict transition cannot be confirmed."""
 
 
 class ReviewStatus(str, Enum):
@@ -252,21 +267,6 @@ class ReviewStore:
         if item.status is not ReviewStatus.PENDING:
             raise AlreadyReviewedError(item)
 
-        if self._use_redis and item_id not in self._local:
-            try:
-                # zrem returns 1 only for the caller that actually removed the
-                # id, which makes it the claim: everyone else loses the race.
-                claimed = await self._redis.zrem(PENDING_INDEX, item_id)
-            except Exception as exc:  # noqa: BLE001
-                self._mark_degraded("record_verdict", exc)
-                claimed = 0
-                if item_id not in self._local:
-                    raise
-            if not claimed:
-                raise AlreadyReviewedError(await self.get(item_id) or item)
-
-        # No await between the status check above and the mutation below, so
-        # the in-memory path cannot interleave either.
         item.verdict = verdict
         item.status = VERDICT_STATUS[verdict]
         item.corrected_answer = corrected_answer
@@ -276,14 +276,25 @@ class ReviewStore:
 
         if self._use_redis and item_id not in self._local:
             try:
-                async with self._redis.pipeline(transaction=True) as pipe:
-                    pipe.set(ITEM_KEY.format(item_id=item.id), item.model_dump_json())
-                    pipe.zadd(REVIEWED_INDEX, {item.id: item.reviewed_at})
-                    await pipe.execute()
-            except Exception as exc:  # noqa: BLE001 - a recorded verdict is not lost
+                result = await self._redis.eval(
+                    _RECORD_VERDICT_SCRIPT,
+                    3,
+                    ITEM_KEY.format(item_id=item.id),
+                    PENDING_INDEX,
+                    REVIEWED_INDEX,
+                    item.id,
+                    item.model_dump_json(),
+                    str(item.reviewed_at),
+                )
+            except Exception as exc:  # noqa: BLE001 - outcome may be ambiguous
                 self._mark_degraded("record_verdict", exc)
-                self._local[item.id] = item
+                raise ReviewStoreUnavailable("Redis could not confirm the verdict transition") from exc
+            if result == 0:
+                return None
+            if result != 1:
+                raise AlreadyReviewedError(await self.get(item_id) or item)
         else:
+            # No await between the pending check and this mutation.
             self._local[item.id] = item
 
         try:

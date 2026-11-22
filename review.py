@@ -40,6 +40,7 @@ from errors import APIException
 from review_store import (
     AlreadyReviewedError,
     ReviewItem,
+    ReviewStoreUnavailable,
     Verdict,
     get_review_store,
 )
@@ -267,6 +268,12 @@ async def record_verdict(
             status_code=409,
             detail=f"Item {item_id} was already reviewed ({exc.item.status.value}); it cannot be decided twice.",
             hint="This review item has already received a verdict and is finalized. Use 'GET /review/reviewed' to view decided items.",
+        ) from exc
+    except ReviewStoreUnavailable as exc:
+        raise APIException(
+            status_code=503,
+            detail="The review store could not confirm this verdict.",
+            hint="Check queue durability before retrying; the transition may have committed before the connection failed.",
         ) from exc
     if item is None:
         raise APIException(
