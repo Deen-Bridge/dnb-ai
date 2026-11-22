@@ -1,0 +1,509 @@
+{
+  "description": "Synthetic labeled pages for the page-analysis citation contract (#854). All text is invented or a public scripture reference; no scans, no personal data.",
+  "cases": [
+    {
+      "id": "en-01",
+      "category": "english",
+      "blocks": [
+        {
+          "text": "As stated in Surah 2:153, seek help through patience.",
+          "confidence": 0.94
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "2:153",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "en-02",
+      "category": "english",
+      "blocks": [
+        {
+          "text": "Ayat al-Kursi (Al-Baqarah: 255-256) is recited at night.",
+          "confidence": 0.88
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "2:255",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "en-03",
+      "category": "english",
+      "blocks": [
+        {
+          "text": "The opening, Q 1:1-7, is read in every prayer."
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "1:1",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "en-04",
+      "category": "english",
+      "blocks": [
+        {
+          "text": "Actions are by intentions (Bukhari #1).",
+          "confidence": 0.9
+        }
+      ],
+      "expected": [
+        [
+          "hadith",
+          "Sahih al-Bukhari",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "en-05",
+      "category": "english",
+      "blocks": [
+        {
+          "text": "Reported in Sahih Muslim 2564 and in Abu Dawud no. 4084."
+        }
+      ],
+      "expected": [
+        [
+          "hadith",
+          "Sahih Muslim",
+          0,
+          "validated"
+        ],
+        [
+          "hadith",
+          "Sunan Abu Dawud",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "en-06",
+      "category": "english",
+      "blocks": [
+        {
+          "text": "The chapter cites Jami at-Tirmidhi without a number."
+        }
+      ],
+      "expected": [
+        [
+          "hadith",
+          "Jami at-Tirmidhi",
+          0,
+          "unverified"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "ar-01",
+      "category": "arabic",
+      "blocks": [
+        {
+          "text": "﴿يا أيها الذين آمنوا استعينوا بالصبر والصلاة﴾ [البقرة: ١٥٣]",
+          "confidence": 0.82
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "2:153",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "ar-02",
+      "category": "arabic",
+      "blocks": [
+        {
+          "text": "قال تعالى في سورة ٣:٢٠٠ اصبروا وصابروا"
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "3:200",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "ar-03",
+      "category": "arabic",
+      "blocks": [
+        {
+          "text": "وفي آية الكرسي [البقرة: ٢٥٥] عظمة الله"
+        },
+        {
+          "text": "[آل عمران: ١٩٠-١٩١] في التفكر"
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "2:255",
+          0,
+          "validated"
+        ],
+        [
+          "quran",
+          "3:190",
+          1,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "ar-04",
+      "category": "arabic",
+      "blocks": [
+        {
+          "text": "كما في [يوسف: ٤] من قصة يوسف عليه السلام",
+          "confidence": 0.35
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "12:4",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "mx-01",
+      "category": "mixed",
+      "blocks": [
+        {
+          "text": "See Q 3:200 and [آل عمران: ١٩٠] for reflection."
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "3:200",
+          0,
+          "validated"
+        ],
+        [
+          "quran",
+          "3:190",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "mx-02",
+      "category": "mixed",
+      "blocks": [
+        {
+          "text": "الحديث في Bukhari 6018 وفي [النساء: ٣٦] أيضا",
+          "confidence": 0.77
+        }
+      ],
+      "expected": [
+        [
+          "hadith",
+          "Sahih al-Bukhari",
+          0,
+          "validated"
+        ],
+        [
+          "quran",
+          "4:36",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "ocr-01",
+      "category": "ocr_noise",
+      "blocks": [
+        {
+          "text": "Surah 2 : 153 with stray spaces from the scan",
+          "confidence": 0.6
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "2:153",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "ocr-02",
+      "category": "ocr_noise",
+      "blocks": [
+        {
+          "text": "Surah 2:l53 (letter l misread for digit 1)",
+          "confidence": 0.3
+        }
+      ],
+      "expected": [],
+      "expected_rejected": []
+    },
+    {
+      "id": "ocr-03",
+      "category": "ocr_noise",
+      "blocks": [
+        {
+          "text": "Bukharl 12 and Tirmidhi# 7"
+        }
+      ],
+      "expected": [
+        [
+          "hadith",
+          "Jami at-Tirmidhi",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "ocr-04",
+      "category": "ocr_noise",
+      "blocks": [
+        {
+          "text": "[البقرة ١٥٣ missing colon"
+        }
+      ],
+      "expected": [],
+      "expected_rejected": []
+    },
+    {
+      "id": "inv-01",
+      "category": "invalid",
+      "blocks": [
+        {
+          "text": "A misprint: Surah 1:200."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": [
+        "Surah 1:200"
+      ]
+    },
+    {
+      "id": "inv-02",
+      "category": "invalid",
+      "blocks": [
+        {
+          "text": "Cited as Surah 115:3 in an old index."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": [
+        "Surah 115:3"
+      ]
+    },
+    {
+      "id": "inv-03",
+      "category": "invalid",
+      "blocks": [
+        {
+          "text": "Q 2:290-300 is out of range."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": [
+        "Q 2:290-300"
+      ]
+    },
+    {
+      "id": "inv-04",
+      "category": "invalid",
+      "blocks": [
+        {
+          "text": "[البقرة: ٣٠٠] does not exist."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": [
+        "[البقرة: ٣٠٠]"
+      ]
+    },
+    {
+      "id": "inv-05",
+      "category": "invalid",
+      "blocks": [
+        {
+          "text": "Musnad Ahmad 123 is not in the bundled index."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": []
+    },
+    {
+      "id": "none-01",
+      "category": "no_reference",
+      "blocks": [
+        {
+          "text": "A Muslim should be patient in hardship."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": []
+    },
+    {
+      "id": "none-02",
+      "category": "no_reference",
+      "blocks": [
+        {
+          "text": "Imam Malik taught in Madinah."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": []
+    },
+    {
+      "id": "none-03",
+      "category": "no_reference",
+      "blocks": [
+        {
+          "text": "Scanned 10:30:15, page (page: 12)."
+        }
+      ],
+      "expected": [],
+      "expected_rejected": []
+    },
+    {
+      "id": "none-04",
+      "category": "no_reference",
+      "blocks": [
+        {
+          "text": "* * *"
+        },
+        {
+          "text": ""
+        }
+      ],
+      "expected": [],
+      "expected_rejected": []
+    },
+    {
+      "id": "bare-01",
+      "category": "bare_numeric",
+      "blocks": [
+        {
+          "text": "The lesson began at 10:30."
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "10:30",
+          0,
+          "unverified"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "bare-02",
+      "category": "bare_numeric",
+      "blocks": [
+        {
+          "text": "John 3:16 is quoted in the comparison chapter."
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "3:16",
+          0,
+          "unverified"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "bare-03",
+      "category": "bare_numeric",
+      "blocks": [
+        {
+          "text": "It's 10:30 and the reading (Time: 3) starts."
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "10:30",
+          0,
+          "unverified"
+        ],
+        [
+          "quran",
+          "103:3",
+          0,
+          "unverified"
+        ]
+      ],
+      "expected_rejected": []
+    },
+    {
+      "id": "en-07",
+      "category": "english",
+      "blocks": [
+        {
+          "text": "The light verse (Surah Light, 35) and [An-Nur: 36].",
+          "confidence": 0.8
+        }
+      ],
+      "expected": [
+        [
+          "quran",
+          "24:35",
+          0,
+          "validated"
+        ],
+        [
+          "quran",
+          "24:36",
+          0,
+          "validated"
+        ]
+      ],
+      "expected_rejected": []
+    }
+  ]
+}
