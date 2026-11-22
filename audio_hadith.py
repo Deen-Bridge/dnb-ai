@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from untrusted_content import sanitize_untrusted_text
+
 router = APIRouter(prefix="/audio-hadith", tags=["audio-hadith"])
 
 # Below this best-match score a transcript is treated as unmatched / a likely
@@ -130,39 +132,15 @@ _STOPWORDS = frozenset(
 # Transcripts come from speech recognition of arbitrary audio, so they are
 # untrusted data. They are never executed or interpreted as instructions here,
 # but they may be forwarded to downstream LLM steps, so instruction-like
-# content is flagged and neutralized.
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏‪-‮⁠-⁤﻿]")
-_INJECTION_PATTERNS = (
-    re.compile(
-        r"\b(?:ignore|disregard|forget|override)\b[^.\n]{0,40}\b(?:previous|prior|above|earlier|all|system)\b"
-        r"[^.\n]{0,40}\b(?:instructions?|prompts?|rules?|context)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\b(?:system|developer)\s+(?:prompt|message|instructions?)\b", re.IGNORECASE),
-    re.compile(r"\byou\s+are\s+now\b", re.IGNORECASE),
-    re.compile(r"\b(?:act|behave|respond)\s+as\s+(?:if|an?|the)\b", re.IGNORECASE),
-    re.compile(r"\b(?:reveal|print|show|leak)\b[^.\n]{0,30}\b(?:prompt|secrets?|api[ _-]?keys?|tokens?)\b", re.IGNORECASE),
-    re.compile(r"\bmark\s+(?:this|it)\s+as\s+(?:verified|sahih|authentic)\b", re.IGNORECASE),
-    re.compile(r"</?\s*(?:system|assistant|user|instructions?)\s*>", re.IGNORECASE),
-    re.compile(r"\bBEGIN\s+(?:SYSTEM|INSTRUCTIONS?)\b", re.IGNORECASE),
-)
-
-
+# content is flagged and neutralized. The sanitizer itself lives in
+# ``untrusted_content`` so every multimodal path shares one contract (AI-082).
 def sanitize_transcript(text: str) -> tuple[str, list[str]]:
     """Strip control/invisible characters and remove instruction-like spans.
 
     Returns ``(clean_text, flags)``; ``flags`` is empty when nothing suspicious
     was found. The removed spans are never echoed back.
     """
-    flags: list[str] = []
-    cleaned = _CONTROL_CHARS.sub("", text)
-    if cleaned != text:
-        flags.append("control_characters_removed")
-    for idx, pattern in enumerate(_INJECTION_PATTERNS):
-        if pattern.search(cleaned):
-            flags.append(f"instruction_like_content_{idx}")
-            cleaned = pattern.sub(" ", cleaned)
-    return cleaned, flags
+    return sanitize_untrusted_text(text)
 
 
 def strip_arabic_diacritics(text: str) -> str:

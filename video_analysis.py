@@ -27,6 +27,7 @@ from media_upload_limits import (
     BoundedJobManager,
     validate_video_upload,
 )
+from untrusted_content import isolate_untrusted_text, sanitize_untrusted_text
 
 router = APIRouter(prefix="/video-analysis", tags=["video-analysis"])
 
@@ -148,6 +149,14 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
             frame["text"] = ocr_frame(Path(frame["path"]))
         visual_text = " ".join(frame["text"] for frame in frames if frame["text"])
         combined = " ".join(part for part in (transcript, visual_text) if part)
+        # ASR and OCR output is untrusted data (AI-082): neutralize
+        # instruction-like and tool-invocation content before it is used or
+        # forwarded, and report what was found.
+        combined, injection_flags = sanitize_untrusted_text(combined)
+        isolated_text, isolation_flags = isolate_untrusted_text(combined, source="video_extraction")
+        for flag in isolation_flags:
+            if flag not in injection_flags:
+                injection_flags.append(flag)
         topics = segment_topics(combined, timestamps)
         key_points = [
             {"timestamp_seconds": item["start"], "text": item["text"]} for item in timestamps if item.get("text")
@@ -165,6 +174,8 @@ def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
             "hadith_references": extract_hadith_references(combined),
             "frames": [{k: v for k, v in frame.items() if k != "path"} for frame in frames],
             "search_index": build_search_index(combined, frames),
+            "isolated_text": isolated_text,
+            "injection_flags": injection_flags,
             "capabilities": {
                 "ffmpeg": audio is not None or bool(frames),
                 "asr": bool(transcript),

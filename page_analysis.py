@@ -50,6 +50,8 @@ from enum import Enum
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from untrusted_content import isolate_untrusted_text
+
 router = APIRouter(prefix="/page-analysis", tags=["page-analysis"])
 
 
@@ -164,6 +166,14 @@ class PageAnalysisResponse(BaseModel):
     )
     references: list[ExtractedReference] = Field(default_factory=list)
     structure: StructuredPage
+    isolated_text: str = Field(
+        "",
+        description="OCR text fenced as untrusted data (AI-082); never instructions.",
+    )
+    injection_flags: list[str] = Field(
+        default_factory=list,
+        description="Instruction-like or tool-invocation content neutralized in the OCR text.",
+    )
 
 
 class ElementTypeInfo(BaseModel):
@@ -404,6 +414,11 @@ def analyze_page(page: PageInput) -> PageAnalysisResponse:
 
     structure = build_structure(page, elements, reading_order)
 
+    # OCR text is untrusted data (AI-082): neutralize instruction-like and
+    # tool-invocation content and expose it only inside a fenced data block.
+    raw_text = "\n".join((block.text or "") for block in page.blocks)
+    isolated_text, injection_flags = isolate_untrusted_text(raw_text, source="page_ocr")
+
     return PageAnalysisResponse(
         columns=columns,
         rtl=page.rtl,
@@ -411,6 +426,8 @@ def analyze_page(page: PageInput) -> PageAnalysisResponse:
         reading_order=reading_order,
         references=references,
         structure=structure,
+        isolated_text=isolated_text,
+        injection_flags=injection_flags,
     )
 
 
