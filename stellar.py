@@ -49,6 +49,9 @@ from soroban import (
 )
 from stellar_contract_state import evaluate_provider_freshness, validate_contract_request
 from stellar_error_codes import (
+    CODE_INVALID_PARAMETER,
+    CODE_LEDGER_STALE,
+    CODE_PROVIDER_UNAVAILABLE,
     build_stellar_tool_error,
     map_transport_exception_to_error_envelope,
     to_api_exception,
@@ -281,7 +284,11 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
     )
     if request_error:
         telemetry_registry.record_stellar_contract_check("invalid_request")
-        raise APIException(status_code=503, detail="Stellar account checks are unavailable.")
+        raise APIException(
+            status_code=503,
+            detail="Stellar account checks are unavailable.",
+            code=CODE_INVALID_PARAMETER,
+        )
 
     if os.getenv("MOCK_UPSTREAMS", "").lower() in {"1", "true", "yes"}:
         latency_ms = int(os.getenv("MOCK_HORIZON_LATENCY_MS", "25"))
@@ -320,6 +327,7 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
             raise APIException(
                 status_code=503,
                 detail="Stellar provider is unavailable; account data was not used.",
+                code=CODE_PROVIDER_UNAVAILABLE,
             ) from None
         try:
             max_age_seconds = int(os.getenv("STELLAR_MAX_LEDGER_AGE_SECONDS", "30"))
@@ -333,7 +341,11 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
             )
         except (TypeError, ValueError):
             telemetry_registry.record_stellar_contract_check("invalid_evidence")
-            raise APIException(status_code=503, detail="Stellar ledger evidence is unavailable.") from None
+            raise APIException(
+                status_code=503,
+                detail="Stellar ledger evidence is unavailable.",
+                code=CODE_PROVIDER_UNAVAILABLE,
+            ) from None
         if not freshness.ok:
             outcome = (
                 "stale_ledger"
@@ -346,7 +358,11 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
             )
             telemetry_registry.record_stellar_contract_check(outcome)
             logger.warning("Stellar provider freshness check failed: %s", freshness.reason)
-            raise APIException(status_code=503, detail="Stellar ledger data is not fresh enough to use.")
+            raise APIException(
+                status_code=409,
+                detail="Stellar ledger data is not fresh enough to use.",
+                code=CODE_LEDGER_STALE,
+            )
         try:
             account = server.accounts().account_id(public_key).call()
         except NotFoundError:
@@ -357,6 +373,7 @@ def fetch_usdc_balance(public_key: str) -> Decimal | None:
             raise APIException(
                 status_code=503,
                 detail="Stellar provider is unavailable; account data was not used.",
+                code=CODE_PROVIDER_UNAVAILABLE,
             ) from None
     except NotFoundError:
         telemetry_registry.record_stellar_contract_check("not_found")

@@ -140,9 +140,10 @@ def test_stale_latest_ledger_prevents_account_lookup(monkeypatch) -> None:
             "history_latest_ledger": 1200501,
             "history_latest_ledger_closed_at": "2020-01-01T00:00:00+00:00",
         }
-        with pytest.raises(APIException):
+        with pytest.raises(APIException) as error:
             stellar.fetch_usdc_balance("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5")
         server.accounts.assert_not_called()
+    assert error.value.status_code == 409
 
 
 def test_provider_failure_prevents_account_lookup(monkeypatch) -> None:
