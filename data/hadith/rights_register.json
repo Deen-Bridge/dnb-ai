@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "Rights/provenance register for every bundled hadith source. Only entries with status 'approved' are served by default; 'quarantined' and 'withdrawn' entries are never loaded in production retrieval. See data/hadith/PROVENANCE.md for the takedown and replacement procedure.",
+  "takedown_contact": "Open an issue at https://github.com/Deen-Bridge/dnb-ai/issues labelled 'takedown'",
+  "default_source": {
+    "origin": "fawazahmed0/hadith-api",
+    "origin_url": "https://github.com/fawazahmed0/hadith-api",
+    "version": "tag 1",
+    "license": "The Unlicense",
+    "license_url": "https://github.com/fawazahmed0/hadith-api/blob/1/LICENSE",
+    "permission": "Public domain dedication covers the grading metadata. No translated hadith text is bundled, so third-party translation copyright does not apply.",
+    "retrieved": "2026-08-30",
+    "content_scope": "grading metadata only (collection, book/hadith numbers, grader names and grades)",
+    "attribution": "Grading metadata derived from fawazahmed0/hadith-api (tag 1, The Unlicense)",
+    "status": "approved",
+    "legal_signoff": {"status": "pending", "by": null, "date": null}
+  },
+  "collections": {
+    "bukhari": {"name": "Sahih al-Bukhari"},
+    "muslim": {"name": "Sahih Muslim"},
+    "abudawud": {"name": "Sunan Abu Dawud"},
+    "tirmidhi": {"name": "Jami at-Tirmidhi"},
+    "nasai": {"name": "Sunan an-Nasai"},
+    "ibnmajah": {"name": "Sunan Ibn Majah"},
+    "malik": {"name": "Muwatta Malik"},
+    "nawawi": {"name": "Forty Hadith of an-Nawawi"},
+    "qudsi": {"name": "Forty Hadith Qudsi"},
+    "dehlawi": {"name": "Forty Hadith of Shah Waliullah al-Dehlawi"}
+  }
+}

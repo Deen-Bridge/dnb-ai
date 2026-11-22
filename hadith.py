@@ -318,11 +318,60 @@ class GradingSource:
         raise NotImplementedError
 
 
-class BundledGradingSource(GradingSource):
-    """Looks up grades from the JSON files under data/hadith/."""
+RIGHTS_REGISTER_NAME = "rights_register.json"
+RELEASED_STATUS = "approved"
 
-    def __init__(self, data_dir: Path = DATA_DIR):
+
+def load_rights_register(data_dir: Path = DATA_DIR) -> dict:
+    """Load the rights/provenance register; empty register if missing/corrupt
+    (which quarantines everything — fail closed)."""
+    try:
+        with open(data_dir / RIGHTS_REGISTER_NAME, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def collection_rights(collection: str, data_dir: Path = DATA_DIR) -> dict | None:
+    """Effective rights record for a collection (default source merged with
+    per-collection overrides), or None if the collection is unregistered."""
+    register = load_rights_register(data_dir)
+    entry = (register.get("collections") or {}).get(collection)
+    if entry is None:
+        return None
+    return {**(register.get("default_source") or {}), **entry}
+
+
+def is_released(collection: str, data_dir: Path = DATA_DIR) -> bool:
+    """True only when the collection is registered with status 'approved'.
+    Unregistered, quarantined, or withdrawn content is not released."""
+    rights = collection_rights(collection, data_dir)
+    return bool(rights) and rights.get("status") == RELEASED_STATUS
+
+
+def source_citation(collection: str, data_dir: Path = DATA_DIR) -> str | None:
+    """Human-readable attribution for a released collection's data."""
+    rights = collection_rights(collection, data_dir)
+    if not rights or rights.get("status") != RELEASED_STATUS:
+        return None
+    return (
+        f"{rights.get('attribution', rights.get('origin', ''))}; "
+        f"license: {rights.get('license', 'unknown')}; "
+        f"retrieved {rights.get('retrieved', 'unknown')}"
+    )
+
+
+class BundledGradingSource(GradingSource):
+    """Looks up grades from the JSON files under data/hadith/.
+
+    Collections that are not 'approved' in the rights register (quarantined,
+    withdrawn, or unregistered) are never served unless ``allow_unverified``
+    is set explicitly (for offline review only, never production).
+    """
+
+    def __init__(self, data_dir: Path = DATA_DIR, allow_unverified: bool = False):
         self._data_dir = data_dir
+        self._allow_unverified = allow_unverified
 
     # B019: the grading sources are process-lifetime singletons, so this
     # per-instance cache is bounded by the bundled collection count, not by
@@ -330,6 +379,8 @@ class BundledGradingSource(GradingSource):
     # change and belongs in its own PR.
     @cache  # noqa: B019
     def _index(self, collection: str) -> dict[str, dict] | None:
+        if not self._allow_unverified and not is_released(collection, self._data_dir):
+            return None
         path = self._data_dir / f"{collection}.json"
         if not path.exists():
             return None
@@ -388,6 +439,7 @@ class HadithReference(BaseModel):
     verified: bool
     flagged: bool
     note: str | None = None
+    source: str | None = None
 
 
 _CAVEAT_KEYWORDS = (
@@ -467,6 +519,7 @@ def annotate(text: str, source: GradingSource | None = None) -> list[HadithRefer
                 verified=True,
                 flagged=flagged,
                 note=note,
+                source=source_citation(ref.collection),
             )
         )
     return results
@@ -579,6 +632,7 @@ class EvidenceVerificationAgent:
                 "chain_type": ref.chain_type or "",
                 "verified": str(ref.verified).lower(),
                 "flagged": str(ref.flagged).lower(),
+                "source": ref.source or "",
             }
             for ref in annotate(text, self._source)
         ]

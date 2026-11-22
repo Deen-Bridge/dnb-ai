@@ -131,6 +131,27 @@ sourced from standard rijāl references (Ibn Hajar's Taqrib al-Tahdhib,
 al-Dhahabi's Siyar and Mizan al-I'tidal). It is advisory and deliberately not
 exhaustive; see the file's own provenance header for details.
 
+## Rights register, quarantine and takedown
+
+`data/hadith/rights_register.json` is the release inventory. Every bundled
+collection maps to origin, version, license, permission, attribution,
+retrieval date, status, and legal sign-off. Legal/content-owner sign-off is
+recorded in `legal_signoff` and is currently **pending** — it must be filled
+in by the owner before release.
+
+- **Quarantine by default:** `hadith.BundledGradingSource` serves a
+  collection only if its register status is `approved`. `quarantined`,
+  `withdrawn`, and unregistered collections (including any file missing from
+  the register, or a missing/corrupt register) are never loaded.
+- **Takedown / replacement:** set the collection's `status` to `withdrawn`
+  (or `quarantined` for review) in the register — retrieval stops
+  immediately, no code change needed. To replace, regenerate the data from
+  the new source, update `origin`/`version`/`license`/`retrieved`, and set
+  `status` back to `approved` once signed off. Requests arrive via
+  `takedown_contact` in the register.
+- **Citations:** annotated hadith references carry a `source` attribution
+  (origin, license, retrieval date) taken from the register.
+
 ## Update process
 
 Re-run the build script whenever the upstream data changes or a new tag is

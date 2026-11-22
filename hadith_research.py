@@ -86,10 +86,12 @@ def load_collections() -> dict[str, dict[str, Any]]:
     """Every bundled collection keyed by its canonical key, with display name and size."""
     collections: dict[str, dict[str, Any]] = {}
     for path in sorted(DATA_DIR.glob("*.json")):
-        if path.name == "variants.json":
+        if path.name in ("variants.json", hadith.RIGHTS_REGISTER_NAME):
             continue
         payload = _load_json(path)
         key = payload.get("collection") or path.stem
+        if not hadith.is_released(key):
+            continue
         collections[key] = {
             "key": key,
             "name": payload.get("name") or key,
