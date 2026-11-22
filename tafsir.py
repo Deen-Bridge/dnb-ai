@@ -780,6 +780,17 @@ def surah_by_name(name: str) -> Surah | None:
     return surah_by_number(number) if number else None
 
 
+def is_canonical_surah_name(name: str, surah: Surah) -> bool:
+    """True when *name* is the surah's own transliterated or Arabic name, not an alias.
+
+    Aliases include English glosses ("cow", "time", "light") that are also
+    ordinary words, so callers that need strong evidence of a citation can tell
+    the two apart.
+    """
+    normalized = _normalize_surah_name(name)
+    return normalized in (_normalize_surah_name(surah.name), _normalize_surah_name(surah.arabic_name))
+
+
 class AyahRef(BaseModel):
     """A validated single-ayah reference."""
 

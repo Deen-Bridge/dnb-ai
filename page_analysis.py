@@ -35,22 +35,63 @@ analyzer returns, for the page:
   (main text, footnotes, commentary, references), the "semantically structured
   digital text" the layout is turned into.
 
-Reuse
------
-Reference extraction mirrors the conventions of ``citations.py`` - the same
-notion of typed Qur'an and hadith references - but works on positioned OCR text
-rather than a model's delimited citation block, so the two do not share code.
+Citation contract (#854)
+------------------------
+Reference extraction runs in two separate stages. The first finds *candidates*
+in block text and records exactly where each came from (block index, matched
+substring, character offsets). The second checks each candidate against the
+repository's canonical data: Qur'an surah/ayah bounds through
+``tafsir.surah_by_number`` / ``surah_by_name`` (the same 114-surah index
+``citations.py`` uses), and hadith collections through
+``hadith.find_collection_mentions`` (the alias table behind
+``hadith.normalize_collection``) plus the bundled hadith number index. There is
+no second alias or bounds table here.
+
+A ``validated`` reference means only that the citation is well formed and
+points at something that exists in that canonical data. It does not mean the
+OCR read the page correctly, that the quoted text matches the ayah, or that a
+hadith is authentic; grading is never assessed here. Anything weaker stays
+``unverified``, and a citation that cannot exist (surah 115, ayah 200 of a
+seven-ayah surah, a backwards range) is moved to ``rejected_references`` with
+a reason instead of being returned as a reference. OCR confidence is carried
+from the source block when the engine supplied one and is reported as
+``unavailable`` otherwise; the analyzer never manufactures a score from a
+regex match. The full contract is in ``docs/PAGE_ANALYSIS_CONTRACT.md``.
 """
 
 from __future__ import annotations
 
+import logging
 import re
+import time
+from dataclasses import dataclass
 from enum import Enum
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter
+from pydantic import BaseModel, Field, model_validator
+
+from hadith import COLLECTION_NAMES, find_collection_mentions, get_default_source
+from media_upload_limits import (
+    MAX_PAGE_BLOCK_TEXT_CHARS,
+    MAX_PAGE_BLOCKS,
+    MAX_PAGE_DIMENSION,
+    MAX_PAGE_TEXT_CHARS,
+    evaluate_confidence_and_fallback,
+    validate_page_layout_input,
+)
+from tafsir import is_canonical_surah_name, surah_by_name, surah_by_number
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/page-analysis", tags=["page-analysis"])
+
+# Bumped when the meaning of a response field changes, so clients can tell the
+# citation semantics they are reading.
+CONTRACT_VERSION = "2"
+
+# A real page cites a few dozen sources at most. The cap bounds the response a
+# maximal 200,000-character page can produce; overflow is reported, not hidden.
+MAX_REFERENCES_PER_PAGE = 1000
 
 
 class ElementType(str, Enum):
@@ -78,12 +119,24 @@ class PageBlock(BaseModel):
     it is absent.
     """
 
-    x: float = Field(..., ge=0, description="Left edge of the block's bounding box.")
-    y: float = Field(..., ge=0, description="Top edge of the block's bounding box.")
-    width: float = Field(..., ge=0)
-    height: float = Field(..., ge=0)
-    text: str = ""
-    font_size: float | None = Field(None, gt=0)
+    x: float = Field(
+        ..., ge=0, le=MAX_PAGE_DIMENSION, allow_inf_nan=False, description="Left edge of the bounding box."
+    )
+    y: float = Field(..., ge=0, le=MAX_PAGE_DIMENSION, allow_inf_nan=False, description="Top edge of the bounding box.")
+    width: float = Field(..., ge=0, le=MAX_PAGE_DIMENSION, allow_inf_nan=False)
+    height: float = Field(..., ge=0, le=MAX_PAGE_DIMENSION, allow_inf_nan=False)
+    text: str = Field("", max_length=MAX_PAGE_BLOCK_TEXT_CHARS, description="OCR text of the block.")
+    font_size: float | None = Field(None, gt=0, le=MAX_PAGE_DIMENSION, allow_inf_nan=False)
+    confidence: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description=(
+            "Recognition confidence the OCR engine reported for this block, if any. "
+            "Omit it when the engine reports none; the analyzer never invents one."
+        ),
+    )
 
     @property
     def center_x(self) -> float:
@@ -102,11 +155,30 @@ class PageInput(BaseModel):
     serves is Arabic Islamic texts.
     """
 
-    width: float = Field(..., gt=0, le=20000, description="Page width in units (max 20000).")
-    height: float = Field(..., gt=0, le=20000, description="Page height in units (max 20000).")
-    blocks: list[PageBlock] = Field(default_factory=list, max_length=5000, description="Blocks on page (max 5000).")
+    width: float = Field(
+        ..., gt=0, le=MAX_PAGE_DIMENSION, allow_inf_nan=False, description="Page width in units (max 20000)."
+    )
+    height: float = Field(
+        ..., gt=0, le=MAX_PAGE_DIMENSION, allow_inf_nan=False, description="Page height in units (max 20000)."
+    )
+    blocks: list[PageBlock] = Field(
+        default_factory=list, max_length=MAX_PAGE_BLOCKS, description="Blocks on page (max 5000)."
+    )
     rtl: bool = True
-    consent_to_process: bool = Field(True, description="Explicit user consent to process.")
+    consent_to_process: bool | None = Field(
+        None,
+        description=(
+            "Required by POST /page-analysis/analyze and must be true. An omitted or false value is "
+            "rejected with 400 before any analysis runs."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _bound_total_text(self) -> PageInput:
+        total = sum(len(block.text) for block in self.blocks)
+        if total > MAX_PAGE_TEXT_CHARS:
+            raise ValueError(f"Page text totals {total} characters; the maximum is {MAX_PAGE_TEXT_CHARS}.")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -114,16 +186,72 @@ class PageInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ReferenceStatus(str, Enum):
+    """How far a reference was checked. Neither value asserts OCR accuracy or authenticity."""
+
+    VALIDATED = "validated"
+    """Well formed and points at something that exists in the canonical data."""
+
+    UNVERIFIED = "unverified"
+    """A plausible candidate that could not be checked to the validated standard."""
+
+
+class OCRConfidenceBand(str, Enum):
+    """Band of the source block's upstream OCR confidence."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNAVAILABLE = "unavailable"
+    """The OCR engine reported no confidence for the block."""
+
+
 class ExtractedReference(BaseModel):
-    """A Qur'an or hadith reference recovered from a block's text."""
+    """A Qur'an or hadith reference recovered from a block's text.
+
+    ``type``, ``reference``, ``text``, ``block_index``, ``surah``, ``ayah`` and
+    ``collection`` keep their original meaning; everything else was added by the
+    v2 citation contract (#854).
+    """
 
     type: str = Field(..., description="'quran' or 'hadith'.")
-    reference: str = Field(..., description="Normalized reference, e.g. '2:153'.")
-    text: str = Field(..., description="The exact substring matched in the source.")
+    reference: str = Field(
+        ...,
+        description="Normalized reference: 'surah:ayah' (range start) for the Qur'an, collection name for hadith.",
+    )
+    text: str = Field(..., description="The exact substring matched in the source block.")
     block_index: int = Field(..., ge=0, description="Index of the source block in the input.")
     surah: int | None = None
     ayah: int | None = None
     collection: str | None = None
+    start: int = Field(..., ge=0, description="Character offset of the match in the source block's text.")
+    end: int = Field(..., ge=0, description="End offset (exclusive): block.text[start:end] == text.")
+    ayah_end: int | None = Field(None, description="Last ayah of a validated range, e.g. 256 for '2:255-256'.")
+    surah_name: str | None = Field(None, description="Canonical surah name from the surah index.")
+    collection_key: str | None = Field(None, description="Canonical hadith collection key, e.g. 'bukhari'.")
+    hadith_number: int | None = Field(None, description="Hadith number cited after the collection name, if any.")
+    book: int | None = Field(None, description="Book number cited before the hadith number, if any.")
+    status: ReferenceStatus = Field(..., description="'validated' or 'unverified'; see the contract doc.")
+    status_reason: str = Field(..., description="Why the reference has this status.")
+    ocr_confidence: float | None = Field(
+        None, ge=0.0, le=1.0, description="Source block's OCR confidence; null when the engine gave none."
+    )
+    ocr_confidence_band: OCRConfidenceBand = Field(..., description="Band of ocr_confidence, or 'unavailable'.")
+    requires_review: bool = Field(
+        ...,
+        description="True unless the reference is validated and its block has medium or high OCR confidence.",
+    )
+
+
+class RejectedReference(BaseModel):
+    """A citation-shaped match that cannot point at real data, with the reason."""
+
+    type: str = Field(..., description="'quran' or 'hadith'.")
+    text: str = Field(..., description="The exact substring matched in the source block.")
+    block_index: int = Field(..., ge=0)
+    start: int = Field(..., ge=0)
+    end: int = Field(..., ge=0)
+    reason: str
 
 
 class ClassifiedElement(BaseModel):
@@ -164,6 +292,12 @@ class PageAnalysisResponse(BaseModel):
     )
     references: list[ExtractedReference] = Field(default_factory=list)
     structure: StructuredPage
+    rejected_references: list[RejectedReference] = Field(
+        default_factory=list,
+        description="Citation-shaped matches that were dropped because they cannot exist.",
+    )
+    warnings: list[str] = Field(default_factory=list, description="Page-level notes on uncertainty.")
+    contract_version: str = Field(CONTRACT_VERSION, description="Version of the citation contract in use.")
 
 
 class ElementTypeInfo(BaseModel):
@@ -174,76 +308,354 @@ class ElementTypeInfo(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Reference extraction
+# Reference extraction, stage 1: candidates with provenance
 # ---------------------------------------------------------------------------
 
-# "2:153", "Surah 2:153", "Q 2:255-256" - a colon-separated surah/ayah pair,
-# optionally with a range end that we keep only as the matched text.
-_QURAN_PATTERN = re.compile(
-    r"\b(?:Q(?:ur[’']?an)?\.?\s*|S(?:urah|ura|urat)?\.?\s*)?"
-    r"(?P<surah>\d{1,3}):(?P<ayah>\d{1,3})(?:-\d{1,3})?\b",
+# "2:153", "Surah 2:153", "Q 2:255-256", "سورة ٢:١٥٣": a colon-separated
+# surah/ayah pair with an optional range end. ``\d`` also matches Arabic-Indic
+# and Extended Arabic-Indic digits, and ``int()`` reads them. Without a marker
+# the pair must start on a boundary and must not sit inside a longer run such
+# as a clock time "10:30:15". The one-letter markers must be a capital Q or S
+# standing alone, so the "s" of "it's 10:30" is not read as "Surah".
+_QURAN_NUMERIC_PATTERN = re.compile(
+    r"(?:(?P<marker>\b(?:Qur[’']?an|Surah|Sura|Surat)\.?|(?<![\w’'])(?-i:[QS])\.?|سورة|سوره)\s*)?"
+    r"(?(marker)|(?<![\w:.]))"
+    r"(?P<surah>\d{1,3})\s?:\s?(?P<ayah>\d{1,3})"
+    r"(?:\s?[-–]\s?(?P<end>\d{1,3}))?(?![\d:])",
     re.IGNORECASE,
 )
 
-# The canonical hadith collections, matched case-insensitively as whole words.
-_HADITH_COLLECTIONS: dict[str, str] = {
-    "bukhari": "Sahih al-Bukhari",
-    "muslim": "Sahih Muslim",
-    "abu dawud": "Sunan Abi Dawud",
-    "abu dawood": "Sunan Abi Dawud",
-    "tirmidhi": "Jami' at-Tirmidhi",
-    "nasai": "Sunan an-Nasa'i",
-    "nasa'i": "Sunan an-Nasa'i",
-    "ibn majah": "Sunan Ibn Majah",
-    "muwatta": "Muwatta Malik",
-    "ahmad": "Musnad Ahmad",
-}
-
-_HADITH_PATTERN = re.compile(
-    r"\b(" + "|".join(re.escape(name) for name in _HADITH_COLLECTIONS) + r")\b",
+# "[البقرة: ١٥٣]", "(Al-Baqarah: 255-256)", "[Surah Yusuf, 4]": the bracketed
+# surah-name citation classical Arabic works use. The name is resolved through
+# tafsir.surah_by_name; a bracket whose "name" is not a surah is ignored. Only
+# the canonical or Arabic name, or an explicit "Surah"/"سورة" prefix, counts as
+# a marker: aliases include ordinary words, so "(Time: 3)" stays unverified.
+_QURAN_NAMED_PATTERN = re.compile(
+    r"[\[(]\s*(?:(?P<prefix>سورة|سوره|Surah|Sura|Surat)\s+)?"
+    r"(?P<name>[^\[\]():،,\d]{2,40}?)\s*[:،,]\s*(?:(?:الآية|آية|ayah|ayat|verse)\s*)?"
+    r"(?P<ayah>\d{1,3})(?:\s?[-–]\s?(?P<end>\d{1,3}))?\s*[\])]",
     re.IGNORECASE,
 )
+
+# What may follow a collection name for the number to belong to it: "1",
+# "#1", "no. 1", "hadith 1", "Book 2, Hadith 3". Kept tight on purpose: OCR text
+# is prose, and a number several words later is not a hadith number.
+_HADITH_NUMBER_AFTER = re.compile(
+    r"\s*[,:]?\s*(?:(?:book|kitab|vol\.?)\s*(?P<book>\d{1,4})\s*[,:]?\s*)?"
+    r"(?:(?:hadith|hadeeth|no\.?|number|#)\s*[:#.]?\s*)?(?P<number>\d{1,5})(?!\d|\s?:\s?\d)",
+    re.IGNORECASE,
+)
+
+# Single words that are far more often ordinary prose ("a Muslim", "Imam
+# Malik said") than a citation. They count only with a hadith number or as
+# part of a longer alias such as "Sahih Muslim".
+_AMBIGUOUS_BARE_ALIASES = frozenset({"muslim", "malik"})
+
+# How far back an opening bracket may sit for "[Al-Baqarah 2:153]" to count as
+# a bracketed (marked) numeric citation.
+_BRACKET_LOOKBACK = 40
+
+
+@dataclass(frozen=True)
+class ReferenceCandidate:
+    """A citation-shaped match, before any check against canonical data."""
+
+    type: str
+    block_index: int
+    start: int
+    end: int
+    text: str
+    marked: bool = False
+    surah: int | None = None
+    named_surah: bool = False
+    ayah: int | None = None
+    ayah_end: int | None = None
+    collection_key: str | None = None
+    hadith_number: int | None = None
+    book: int | None = None
+
+
+def _is_bracketed(text: str, start: int, end: int) -> bool:
+    """True when [start, end) sits inside an open bracket that closes right after it."""
+    tail = text[end:].lstrip()
+    if not tail or tail[0] not in "])":
+        return False
+    for char in reversed(text[max(0, start - _BRACKET_LOOKBACK) : start]):
+        if char in "[(":
+            return True
+        if char in "])":
+            return False
+    return False
+
+
+def _overlaps(span: tuple[int, int], taken: list[tuple[int, int]]) -> bool:
+    return any(span[0] < other[1] and other[0] < span[1] for other in taken)
+
+
+def _quran_candidates(index: int, text: str) -> list[ReferenceCandidate]:
+    found: list[ReferenceCandidate] = []
+    taken: list[tuple[int, int]] = []
+
+    for match in _QURAN_NAMED_PATTERN.finditer(text):
+        name = match.group("name").strip()
+        record = surah_by_name(name)
+        if record is None:
+            continue
+        end_group = match.group("end")
+        found.append(
+            ReferenceCandidate(
+                type="quran",
+                block_index=index,
+                start=match.start(),
+                end=match.end(),
+                text=match.group(0),
+                marked=bool(match.group("prefix")) or is_canonical_surah_name(name, record),
+                surah=record.number,
+                named_surah=True,
+                ayah=int(match.group("ayah")),
+                ayah_end=int(end_group) if end_group else None,
+            )
+        )
+        taken.append(match.span())
+
+    for match in _QURAN_NUMERIC_PATTERN.finditer(text):
+        if _overlaps(match.span(), taken):
+            continue
+        end_group = match.group("end")
+        found.append(
+            ReferenceCandidate(
+                type="quran",
+                block_index=index,
+                start=match.start(),
+                end=match.end(),
+                text=match.group(0),
+                marked=bool(match.group("marker")) or _is_bracketed(text, match.start(), match.end()),
+                surah=int(match.group("surah")),
+                ayah=int(match.group("ayah")),
+                ayah_end=int(end_group) if end_group else None,
+            )
+        )
+    return found
+
+
+def _hadith_candidates(index: int, text: str) -> list[ReferenceCandidate]:
+    found: list[ReferenceCandidate] = []
+    for key, matched, (start, end) in find_collection_mentions(text):
+        number_match = _HADITH_NUMBER_AFTER.match(text, end)
+        if number_match is not None:
+            book_group = number_match.group("book")
+            found.append(
+                ReferenceCandidate(
+                    type="hadith",
+                    block_index=index,
+                    start=start,
+                    end=number_match.end(),
+                    text=text[start : number_match.end()],
+                    marked=True,
+                    collection_key=key,
+                    hadith_number=int(number_match.group("number")),
+                    book=int(book_group) if book_group else None,
+                )
+            )
+            continue
+        if matched.casefold() in _AMBIGUOUS_BARE_ALIASES:
+            continue
+        found.append(
+            ReferenceCandidate(type="hadith", block_index=index, start=start, end=end, text=matched, collection_key=key)
+        )
+    return found
+
+
+def find_reference_candidates(blocks: list[PageBlock]) -> list[ReferenceCandidate]:
+    """Stage 1: every citation-shaped match, in block order then left to right."""
+    candidates: list[ReferenceCandidate] = []
+    for index, block in enumerate(blocks):
+        text = block.text or ""
+        if not text.strip():
+            continue
+        per_block = _quran_candidates(index, text) + _hadith_candidates(index, text)
+        per_block.sort(key=lambda candidate: (candidate.start, candidate.end))
+        candidates.extend(per_block)
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Reference extraction, stage 2: check candidates against canonical data
+# ---------------------------------------------------------------------------
+
+
+def _confidence_band(confidence: float | None) -> OCRConfidenceBand:
+    if confidence is None:
+        return OCRConfidenceBand.UNAVAILABLE
+    band, _fallback, _review = evaluate_confidence_and_fallback(confidence)
+    return OCRConfidenceBand(band.value)
+
+
+def _rejected(candidate: ReferenceCandidate, reason: str) -> RejectedReference:
+    return RejectedReference(
+        type=candidate.type,
+        text=candidate.text,
+        block_index=candidate.block_index,
+        start=candidate.start,
+        end=candidate.end,
+        reason=reason,
+    )
+
+
+def _accepted(
+    candidate: ReferenceCandidate,
+    block: PageBlock,
+    *,
+    reference: str,
+    status: ReferenceStatus,
+    reason: str,
+    surah: int | None = None,
+    ayah: int | None = None,
+    ayah_end: int | None = None,
+    surah_name: str | None = None,
+    collection: str | None = None,
+    collection_key: str | None = None,
+) -> ExtractedReference:
+    band = _confidence_band(block.confidence)
+    requires_review = status != ReferenceStatus.VALIDATED or band in (
+        OCRConfidenceBand.LOW,
+        OCRConfidenceBand.UNAVAILABLE,
+    )
+    return ExtractedReference(
+        type=candidate.type,
+        reference=reference,
+        text=candidate.text,
+        block_index=candidate.block_index,
+        start=candidate.start,
+        end=candidate.end,
+        surah=surah,
+        ayah=ayah,
+        ayah_end=ayah_end,
+        surah_name=surah_name,
+        collection=collection,
+        collection_key=collection_key,
+        hadith_number=candidate.hadith_number,
+        book=candidate.book,
+        status=status,
+        status_reason=reason,
+        ocr_confidence=block.confidence,
+        ocr_confidence_band=band,
+        requires_review=requires_review,
+    )
+
+
+def _verify_quran(candidate: ReferenceCandidate, block: PageBlock) -> ExtractedReference | RejectedReference:
+    surah, ayah, ayah_end = candidate.surah or 0, candidate.ayah or 0, candidate.ayah_end
+    record = surah_by_number(surah)
+    if record is None:
+        return _rejected(candidate, f"Surah {surah} does not exist; surahs are numbered 1-114.")
+    if not 1 <= ayah <= record.ayah_count:
+        return _rejected(candidate, f"{record.name} has {record.ayah_count} ayat; ayah {ayah} does not exist.")
+    if ayah_end is not None:
+        if ayah_end < ayah or ayah_end > record.ayah_count:
+            return _rejected(
+                candidate,
+                f"Range {ayah}-{ayah_end} is not valid within {record.name} ({record.ayah_count} ayat).",
+            )
+        if ayah_end == ayah:
+            ayah_end = None
+
+    if candidate.marked:
+        status = ReferenceStatus.VALIDATED
+        reason = (
+            "Qur'an citation marker present and the surah/ayah exist in the surah index. "
+            "The OCR reading itself is not verified."
+        )
+    elif candidate.named_surah:
+        status = ReferenceStatus.UNVERIFIED
+        reason = (
+            "Surah matched only through an alias that can also be an ordinary word; "
+            "confirm the bracket is a Qur'an citation."
+        )
+    else:
+        status = ReferenceStatus.UNVERIFIED
+        reason = (
+            "Bare number pair with no Qur'an marker; it exists in the surah index but may be "
+            "a time, a ratio, or another text's verse."
+        )
+    return _accepted(
+        candidate,
+        block,
+        reference=f"{record.number}:{ayah}",
+        status=status,
+        reason=reason,
+        surah=record.number,
+        ayah=ayah,
+        ayah_end=ayah_end,
+        surah_name=record.name,
+    )
+
+
+def _verify_hadith(candidate: ReferenceCandidate, block: PageBlock) -> ExtractedReference:
+    key = candidate.collection_key or ""
+    display = COLLECTION_NAMES.get(key, key)
+    if candidate.hadith_number is None:
+        status = ReferenceStatus.UNVERIFIED
+        reason = "Collection named without a hadith number; nothing specific can be checked."
+    elif get_default_source().get(key, candidate.hadith_number, candidate.book) is not None:
+        status = ReferenceStatus.VALIDATED
+        reason = (
+            "Collection recognized and the hadith number exists in the bundled hadith index. "
+            "Authenticity and the narration text are not assessed here."
+        )
+    else:
+        status = ReferenceStatus.UNVERIFIED
+        reason = (
+            "Collection recognized, but this number was not found in the bundled hadith index; "
+            "numbering schemes differ between editions."
+        )
+    return _accepted(
+        candidate,
+        block,
+        reference=display,
+        status=status,
+        reason=reason,
+        collection=display,
+        collection_key=key,
+    )
+
+
+def verify_reference_candidate(
+    candidate: ReferenceCandidate, blocks: list[PageBlock]
+) -> ExtractedReference | RejectedReference:
+    """Stage 2: check one candidate, returning an accepted or a rejected reference."""
+    block = blocks[candidate.block_index]
+    if candidate.type == "quran":
+        return _verify_quran(candidate, block)
+    return _verify_hadith(candidate, block)
+
+
+def extract_and_verify_references(
+    blocks: list[PageBlock],
+) -> tuple[list[ExtractedReference], list[RejectedReference]]:
+    """Run both stages: accepted references and rejected citation-shaped matches.
+
+    Never raises on block content. Order is stable: blocks in input order,
+    matches left to right within a block.
+    """
+    accepted: list[ExtractedReference] = []
+    rejected: list[RejectedReference] = []
+    for candidate in find_reference_candidates(blocks):
+        outcome = verify_reference_candidate(candidate, blocks)
+        if isinstance(outcome, RejectedReference):
+            rejected.append(outcome)
+        else:
+            accepted.append(outcome)
+    return accepted, rejected
 
 
 def extract_references(blocks: list[PageBlock]) -> list[ExtractedReference]:
-    """Pull Qur'an and hadith references out of every block, linked to its index.
+    """Accepted Qur'an and hadith references from every block, linked to their source.
 
-    Never raises: a block whose text matches nothing simply contributes no
-    references. Order is stable - blocks in input order, matches left to right.
+    Kept for existing callers; ``extract_and_verify_references`` also returns
+    what was rejected and why.
     """
-    references: list[ExtractedReference] = []
-    for index, block in enumerate(blocks):
-        text = block.text or ""
-
-        for match in _QURAN_PATTERN.finditer(text):
-            surah = int(match.group("surah"))
-            ayah = int(match.group("ayah"))
-            if not (1 <= surah <= 114) or ayah < 1:
-                continue
-            references.append(
-                ExtractedReference(
-                    type="quran",
-                    reference=f"{surah}:{ayah}",
-                    text=match.group(0).strip(),
-                    block_index=index,
-                    surah=surah,
-                    ayah=ayah,
-                )
-            )
-
-        for match in _HADITH_PATTERN.finditer(text):
-            canonical = _HADITH_COLLECTIONS[match.group(1).lower()]
-            references.append(
-                ExtractedReference(
-                    type="hadith",
-                    reference=canonical,
-                    text=match.group(0).strip(),
-                    block_index=index,
-                    collection=canonical,
-                )
-            )
-
-    return references
+    return extract_and_verify_references(blocks)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -381,8 +793,13 @@ def analyze_page(page: PageInput) -> PageAnalysisResponse:
     """Classify, order, extract references from, and structure a page. Never raises."""
     reading_order, column_of = determine_reading_order(page)
     columns = max(column_of.values(), default=-1) + 1
-    references = extract_references(page.blocks)
-    referenced_blocks = {ref.block_index for ref in references}
+    references, rejected = extract_and_verify_references(page.blocks)
+    truncated = len(references) > MAX_REFERENCES_PER_PAGE or len(rejected) > MAX_REFERENCES_PER_PAGE
+    references = references[:MAX_REFERENCES_PER_PAGE]
+    rejected = rejected[:MAX_REFERENCES_PER_PAGE]
+    # Only validated citations shape layout classification; an unverified
+    # "10:30" must not turn a block into a reference line.
+    referenced_blocks = {ref.block_index for ref in references if ref.status == ReferenceStatus.VALIDATED}
     median_font = _median_font_size(page)
 
     position_in_reading = {block_index: pos for pos, block_index in enumerate(reading_order)}
@@ -411,7 +828,44 @@ def analyze_page(page: PageInput) -> PageAnalysisResponse:
         reading_order=reading_order,
         references=references,
         structure=structure,
+        rejected_references=rejected,
+        warnings=_page_warnings(page, references, rejected, truncated),
     )
+
+
+def _page_warnings(
+    page: PageInput,
+    references: list[ExtractedReference],
+    rejected: list[RejectedReference],
+    truncated: bool = False,
+) -> list[str]:
+    """Page-level uncertainty notes. Counts only; never echoes page text."""
+    warnings: list[str] = []
+    if truncated:
+        warnings.append(
+            f"More than {MAX_REFERENCES_PER_PAGE} references or rejections were found; "
+            "each list was cut to the first entries in block order."
+        )
+    if not any((block.text or "").strip() for block in page.blocks):
+        warnings.append("No text was found on the page; nothing was extracted.")
+    unavailable = sum(1 for ref in references if ref.ocr_confidence_band == OCRConfidenceBand.UNAVAILABLE)
+    if unavailable:
+        warnings.append(
+            f"{unavailable} reference(s) come from blocks with no OCR confidence; "
+            "confirm them against the page image before citing."
+        )
+    low = sum(1 for ref in references if ref.ocr_confidence_band == OCRConfidenceBand.LOW)
+    if low:
+        warnings.append(f"{low} reference(s) come from low-confidence OCR blocks and may be misread.")
+    unverified = sum(1 for ref in references if ref.status == ReferenceStatus.UNVERIFIED)
+    if unverified:
+        warnings.append(f"{unverified} reference(s) are unverified candidates, not checked citations.")
+    if rejected:
+        warnings.append(
+            f"{len(rejected)} citation-shaped match(es) were rejected because they cannot exist; "
+            "see rejected_references."
+        )
+    return warnings
 
 
 # The order regions appear in the structured page: main text leads, then the
@@ -471,19 +925,30 @@ async def analyze(page: PageInput) -> PageAnalysisResponse:
     """Analyze one scanned Islamic book page from its OCR block layout.
 
     Returns per-block classification, a layout-aware reading order, extracted
-    Qur'an and hadith references, and a semantically structured page.
+    Qur'an and hadith references with their verification status, rejected
+    citation-shaped matches, and a semantically structured page.
+
+    ``consent_to_process`` must be true: omitted or false is rejected with 400
+    before analysis. Limit violations (dimensions, block count, block or page
+    text length) are rejected with 422 by request validation. Nothing is
+    stored; see docs/PAGE_ANALYSIS_CONTRACT.md.
     """
-    if not page.consent_to_process:
-        raise HTTPException(
-            status_code=400,
-            detail="Processing requires explicit user consent (consent_to_process=true).",
-        )
-    if len(page.blocks) > 5000:
-        raise HTTPException(
-            status_code=413,
-            detail="Page contains too many blocks. Maximum allowed is 5000.",
-        )
-    return analyze_page(page)
+    validate_page_layout_input(page.width, page.height, len(page.blocks), consent=page.consent_to_process is True)
+    started = time.perf_counter()
+    result = analyze_page(page)
+    logger.info(
+        "page_analysis completed: %s",
+        {
+            "blocks": len(page.blocks),
+            "text_chars": sum(len(block.text) for block in page.blocks),
+            "validated": sum(1 for ref in result.references if ref.status == ReferenceStatus.VALIDATED),
+            "unverified": sum(1 for ref in result.references if ref.status == ReferenceStatus.UNVERIFIED),
+            "rejected": len(result.rejected_references),
+            "requires_review": sum(1 for ref in result.references if ref.requires_review),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+        },
+    )
+    return result
 
 
 @router.get("/element-types", response_model=list[ElementTypeInfo])
