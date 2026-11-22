@@ -62,6 +62,9 @@ jobs:
       - name: Run hadith research agent tests
         run: pytest -q tests/test_hadith_research.py
 
+      - name: Run public knowledge governance and dataset provenance tests (#848)
+        run: pytest -q tests/test_public_knowledge.py tests/test_knowledge_data_provenance.py tests/test_study_store.py tests/test_faraid.py tests/test_memorization_planner.py
+
       - name: Run structured citation tests
         run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 
