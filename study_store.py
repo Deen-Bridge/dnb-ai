@@ -77,10 +77,10 @@ class StudyStore:
                 logger.error("Redis read error in StudyStore.get_progress: %s", exc)
 
         # In-memory fallback
-        record = self._memory_cache.get(key)
-        if record:
+        cached = self._memory_cache.get(key)
+        if cached:
             self._memory_cache.move_to_end(key)
-            return record if record.opt_in else None
+            return cached if cached.opt_in else None
         return None
 
     async def record_progress(

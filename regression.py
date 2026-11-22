@@ -55,7 +55,9 @@ class RegressionRunner:
         """
         data = dict(results)
         if any((owner, version, rollback_plan)):
-            missing = [k for k, v in (("owner", owner), ("version", version), ("rollback_plan", rollback_plan)) if not v]
+            missing = [
+                k for k, v in (("owner", owner), ("version", version), ("rollback_plan", rollback_plan)) if not v
+            ]
             if missing:
                 raise ValueError(f"baseline metadata missing: {', '.join(missing)}")
             data["metadata"] = {

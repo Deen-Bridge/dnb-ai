@@ -16,7 +16,6 @@ import re
 import tempfile
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from adhkar import AdhkarCorpus
@@ -188,9 +187,7 @@ def test_arabic_query_search():
 
     assert response.status_code == 200
     matches = response.json()["matches"]
-    assert any(m["id"] == "evening_1" for m in matches), (
-        "Arabic query 'أَمْسَيْنَا' should match the evening adhkar entry"
-    )
+    assert any(m["id"] == "evening_1" for m in matches), "Arabic query 'أَمْسَيْنَا' should match the evening adhkar entry"
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +257,10 @@ def test_corpus_missing_file_gives_empty_entries():
 
 
 def test_corpus_search_no_filters_returns_all():
-    entries = [{"id": f"e{i}", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""} for i in range(3)]
+    entries = [
+        {"id": f"e{i}", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""}
+        for i in range(3)
+    ]
     c = _make_corpus(entries)
     assert len(c.search()) == 3
 
@@ -289,24 +289,34 @@ def test_corpus_search_by_arabic_text():
 
 
 def test_corpus_search_empty_query_returns_all():
-    entries = [{"id": f"e{i}", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""} for i in range(3)]
+    entries = [
+        {"id": f"e{i}", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""}
+        for i in range(3)
+    ]
     c = _make_corpus(entries)
     assert len(c.search(query="")) == 3
 
 
 def test_corpus_search_whitespace_query_returns_all():
-    entries = [{"id": f"e{i}", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""} for i in range(2)]
+    entries = [
+        {"id": f"e{i}", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""}
+        for i in range(2)
+    ]
     c = _make_corpus(entries)
     assert len(c.search(query="   ")) == 2
 
 
 def test_corpus_search_no_match_returns_empty_list():
-    c = _make_corpus([{"id": "m1", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""}])
+    c = _make_corpus(
+        [{"id": "m1", "category": "morning", "arabic": "", "transliteration": "", "translation": "", "source": ""}]
+    )
     assert c.search(category="evening") == []
 
 
 def test_corpus_category_match_case_insensitive():
-    entries = [{"id": "m1", "category": "Morning", "arabic": "", "transliteration": "", "translation": "", "source": ""}]
+    entries = [
+        {"id": "m1", "category": "Morning", "arabic": "", "transliteration": "", "translation": "", "source": ""}
+    ]
     c = _make_corpus(entries)
     assert len(c.search(category="morning")) == 1
     assert len(c.search(category="MORNING")) == 1

@@ -661,9 +661,7 @@ class AdhkarProvenance(BaseModel):
     data_version: str = Field(..., description="Semantic version of the bundled adhkar data file.")
     schema_version: int = Field(..., description="Integer schema revision of the data file format.")
     source: str = Field(..., description="Human-readable description of the upstream source(s).")
-    data_last_updated: str = Field(
-        ..., description="ISO-8601 date the corpus content was last reviewed or changed."
-    )
+    data_last_updated: str = Field(..., description="ISO-8601 date the corpus content was last reviewed or changed.")
     loaded_at: str = Field(
         ...,
         description="UTC ISO-8601 timestamp at which the corpus was loaded into memory.",
