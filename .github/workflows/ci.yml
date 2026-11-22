@@ -28,6 +28,12 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Verify Stellar production contract (offline)
+        run: pytest -q tests/test_stellar_contract_state.py tests/test_stellar_ledger_freshness_guard.py tests/test_zakat.py tests/test_telemetry.py
+
+      - name: Report sanitized Stellar verification result
+        run: python scripts/eval_stellar_contract.py
+
       - name: Lint (ruff)
         run: ruff check .
 
@@ -39,12 +45,6 @@ jobs:
 
       - name: Run full test suite
         run: pytest -q tests/
-
-      - name: Verify Stellar production contract (offline)
-        run: pytest -q tests/test_stellar_contract_state.py tests/test_stellar_ledger_freshness_guard.py tests/test_zakat.py
-
-      - name: Report sanitized Stellar verification result
-        run: python scripts/eval_stellar_contract.py
 
       - name: Verify retrieval backfill is idempotent (offline demo)
         run: |
