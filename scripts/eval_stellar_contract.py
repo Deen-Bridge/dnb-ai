@@ -46,6 +46,32 @@ def run() -> dict[str, object]:
         is None
     )
 
+    checks += 1
+    failures += (
+        validate_contract_request(
+            network="unsupported",
+            configured_network="testnet",
+            asset_code="USDC",
+            asset_issuer=issuer,
+            expected_issuer=issuer,
+            public_key_valid=True,
+        )
+        is None
+    )
+
+    checks += 1
+    failures += (
+        validate_contract_request(
+            network="testnet",
+            configured_network="testnet",
+            asset_code="USDC",
+            asset_issuer=issuer,
+            expected_issuer=issuer,
+            public_key_valid=False,
+        )
+        is None
+    )
+
     fresh = evaluate_provider_freshness(
         {
             "network_passphrase": "Public Global Stellar Network ; September 2015",

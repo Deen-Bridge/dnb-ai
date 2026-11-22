@@ -154,6 +154,22 @@ def test_stale_latest_ledger_prevents_account_lookup(monkeypatch) -> None:
     assert error.value.status_code == 409
 
 
+@pytest.mark.parametrize(
+    ("public_key", "invalid_issuer"),
+    [
+        ("not-a-public-key", False),
+        ("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", True),
+    ],
+)
+def test_invalid_public_key_or_issuer_stops_before_horizon(monkeypatch, public_key: str, invalid_issuer: bool) -> None:
+    monkeypatch.setattr(stellar, "STELLAR_NETWORK", "testnet")
+    if invalid_issuer:
+        monkeypatch.setattr(stellar, "usdc_issuer", lambda: "G" + "C" * 55)
+    with patch.object(stellar, "Server") as server, pytest.raises(APIException):
+        stellar.fetch_usdc_balance(public_key)
+    server.assert_not_called()
+
+
 def test_provider_failure_prevents_account_lookup(monkeypatch) -> None:
     monkeypatch.setattr(stellar, "STELLAR_NETWORK", "public")
     with patch.object(stellar, "Server") as provider:
