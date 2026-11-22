@@ -141,7 +141,9 @@ _INJECTION_PATTERNS = (
     re.compile(r"\b(?:system|developer)\s+(?:prompt|message|instructions?)\b", re.IGNORECASE),
     re.compile(r"\byou\s+are\s+now\b", re.IGNORECASE),
     re.compile(r"\b(?:act|behave|respond)\s+as\s+(?:if|an?|the)\b", re.IGNORECASE),
-    re.compile(r"\b(?:reveal|print|show|leak)\b[^.\n]{0,30}\b(?:prompt|secrets?|api[ _-]?keys?|tokens?)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:reveal|print|show|leak)\b[^.\n]{0,30}\b(?:prompt|secrets?|api[ _-]?keys?|tokens?)\b", re.IGNORECASE
+    ),
     re.compile(r"\bmark\s+(?:this|it)\s+as\s+(?:verified|sahih|authentic)\b", re.IGNORECASE),
     re.compile(r"</?\s*(?:system|assistant|user|instructions?)\s*>", re.IGNORECASE),
     re.compile(r"\bBEGIN\s+(?:SYSTEM|INSTRUCTIONS?)\b", re.IGNORECASE),

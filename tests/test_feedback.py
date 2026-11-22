@@ -8,6 +8,7 @@ Gemini stubbed, matching the existing endpoint tests.
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -40,7 +41,8 @@ def make_record(**overrides) -> FeedbackRecord:
         answer="An incorrect paraphrase.",
         model_name="gemini-test",
         generation_config={"temperature": 0.7},
-        created_at="2026-07-25T10:00:00+00:00",
+        # Recent by default so records stay inside the retention window.
+        created_at=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
     )
     fields.update(overrides)
     return FeedbackRecord(**fields)

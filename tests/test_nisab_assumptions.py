@@ -17,9 +17,8 @@ test is the pure arithmetic layer that never reaches the network. The
 from __future__ import annotations
 
 import asyncio
-import os
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -28,12 +27,12 @@ from nisab import (
     DEFAULT_NISAB_USD,
     FALLBACK_SOURCE,
     GRAMS_PER_TROY_OUNCE,
-    MIN_PLAUSIBLE_OUNCE_USD,
     MAX_PLAUSIBLE_OUNCE_USD,
+    MIN_PLAUSIBLE_OUNCE_USD,
     NISAB_GOLD_GRAMS,
+    PRIMARY_SOURCE,
     NisabAssumptions,
     NisabQuote,
-    PRIMARY_SOURCE,
     get_nisab,
     nisab_from_ounce_price,
     override_quote,
@@ -41,7 +40,6 @@ from nisab import (
     validate_nisab_assumptions,
 )
 from semantic_cache import get_keyed_cache
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,9 +91,7 @@ class TestNisabConstants:
     def test_nisab_gold_grams_is_less_than_one_troy_ounce(self):
         """Sanity: 85 g < 31.1 g/oz means the nisab is less than 3 troy oz."""
         nisab_oz = NISAB_GOLD_GRAMS / GRAMS_PER_TROY_OUNCE
-        assert Decimal("2") < nisab_oz < Decimal("3"), (
-            f"85 g should be ~2.73 troy oz, got {nisab_oz}"
-        )
+        assert Decimal("2") < nisab_oz < Decimal("3"), f"85 g should be ~2.73 troy oz, got {nisab_oz}"
 
     def test_plausibility_bounds_are_ordered(self):
         assert MIN_PLAUSIBLE_OUNCE_USD < MAX_PLAUSIBLE_OUNCE_USD
@@ -127,9 +123,7 @@ class TestNisabFromOuncePrice:
         # Independent formula — not calling nisab_from_ounce_price, so this is a
         # genuine cross-check and cannot mask a systematic bug in the function.
         expected = (Decimal("85") / Decimal("31.1034768") * price).quantize(Decimal("0.01"))
-        assert result == expected, (
-            f"At {price_per_oz} USD/oz: expected nisab {expected}, got {result}"
-        )
+        assert result == expected, f"At {price_per_oz} USD/oz: expected nisab {expected}, got {result}"
 
     def test_result_is_quantized_to_cents(self):
         result = nisab_from_ounce_price(Decimal("1234.5678"))
@@ -155,9 +149,7 @@ class TestNisabFromOuncePrice:
     def test_cross_check_against_manual_formula(self):
         """Independent formula: price × (85 / 31.1034768) == nisab_from_ounce_price."""
         for price in ("1500", "2000", "2750", "3100"):
-            expected = (Decimal("85") / Decimal("31.1034768") * Decimal(price)).quantize(
-                Decimal("0.01")
-            )
+            expected = (Decimal("85") / Decimal("31.1034768") * Decimal(price)).quantize(Decimal("0.01"))
             actual = nisab_from_ounce_price(Decimal(price))
             assert abs(actual - expected) <= Decimal("0.01"), (
                 f"Formula mismatch at {price} USD/oz: manual={expected}, function={actual}"
@@ -178,9 +170,7 @@ class TestValidateNisabAssumptions:
 
     def test_valid_on_unmodified_codebase(self):
         result = validate_nisab_assumptions()
-        assert result.valid is True, (
-            f"validate_nisab_assumptions() reported errors on unmodified code: {result.errors}"
-        )
+        assert result.valid is True, f"validate_nisab_assumptions() reported errors on unmodified code: {result.errors}"
 
     def test_no_errors_on_unmodified_codebase(self):
         result = validate_nisab_assumptions()
@@ -499,6 +489,7 @@ class TestEdgeCases:
     def test_fallback_quote_with_empty_reason(self):
         """_fallback_quote is reachable via get_nisab; ensure it handles an empty reason."""
         from nisab import _fallback_quote
+
         q = _fallback_quote("")
         assert q.live is False
         assert q.note is not None
@@ -548,11 +539,13 @@ class TestZakatIntegration:
     @pytest.fixture
     def compute_zakat(self):
         from stellar import compute_zakat
+
         return compute_zakat
 
     @pytest.fixture
     def zakat_rate(self):
         from stellar import ZAKAT_RATE
+
         return ZAKAT_RATE
 
     def test_at_exactly_live_nisab_zakat_is_due(self, compute_zakat):

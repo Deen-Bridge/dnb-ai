@@ -44,8 +44,7 @@ def replay_incidents(incidents: list[dict[str, Any]]) -> dict[str, Any]:
         expected = bool(inc["expect_detected"])
         if result.hallucination_detected != expected:
             failures.append(
-                f"{inc['id']}: expected detected={expected}, got {result.hallucination_detected} "
-                f"({inc['description']})"
+                f"{inc['id']}: expected detected={expected}, got {result.hallucination_detected} ({inc['description']})"
             )
         elif expected and inc.get("expect_type") and inc["expect_type"] not in types:
             failures.append(f"{inc['id']}: expected type {inc['expect_type']}, got {sorted(types)}")

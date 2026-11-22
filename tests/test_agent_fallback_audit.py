@@ -87,6 +87,7 @@ async def test_provider_timeout_fallback_emits_audit_metadata() -> None:
     assert result.component == "primary_gemini"
     assert result.version == "2.1.0"
     assert result.duration_ms > 0
+    assert result.user_message is not None
     assert "The primary provider timed out" in result.user_message
 
     meta = result.fallback_metadata
@@ -144,7 +145,9 @@ async def test_circuit_open_fallback_emits_audit_metadata() -> None:
     assert r2.component == "fragile_provider"
     assert r2.version == "1.5.0"
     assert "circuit_breaker_open" in r2.stages_executed
+    assert r2.fallback_metadata is not None
     assert r2.fallback_metadata.risk_level == FallbackRiskLevel.HIGH
+    assert r2.user_message is not None
     assert "experiencing connectivity issues" in r2.user_message
 
 
@@ -175,7 +178,9 @@ async def test_circuit_half_open_failure_emits_audit_metadata() -> None:
     assert r2.success is True
     assert r2.fallback_used is True
     assert r2.fallback_reason == FallbackReason.CIRCUIT_HALF_OPEN_FAILED
+    assert r2.fallback_metadata is not None
     assert r2.fallback_metadata.risk_level == FallbackRiskLevel.HIGH
+    assert r2.user_message is not None
     assert "recovery check failed" in r2.user_message.lower()
     assert cb.state == CircuitState.OPEN
 
@@ -222,7 +227,9 @@ async def test_safety_block_terminal_cannot_bypass_safety() -> None:
     assert result.success is False
     assert result.fallback_used is True
     assert result.fallback_reason == FallbackReason.SAFETY_BLOCK
+    assert result.user_message is not None
     assert "safety policy constraints" in result.user_message
+    assert result.fallback_metadata is not None
     assert result.fallback_metadata.risk_level == FallbackRiskLevel.HIGH
     assert "safety_block_terminal" in result.stages_executed
     assert alt_called is False, "Alternative agent was called despite safety block!"
@@ -286,7 +293,9 @@ async def test_deterministic_fallback_emits_audit_metadata() -> None:
     assert result.fallback_reason == FallbackReason.DETERMINISTIC_FALLBACK
     assert result.component == "zakat_agent"
     assert result.version == "3.0.0"
+    assert result.fallback_metadata is not None
     assert result.fallback_metadata.fallback_type == "deterministic"
+    assert result.user_message is not None
     assert "rule-based deterministic response" in result.user_message
     assert result.fallback_metadata.risk_level == FallbackRiskLevel.MEDIUM
     assert result.data == {"calculation": "2.5% zakat standard rate"}
@@ -411,6 +420,7 @@ async def test_threshold_review_trigger_and_auto_disable() -> None:
     r4 = await registry.execute_with_resilience("fragile", {}, retry_config=RetryConfig(max_retries=0))
     assert r4.success is False
     assert r4.fallback_used is False
+    assert r4.error is not None
     assert "Fallback disabled" in r4.error
 
 
@@ -440,6 +450,7 @@ async def test_operator_manual_rollback_and_reenable() -> None:
     res2 = await registry.execute_with_resilience("search_agent", {}, retry_config=RetryConfig(max_retries=0))
     assert res2.success is False
     assert res2.fallback_used is False
+    assert res2.error is not None
     assert "Fallback disabled for 'search_agent'" in res2.error
 
     # Operator re-enables fallback
@@ -484,6 +495,7 @@ async def test_telemetry_and_metadata_never_leak_prompts_or_secrets() -> None:
     assert result.fallback_used is True
 
     # Inspect fallback metadata
+    assert result.fallback_metadata is not None
     metadata_json = json.dumps(result.fallback_metadata.to_dict())
     assert SECRET_PROMPT not in metadata_json
     assert SECRET_API_KEY not in metadata_json

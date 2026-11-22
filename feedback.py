@@ -866,20 +866,24 @@ class RedisFeedbackStore(FeedbackStore):
     def _fetch_keys(self, index_key: str, limit: int) -> list[str]:
         return self._r.zrevrange(index_key, 0, limit - 1)
 
-    def _fetch_records(self, keys: list[str]) -> list[FeedbackRecord]:
+    def _fetch_keyed_records(self, keys: list[str]) -> list[tuple[str, FeedbackRecord]]:
+        """Fetch records paired with their keys; missing or malformed hashes are skipped."""
         if not keys:
             return []
         pipe = self._r.pipeline()
         for k in keys:
             pipe.hgetall(k)
-        records = []
-        for data in pipe.execute():
+        pairs = []
+        for key, data in zip(keys, pipe.execute(), strict=True):
             if data:
                 try:
-                    records.append(FeedbackRecord.from_dict(data))
+                    pairs.append((key, FeedbackRecord.from_dict(data)))
                 except (KeyError, TypeError):
                     continue
-        return records
+        return pairs
+
+    def _fetch_records(self, keys: list[str]) -> list[FeedbackRecord]:
+        return [record for _, record in self._fetch_keyed_records(keys)]
 
     def list_records(
         self,
@@ -964,7 +968,9 @@ class RedisFeedbackStore(FeedbackStore):
     def purge_expired(self, days: int | None = None, now: datetime | None = None) -> int:
         """Delete records past the retention window (Redis TTL is a backstop)."""
         keys = self._all_record_keys()
-        expired = [key for key, record in zip(keys, self._fetch_records(keys)) if is_expired(record.created_at, days, now)]
+        # Pair each record with its own key: skipped (missing/malformed) hashes
+        # would shift a plain zip and delete the wrong records.
+        expired = [key for key, record in self._fetch_keyed_records(keys) if is_expired(record.created_at, days, now)]
         return self._delete_keys(expired)
 
     def delete_chat(self, chat_id: str) -> int:

@@ -98,9 +98,13 @@ class TestRegressionRunner:
         assert runner.rollback_baseline() is False
         runner.save_baseline({"mean_composite_score": 0.9})
         runner.save_baseline({"mean_composite_score": 0.5})
-        assert runner.load_baseline()["mean_composite_score"] == 0.5
+        baseline = runner.load_baseline()
+        assert baseline is not None
+        assert baseline["mean_composite_score"] == 0.5
         assert runner.rollback_baseline() is True
-        assert runner.load_baseline()["mean_composite_score"] == 0.9
+        restored = runner.load_baseline()
+        assert restored is not None
+        assert restored["mean_composite_score"] == 0.9
 
     def test_domain_and_pass_rate_thresholds(self, tmp_path: Path):
         runner = RegressionRunner(baseline_path=tmp_path / "b.json")
