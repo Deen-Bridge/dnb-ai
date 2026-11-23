@@ -198,6 +198,28 @@ class TestRijal:
         assert narrator is not None
         assert narrator["reliability"] == "daif"
 
+    def test_arabic_script_name_resolves(self):
+        narrator = find_narrator("أبو هريرة")
+        assert narrator is not None
+        assert narrator["id"] == "abu-hurayrah"
+
+    def test_transliteration_diacritics_fold(self):
+        assert find_narrator("Abū Hurayrah") is not None
+        assert find_narrator("Abu Hurayra") is not None
+
+    def test_bin_and_b_dot_forms_fold_to_ibn(self):
+        by_bin = find_narrator("Umar bin al-Khattab")
+        by_b_dot = find_narrator("Umar b. al-Khattab")
+        assert by_bin is not None and by_b_dot is not None
+        assert by_bin["id"] == by_b_dot["id"] == "umar-ibn-al-khattab"
+
+    def test_empty_or_whitespace_name_returns_none(self):
+        assert find_narrator("") is None
+        assert find_narrator("   ") is None
+
+    def test_short_alias_does_not_match_inside_another_name(self):
+        assert find_narrator("Khalid ibn al-Walid") is None
+
 
 class TestIsnadAnalysis:
     def test_golden_chain_is_continuous(self):
@@ -228,6 +250,49 @@ class TestIsnadAnalysis:
         assert entry.profile.reliability == "daif"
         assert any("do not rely" in warning for warning in entry.warnings)
         assert analysis.flagged is True
+
+    def test_analysis_reports_versioned_provenance(self):
+        analysis = analyze_isnad(["Malik ibn Anas", "Nafi'", "Abdullah ibn Umar"])
+        provenance = analysis.provenance
+        assert provenance.dataset == "data/rijal/narrators.json"
+        assert provenance.version >= 2
+        assert provenance.narrator_count == len(hr.load_rijal())
+        assert provenance.source and provenance.disclaimer
+
+    def test_exact_matches_carry_high_confidence(self):
+        analysis = analyze_isnad(["Malik ibn Anas", "Nafi'", "Abdullah ibn Umar"])
+        assert analysis.uncertain is False
+        for entry in analysis.narrators:
+            assert entry.profile.match_method in {"name", "alias"}
+            assert entry.profile.match_confidence >= 0.9
+            assert entry.profile.source == f"data/rijal/narrators.json v{analysis.provenance.version}"
+
+    def test_arabic_chain_is_continuous(self):
+        analysis = analyze_isnad(["مالك بن أنس", "نافع", "عبد الله بن عمر"])
+        assert analysis.continuous is True
+        assert analysis.uncertain is False
+        assert all(entry.profile.matched for entry in analysis.narrators)
+
+    def test_partial_name_match_is_low_confidence_and_uncertain(self):
+        analysis = analyze_isnad(["Narrated by Malik ibn Anas", "Nafi'", "Abdullah ibn Umar"])
+        first = analysis.narrators[0]
+        assert first.profile.matched is True
+        assert first.profile.match_method == "partial"
+        assert first.profile.match_confidence < 0.9
+        assert any("partial" in warning for warning in first.warnings)
+        assert analysis.uncertain is True
+        assert any("partially" in note for note in analysis.notes)
+
+    def test_unknown_narrator_is_uncertain(self):
+        analysis = analyze_isnad(["Malik ibn Anas", "A Completely Unknown Man"])
+        assert analysis.uncertain is True
+
+    def test_empty_chain_is_handled_directly(self):
+        analysis = analyze_isnad([])
+        assert analysis.narrators == []
+        assert analysis.continuous is None
+        assert analysis.flagged is False
+        assert analysis.provenance.version >= 2
 
     def test_empty_chain_rejected_by_endpoint(self):
         app = FastAPI()
@@ -350,7 +415,12 @@ class TestEndpoints:
 
         response = run(post())
         assert response.status_code == 200
-        assert response.json()["continuous"] is True
+        payload = response.json()
+        assert payload["continuous"] is True
+        assert payload["uncertain"] is False
+        assert payload["provenance"]["dataset"] == "data/rijal/narrators.json"
+        assert payload["provenance"]["version"] >= 2
+        assert payload["narrators"][0]["profile"]["match_method"] in {"name", "alias"}
 
     def test_variants_endpoint_by_reference(self, app):
         async def post():
