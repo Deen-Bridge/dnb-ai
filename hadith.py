@@ -328,7 +328,7 @@ class BundledGradingSource(GradingSource):
     # per-instance cache is bounded by the bundled collection count, not by
     # request volume. Changing the caching strategy would be a behaviour
     # change and belongs in its own PR.
-    @cache  # noqa: B019
+    @cache  # noqa: B019  (bounded: one entry per bundled collection)
     def _index(self, collection: str) -> dict[str, dict] | None:
         path = self._data_dir / f"{collection}.json"
         if not path.exists():

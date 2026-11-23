@@ -6,6 +6,11 @@ English gloss, thematic category, and usage notes. The lexicon is embedded so
 the subsystem runs fully offline, mirroring how the concordance and hadith
 datasets are bundled. The categories mirror the domains the rest of the
 service reasons about (worship, jurisprudence, creed, transactions, ethics).
+
+Expansion is bounded: query expansion never returns more than
+``MAX_EXPANSION_TERMS`` candidates, and matches are only emitted when the
+surface form and the requested dialect agree, to prevent cross-dialect
+language leakage.
 """
 
 from __future__ import annotations
@@ -13,6 +18,9 @@ from __future__ import annotations
 import re
 
 from arabic_dialect.models import ArabicDialect, DialectTerm
+
+MAX_EXPANSION_TERMS = 10
+MAX_QUERY_LENGTH = 200
 
 # id, term, dialect, msa, transliteration, english, category, variants, notes
 _RAW_TERMS: list[tuple[str, str, ArabicDialect, str, str, str, str, list[str], str | None]] = [
@@ -205,14 +213,18 @@ class DialectalTerminology:
         category: str | None = None,
         limit: int = 50,
     ) -> list[DialectTerm]:
-        """Search the lexicon by term, MSA equivalent, transliteration, or gloss."""
+        """Search the lexicon by term, MSA equivalent, transliteration, or gloss.
+
+        Query length and result count are bounded; oversized queries are truncated.
+        """
         results = list(self.terms)
+        limit = max(0, min(limit, MAX_EXPANSION_TERMS * 5))
         if dialect is not None and dialect is not ArabicDialect.UNKNOWN:
             results = [t for t in results if t.dialect is dialect]
         if category:
             results = [t for t in results if t.category == category]
         if query:
-            lowered = query.strip().lower()
+            lowered = query.strip()[:MAX_QUERY_LENGTH].lower()
             results = [
                 t
                 for t in results
@@ -235,6 +247,8 @@ def extract_terms_from_text(text: str) -> list[DialectTerm]:
     """Return the dialectal lexicon terms present in the text."""
     found: list[DialectTerm] = []
     seen: set[str] = set()
+    if not text or not text.strip():
+        return found
     for term in terminology_db.terms:
         for candidate in [term.term, *term.variants]:
             if candidate and re.search(r"\b" + re.escape(candidate) + r"\b", text):
@@ -242,4 +256,6 @@ def extract_terms_from_text(text: str) -> list[DialectTerm]:
                     found.append(term)
                     seen.add(term.id)
                 break
+        if len(found) >= MAX_EXPANSION_TERMS:
+            break
     return found

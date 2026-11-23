@@ -1,5 +1,6 @@
 """Tafsir layer — grounded, attributed ayah explanations.
 
+
 Why this exists
 ---------------
 Asked "what does Surah al-'Asr mean?", a bare language model produces a
@@ -541,6 +542,28 @@ class TafsirWork(BaseModel):
     @property
     def languages(self) -> list[str]:
         return sorted(self.slugs)
+
+
+# Cap on how many distinct named-surah/ayah candidates a single chat prompt may
+# yield. Query expansion is bounded so one message cannot fan out into an
+# unbounded number of upstream lookups or cache entries.
+MAX_EXPANDED_REFERENCES = int(os.getenv("TAFSIR_MAX_EXPANDED_REFERENCES", "5"))
+
+
+def bound_expanded_references(refs: list[AyahRef], limit: int = MAX_EXPANDED_REFERENCES) -> list[AyahRef]:
+    """Deduplicate and cap expanded references, preserving first-seen order."""
+    if limit <= 0:
+        return []
+    seen: set[str] = set()
+    bounded: list[AyahRef] = []
+    for ref in refs:
+        if ref.key in seen:
+            continue
+        seen.add(ref.key)
+        bounded.append(ref)
+        if len(bounded) >= limit:
+            break
+    return bounded
 
 
 TAFSIR_REGISTRY: dict[str, TafsirWork] = {
@@ -1710,6 +1733,7 @@ async def _build_chat_tafsir_context(
     refs = detect_ayah_references(prompt)
     if not refs:
         return None
+    refs = bound_expanded_references(refs)
 
     keys = list(DEFAULT_TAFSIR_KEYS)
     ayat = list(

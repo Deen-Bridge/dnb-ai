@@ -45,6 +45,12 @@ _RELATED_MIN_COOCCURRENCE = 1
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 200
 
+# Bounds for query expansion: cap how many topics a multi-topic query may
+# combine, and how many related topics a single expansion may return, so a
+# caller cannot force unbounded fan-out across the taxonomy.
+_MAX_MULTI_TOPICS = 20
+_MAX_RELATED_TOPICS = 25
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -77,7 +83,7 @@ class ThemeSummary(BaseModel):
 class MultiTopicQueryRequest(BaseModel):
     """Request body for a multi-topic AND/OR query."""
 
-    topics: list[str] = Field(..., min_length=1, description="Theme ids to combine")
+    topics: list[str] = Field(..., min_length=1, max_length=_MAX_MULTI_TOPICS, description="Theme ids to combine")
     operator: str = Field("OR", description="'AND' (intersection) or 'OR' (union)")
     limit: int = Field(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT)
 
@@ -287,6 +293,9 @@ async def search_topics(
     """
     retriever = _resolve_retriever()
     themes = retriever.taxonomy.search_themes(q)
+    # Empty or whitespace-only queries are rejected earlier by min_length;
+    # trim so Arabic/English padding does not produce spurious matches.
+    q = q.strip()
     themes.sort(key=lambda t: -_verse_count(retriever, t.id))
 
     results: list[dict[str, Any]] = []
@@ -350,6 +359,12 @@ async def multi_topic_query(body: MultiTopicQueryRequest) -> MultiTopicResult:
             status_code=422,
             detail=f"operator must be 'AND' or 'OR', got '{operator}'.",
             hint="Use 'AND' for verses about every topic, or 'OR' for verses about any topic.",
+        )
+    if len(set(topics)) != len(topics):
+        raise APIException(
+            status_code=422,
+            detail="topics must not contain duplicate ids.",
+            hint="Remove repeated theme ids before querying.",
         )
     retriever = _resolve_retriever()
     resolved: list[Any] = []
@@ -430,6 +445,8 @@ async def related_topics(theme_id: str) -> RelatedTopicsResponse:
 
     related: list[RelatedTopic] = []
     for other_id, count in sorted(cooccurrence.items(), key=lambda item: (-item[1], item[0])):
+        if len(related) >= _MAX_RELATED_TOPICS:
+            break
         if count < _RELATED_MIN_COOCCURRENCE:
             continue
         other = retriever.taxonomy.get_theme(other_id)

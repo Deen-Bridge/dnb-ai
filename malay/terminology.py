@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
+
+MAX_QUERY_TERMS = 50
+MAX_TERM_LENGTH = 64
+_TOKEN_RE = re.compile(r"[^\w\s'-]", re.UNICODE)
 
 
 class TerminologyLexicon:
@@ -32,7 +37,11 @@ class TerminologyLexicon:
             ]
 
     def lookup(self, term: str) -> dict[str, Any] | None:
-        tl = term.lower()
+        if not isinstance(term, str):
+            return None
+        tl = term.strip()[:MAX_TERM_LENGTH].lower()
+        if not tl:
+            return None
         for t in self.terms:
             if tl == t.get("malay_term", "").lower() or tl == t.get("indonesian_term", "").lower():
                 return t
@@ -41,8 +50,10 @@ class TerminologyLexicon:
         return None
 
     def identify_terms(self, text: str) -> list[dict[str, Any]]:
+        if not isinstance(text, str) or not text.strip():
+            return []
         found = []
-        words = text.split()
+        words = _TOKEN_RE.sub(" ", text).split()[:MAX_QUERY_TERMS]
         for w in words:
             cleaned = w.strip(",.?!;:()").lower()
             res = self.lookup(cleaned)

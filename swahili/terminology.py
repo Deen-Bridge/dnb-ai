@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "swahili_islamic_terms.json"
 
+# Bounds for query expansion to prevent unbounded work and cross-language leakage.
+MAX_QUERY_LENGTH = 256
+MAX_EXPANSION_TERMS = 25
+
 
 class SwahiliIslamicTerminology:
     """Manages the Swahili Islamic terminology database with multi-index lookups."""
@@ -110,6 +114,10 @@ class SwahiliIslamicTerminology:
         key = self._normalize_key(text)
         return self._normalized_lookup.get(key)
 
+    def _bounded_query(self, query: str) -> str:
+        """Truncate oversized queries so expansion work stays bounded."""
+        return query.strip()[:MAX_QUERY_LENGTH]
+
     def search_terms(
         self,
         query: str | None = None,
@@ -125,7 +133,7 @@ class SwahiliIslamicTerminology:
         if not query or not query.strip():
             return results[:limit]
 
-        normalized_query = self._normalize_key(query)
+        normalized_query = self._normalize_key(self._bounded_query(query))
         matched: list[tuple[int, IslamicTerm]] = []
 
         for term in results:
@@ -154,12 +162,12 @@ class SwahiliIslamicTerminology:
                 matched.append((score, term))
 
         matched.sort(key=lambda x: x[0], reverse=True)
-        return [item[1] for item in matched[:limit]]
+        return [item[1] for item in matched[: min(limit, MAX_EXPANSION_TERMS)]]
 
     def extract_terms_from_text(self, text: str) -> list[IslamicTerm]:
         """Scan input text and extract all recognized Islamic terms."""
         found_terms: dict[str, IslamicTerm] = {}
-        normalized_words = re.findall(r"[\w']+", text.lower())
+        normalized_words = re.findall(r"[\w']+", self._bounded_query(text).lower())
 
         # Check multi-word terms first (e.g. "zaka ya fitri", "uchaji mungu", "qur'ani tukufu", "kadhi mkuu")
         lower_text = text.lower()

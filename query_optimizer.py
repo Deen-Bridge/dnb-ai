@@ -129,18 +129,33 @@ def normalize_turkish_islamic_term(term: str) -> tuple[str, ...] | str:
     return TURKISH_ISLAMIC_TERMS.get(normalized, turkish_lower(term))
 
 
+# Upper bounds keep query expansion from growing without limit on hostile or
+# very long input. Expansion only ever adds Arabic/Ottoman equivalents of known
+# Turkish Islamic terms; any other token passes through unchanged.
+MAX_EXPANSION_INPUT_TOKENS = 256
+MAX_EXPANSION_OUTPUT_TOKENS = 512
+
+
 def expand_turkish_islamic_query(text: str) -> str:
-    """Expand Turkish Islamic terms with Arabic/Ottoman equivalents for recall."""
-    tokens = turkish_tokenize(text)
+    """Expand Turkish Islamic terms with Arabic/Ottoman equivalents for recall.
+
+    Bounded: input is truncated to ``MAX_EXPANSION_INPUT_TOKENS`` tokens and the
+    output is capped at ``MAX_EXPANSION_OUTPUT_TOKENS``. Empty or whitespace-only
+    input returns an empty string. Each equivalent is only emitted for a token
+    that matched a known term, so unrelated (e.g. English) text is not leaked
+    into Turkish-only expansions.
+    """
+    tokens = turkish_tokenize(text)[:MAX_EXPANSION_INPUT_TOKENS]
     expanded: list[str] = []
     for token in tokens:
         root = strip_turkish_suffixes(token)
         equivalents = normalize_turkish_islamic_term(root)
+        expanded.append(token)
         if isinstance(equivalents, tuple):
-            expanded.append(token)
             expanded.extend(equivalents)
-        else:
-            expanded.append(token)
+        if len(expanded) >= MAX_EXPANSION_OUTPUT_TOKENS:
+            expanded = expanded[:MAX_EXPANSION_OUTPUT_TOKENS]
+            break
     return " ".join(expanded)
 
 
