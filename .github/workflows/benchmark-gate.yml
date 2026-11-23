@@ -18,7 +18,7 @@ on:
 jobs:
   benchmark-gate:
     name: Benchmark Release Gate (AI-102)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
@@ -110,7 +110,7 @@ jobs:
 
   quran-provider-gate:
     name: Quran Provider Health Gate (AI-101)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
