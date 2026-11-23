@@ -18,7 +18,6 @@ import json
 import sys
 from typing import Any
 
-
 REQUIRED_THRESHOLDS: dict[str, dict[str, Any]] = {
     "composite_score": {"key": "metrics.composite_score", "min": 0.70, "type": "min"},
     "arabic_comprehension": {"key": "metrics.arabic_comprehension_vs_english_baseline", "min": 0.90, "type": "min"},
@@ -77,15 +76,9 @@ def evaluate_release_gate(report: dict[str, Any]) -> dict[str, Any]:
 
     # ---- 2. Scholar sign-off ----
     if not report.get("scholar_sign_off"):
-        failures.append(
-            "scholar_sign_off is False or missing. "
-            "A qualified scholar must sign off before release."
-        )
+        failures.append("scholar_sign_off is False or missing. A qualified scholar must sign off before release.")
     if not report.get("scholar_id"):
-        failures.append(
-            "scholar_id is missing. "
-            "The sign-off reviewer must be identified by ID."
-        )
+        failures.append("scholar_id is missing. The sign-off reviewer must be identified by ID.")
 
     # ---- 3. Metric thresholds ----
     for name, spec in REQUIRED_THRESHOLDS.items():
@@ -94,20 +87,15 @@ def evaluate_release_gate(report: dict[str, Any]) -> dict[str, Any]:
             failures.append(f"Missing required metric: {spec['key']}")
             continue
         if spec["type"] == "min" and value < spec["min"]:
-            failures.append(
-                f"{name}: {value:.4f} is below required minimum {spec['min']}."
-            )
+            failures.append(f"{name}: {value:.4f} is below required minimum {spec['min']}.")
         elif spec["type"] == "max" and value > spec["max"]:
-            failures.append(
-                f"{name}: {value:.4f} exceeds maximum allowed {spec['max']}."
-            )
+            failures.append(f"{name}: {value:.4f} exceeds maximum allowed {spec['max']}.")
 
     # ---- 4. Confidence intervals ----
     ci = report.get("confidence_intervals") or {}
     if not ci:
         failures.append(
-            "confidence_intervals is missing or empty. "
-            "Report must include confidence intervals for primary metrics."
+            "confidence_intervals is missing or empty. Report must include confidence intervals for primary metrics."
         )
 
     # ---- 5. Versioned artifact fields ----
@@ -144,16 +132,11 @@ def evaluate_release_gate(report: dict[str, Any]) -> dict[str, Any]:
     # ---- 8. Rollback criteria ----
     rollback = report.get("rollback_criteria") or {}
     if not rollback:
-        failures.append(
-            "rollback_criteria is missing or empty. "
-            "Define rollback thresholds before releasing."
-        )
+        failures.append("rollback_criteria is missing or empty. Define rollback thresholds before releasing.")
     else:
         for key in REQUIRED_ROLLBACK_KEYS:
             if key not in rollback:
-                failures.append(
-                    f"rollback_criteria is missing required key: '{key}'."
-                )
+                failures.append(f"rollback_criteria is missing required key: '{key}'.")
 
     # ---- Build result ----
     passed = len(failures) == 0

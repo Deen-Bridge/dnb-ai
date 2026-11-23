@@ -15,13 +15,7 @@ All tests run offline using fixtures and mocking — no live model calls.
 
 from __future__ import annotations
 
-import json
-import pathlib
 from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -185,7 +179,10 @@ class TestReleaseGateThresholds:
     def test_gate_fails_on_low_arabic_comprehension(self) -> None:
         from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
 
-        report = {**PASSING_REPORT, "metrics": {**PASSING_REPORT["metrics"], "arabic_comprehension_vs_english_baseline": 0.89}}
+        report = {
+            **PASSING_REPORT,
+            "metrics": {**PASSING_REPORT["metrics"], "arabic_comprehension_vs_english_baseline": 0.89},
+        }
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
@@ -302,8 +299,7 @@ class TestAdjudication:
         result = evaluate_release_gate(FAILING_REPORT_SACRED_TEXT_MISMATCH)
         assert result["passed"] is False
         assert any(
-            word in " ".join(result["failures"]).lower()
-            for word in ("sacred", "mismatch", "adjudicat", "quran")
+            word in " ".join(result["failures"]).lower() for word in ("sacred", "mismatch", "adjudicat", "quran")
         )
 
     def test_adjudicated_mismatch_does_not_block(self) -> None:
@@ -328,8 +324,7 @@ class TestAdjudication:
         result = evaluate_release_gate(report)
         assert result["passed"] is False
         assert any(
-            word in " ".join(result["failures"]).lower()
-            for word in ("disagreement", "adjudicat", "spread", "rating")
+            word in " ".join(result["failures"]).lower() for word in ("disagreement", "adjudicat", "spread", "rating")
         )
 
     def test_adjudicated_disagreement_does_not_block(self) -> None:
