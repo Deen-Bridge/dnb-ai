@@ -37,6 +37,8 @@ introducing a second cache system.
 from __future__ import annotations
 
 import asyncio
+import collections
+import copy
 import html
 import json
 import logging
@@ -95,6 +97,19 @@ MAX_AYAT_PER_REQUEST = int(os.getenv("TAFSIR_MAX_AYAT", "10"))
 MAX_TAFSIRS_PER_REQUEST = 6
 MAX_REFERENCES_PER_BATCH = 10
 MAX_TOTAL_AYAT_PER_BATCH = 20
+
+# Comparative analysis retrieves more works than the ordinary /tafsir request
+# (which caps at six) so that consensus and divergence are evidence-backed.
+MAX_COMPARISON_TAFSIRS = 12
+MIN_COMPARISON_TAFSIRS = 10
+COMPARISON_REPRESENTATIVE_SENTENCES = 2
+COMPARISON_REPRESENTATIVE_CHARS = 500
+DEFAULT_SIMILARITY_THRESHOLD = 0.35
+COMPARISON_RULESET_VERSION = "1.0.0"
+COMPARISON_BOUNDARY_POLICY = (
+    "Every cited source reports the ayah boundary its retrieved passage covers; a source that "
+    "states no boundary is cited against the compared ayah so a claim is never left unbounded."
+)
 
 # Wall-clock budget for retrieving tafsir inside a /chat turn. Retrieval runs
 # concurrently, but a slow upstream must not hold a chat turn open indefinitely:
@@ -534,6 +549,10 @@ class TafsirWork(BaseModel):
     author: str
     source: str = "quran.com"
     slugs: dict[str, str] = Field(..., description="Language code -> source slug for this tafsir")
+    era: str = Field(default="unknown", description="Broad historical period of the work")
+    death_year_ah: int | None = Field(default=None, description="Author's death year in the Hijri calendar, when known")
+    methodologies: list[str] = Field(default_factory=list, description="Methodological descriptors for comparison")
+    perspective: str = Field(default="not classified", description="Broad perspective label; not a sectarian ruling")
 
     def slug_for(self, language: str) -> str | None:
         return self.slugs.get(language)
@@ -639,6 +658,97 @@ TAFSIR_REGISTRY: dict[str, TafsirWork] = {
 # (al-Qurtubi) and concise-summary (al-Sa'di) approaches — chosen so a default
 # request already shows more than one methodology.
 DEFAULT_TAFSIR_KEYS: tuple[str, ...] = ("ibn-kathir", "tabari", "qurtubi", "saadi")
+# Al-Jalalayn is served by a separate backend and is available on request, but it
+# is left out of the default comparison so the default set stays within the
+# twelve-work comparison budget.
+DEFAULT_COMPARISON_TAFSIR_KEYS: tuple[str, ...] = tuple(key for key in TAFSIR_REGISTRY if key != "jalalayn")
+
+# Comparative metadata is kept separate from the retrieval registry above so
+# adding a work never requires inventing classification fields at retrieval time.
+_WORK_METADATA: dict[str, dict[str, Any]] = {
+    "ibn-kathir": {
+        "era": "classical",
+        "death_year_ah": 774,
+        "methodologies": ["narration", "hadith", "linguistic"],
+        "perspective": "Sunni",
+    },
+    "tabari": {
+        "era": "classical",
+        "death_year_ah": 310,
+        "methodologies": ["narration", "linguistic", "variant_readings"],
+        "perspective": "Sunni",
+    },
+    "qurtubi": {
+        "era": "classical",
+        "death_year_ah": 671,
+        "methodologies": ["juristic", "linguistic", "narration"],
+        "perspective": "Sunni",
+    },
+    "saadi": {
+        "era": "modern",
+        "death_year_ah": 1376,
+        "methodologies": ["thematic", "linguistic", "concise"],
+        "perspective": "Sunni",
+    },
+    "baghawi": {
+        "era": "classical",
+        "death_year_ah": 516,
+        "methodologies": ["narration", "linguistic"],
+        "perspective": "Sunni",
+    },
+    "jalalayn": {
+        "era": "classical",
+        "death_year_ah": 911,
+        "methodologies": ["concise", "linguistic"],
+        "perspective": "Sunni",
+    },
+    "muyassar": {
+        "era": "contemporary",
+        "methodologies": ["concise", "thematic"],
+        "perspective": "institutional",
+    },
+    "wasit": {
+        "era": "contemporary",
+        "death_year_ah": 1431,
+        "methodologies": ["linguistic", "thematic", "juristic"],
+        "perspective": "Sunni",
+    },
+    "maarif-ul-quran": {
+        "era": "modern",
+        "death_year_ah": 1396,
+        "methodologies": ["juristic", "narration", "thematic"],
+        "perspective": "Sunni",
+    },
+    "bayan-ul-quran": {
+        "era": "contemporary",
+        "death_year_ah": 1431,
+        "methodologies": ["thematic", "linguistic"],
+        "perspective": "Sunni",
+    },
+    "fi-zilal": {
+        "era": "modern",
+        "death_year_ah": 1386,
+        "methodologies": ["thematic", "literary", "social"],
+        "perspective": "Sunni",
+    },
+    "tazkirul-quran": {
+        "era": "contemporary",
+        "death_year_ah": 1443,
+        "methodologies": ["thematic", "linguistic", "concise"],
+        "perspective": "Sunni",
+    },
+    "ahsanul-bayaan": {
+        "era": "contemporary",
+        "methodologies": ["concise", "thematic"],
+        "perspective": "institutional",
+    },
+}
+
+for _work_key, _metadata in _WORK_METADATA.items():
+    _work = TAFSIR_REGISTRY.get(_work_key)
+    if _work is not None:
+        for _field, _value in _metadata.items():
+            setattr(_work, _field, _value)
 
 TAFSIR_ALIASES: dict[str, str] = {
     "ibnkathir": "ibn-kathir",
@@ -1414,6 +1524,145 @@ class TafsirResponse(BaseModel):
     disclaimer: str = DISCLAIMER
 
 
+class ComparisonSource(BaseModel):
+    """Metadata and retrieved text for one work in a comparison."""
+
+    key: str
+    name: str
+    author: str
+    language: str
+    era: str
+    death_year_ah: int | None = None
+    methodologies: list[str] = Field(default_factory=list)
+    perspective: str
+    text: str
+    verse_range: str | None = Field(
+        None,
+        description="Ayah boundary this passage covers, e.g. '103:1-3'; null when the source did not state one.",
+    )
+
+
+class InterpretationCluster(BaseModel):
+    """A reproducible semantic grouping of similar source passages."""
+
+    id: str
+    label: str
+    source_keys: list[str]
+    representative: str
+    similarity_threshold: float
+
+
+class ComparisonConsensus(BaseModel):
+    """A consensus claim supported by the listed retrieved works."""
+
+    statement: str = Field(..., min_length=1)
+    source_keys: list[str] = Field(..., min_length=2)
+    support_ratio: float = Field(..., ge=0.0, le=1.0)
+    source_boundaries: dict[str, str] = Field(
+        default_factory=dict,
+        description="Cited source key -> the ayah boundary its passage covers.",
+    )
+
+
+class ComparisonPosition(BaseModel):
+    statement: str = Field(..., min_length=1)
+    source_keys: list[str] = Field(..., min_length=1)
+    source_boundaries: dict[str, str] = Field(default_factory=dict)
+
+
+class ComparisonDivergence(BaseModel):
+    """A difference between interpretations, with source attribution."""
+
+    topic: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    positions: list[ComparisonPosition] = Field(..., min_length=2)
+
+
+class ComparisonInsight(BaseModel):
+    """A distinctive observation attributed to one or more works."""
+
+    statement: str = Field(..., min_length=1)
+    source_keys: list[str] = Field(..., min_length=1)
+    source_boundaries: dict[str, str] = Field(default_factory=dict)
+
+
+class ComparisonSynthesis(BaseModel):
+    """A source-aware synthesis suitable for display to a learner."""
+
+    summary: str = Field(..., min_length=1)
+    evolution: str = Field(..., min_length=1)
+    methodological_notes: str = Field(..., min_length=1)
+    balance_note: str = Field(..., min_length=1)
+    cited_source_keys: list[str] = Field(default_factory=list)
+    source_boundaries: dict[str, str] = Field(default_factory=dict)
+
+
+class GeneratedComparisonAnalysis(BaseModel):
+    """Schema-validated model analysis before source-key guardrails."""
+
+    consensus: list[ComparisonConsensus] = Field(default_factory=list)
+    divergences: list[ComparisonDivergence] = Field(default_factory=list)
+    unique_insights: list[ComparisonInsight] = Field(default_factory=list)
+    synthesis: ComparisonSynthesis
+
+
+class ComparisonProvenance(BaseModel):
+    """Versioned provenance for one tafsir comparison."""
+
+    ruleset_version: str
+    algorithm: str
+    similarity_threshold: float
+    boundary_policy: str
+
+
+class TafsirComparisonRequest(BaseModel):
+    reference: str = Field(
+        ...,
+        description="One ayah reference, such as '103:2', '2:255', or 'Al-Fatihah 1'",
+        json_schema_extra={"examples": ["103:2", "2:255", "Al-Fatihah 1"]},
+    )
+    tafsirs: list[str] | None = Field(
+        None,
+        min_length=MIN_COMPARISON_TAFSIRS,
+        max_length=MAX_COMPARISON_TAFSIRS,
+        description=(
+            f"At least {MIN_COMPARISON_TAFSIRS} and at most {MAX_COMPARISON_TAFSIRS} tafsir keys. "
+            "Defaults to every registered work."
+        ),
+    )
+    language: str = Field(DEFAULT_TRANSLATION_LANGUAGE, description="Preferred language for retrieved tafsir text")
+    allow_language_fallback: bool = Field(
+        True,
+        description="Use a work's original language when the preferred language is unavailable",
+    )
+    similarity_threshold: float = Field(
+        DEFAULT_SIMILARITY_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Token similarity threshold used to group interpretation passages",
+    )
+
+
+class TafsirComparisonResponse(BaseModel):
+    reference: str
+    language: str
+    ayah: AyahTafsir
+    sources: list[ComparisonSource]
+    unavailable: list[TafsirUnavailable]
+    clusters: list[InterpretationCluster]
+    consensus: list[ComparisonConsensus]
+    divergences: list[ComparisonDivergence]
+    unique_insights: list[ComparisonInsight]
+    synthesis: ComparisonSynthesis
+    boundaries: dict[str, str] = Field(
+        default_factory=dict,
+        description="Every retrieved source key -> the ayah boundary its passage covers.",
+    )
+    uncertain: bool = False
+    provenance: ComparisonProvenance
+    disclaimer: str = DISCLAIMER
+
+
 class TafsirBatchRequest(BaseModel):
     references: list[str] = Field(
         ...,
@@ -1464,6 +1713,10 @@ class TafsirSourceInfo(BaseModel):
     name: str
     author: str
     languages: list[str]
+    era: str = "unknown"
+    death_year_ah: int | None = None
+    methodologies: list[str] = Field(default_factory=list)
+    perspective: str = "not classified"
 
 
 def resolve_requested_tafsirs(requested: list[str] | None) -> list[str]:
@@ -1490,6 +1743,36 @@ def resolve_requested_tafsirs(requested: list[str] | None) -> list[str]:
         )
     if unknown:
         logger.info("Ignoring unknown tafsir(s): %s", ", ".join(unknown))
+    return resolved
+
+
+def resolve_comparison_tafsirs(requested: list[str] | None) -> list[str]:
+    """Resolve a comparison's source list without the ordinary six-work cap."""
+    if not requested:
+        return list(DEFAULT_COMPARISON_TAFSIR_KEYS)
+
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for raw in requested:
+        key = normalize_tafsir_key(raw)
+        if key is None:
+            unknown.append(raw)
+        elif key not in resolved:
+            resolved.append(key)
+
+    if unknown:
+        logger.info("Ignoring unknown comparison tafsir(s): %s", ", ".join(unknown))
+    if not resolved:
+        raise InvalidReference(
+            f"Unknown tafsir(s): {', '.join(unknown)}. Available: {', '.join(sorted(TAFSIR_REGISTRY))}."
+        )
+    if len(resolved) < MIN_COMPARISON_TAFSIRS:
+        raise InvalidReference(
+            f"A comparison needs at least {MIN_COMPARISON_TAFSIRS} distinct tafsir works; "
+            f"{len(resolved)} were recognized."
+        )
+    if len(resolved) > MAX_COMPARISON_TAFSIRS:
+        raise InvalidReference(f"A comparison can include at most {MAX_COMPARISON_TAFSIRS} tafsir works.")
     return resolved
 
 
@@ -1610,6 +1893,504 @@ async def build_tafsir_batch_response(
             errors[reference] = error
 
     return TafsirBatchResponse(results=results, errors=errors)
+
+
+# ---------------------------------------------------------------------------
+# Comparative analysis
+# ---------------------------------------------------------------------------
+
+
+_WORD_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
+_COMPARISON_STOPWORDS = frozenset(
+    {
+        "a",
+        "about",
+        "after",
+        "all",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "he",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "their",
+        "this",
+        "to",
+        "was",
+        "which",
+        "with",
+    }
+)
+
+
+def _comparison_tokens(text: str) -> collections.Counter[str]:
+    """Return normalized content-word counts for deterministic similarity."""
+    tokens = (
+        token
+        for token in _WORD_PATTERN.findall(text.casefold())
+        if len(token) > 2 and token not in _COMPARISON_STOPWORDS
+    )
+    return collections.Counter(tokens)
+
+
+def _semantic_similarity(left: str, right: str) -> float:
+    """Approximate semantic similarity using weighted content-word cosine."""
+    left_counts = _comparison_tokens(left)
+    right_counts = _comparison_tokens(right)
+    if not left_counts or not right_counts:
+        return 0.0
+    vocabulary = left_counts.keys() | right_counts.keys()
+    dot = sum(left_counts[token] * right_counts[token] for token in vocabulary)
+    left_norm = sum(value * value for value in left_counts.values()) ** 0.5
+    right_norm = sum(value * value for value in right_counts.values()) ** 0.5
+    return dot / (left_norm * right_norm)
+
+
+def _comparison_sentence(text: str) -> str:
+    """Keep evidence labels concise while preserving the source's wording."""
+    sentences = re.split(r"(?<=[.!?؟])\s+", text.strip())
+    selected = [sentence.strip() for sentence in sentences if sentence.strip()]
+    if not selected:
+        representative = text.strip()
+    else:
+        representative = " ".join(selected[:COMPARISON_REPRESENTATIVE_SENTENCES])
+    if len(representative) > COMPARISON_REPRESENTATIVE_CHARS:
+        return representative[:COMPARISON_REPRESENTATIVE_CHARS].rstrip() + "..."
+    return representative
+
+
+def _cluster_comparison_sources(
+    sources: list[ComparisonSource],
+    threshold: float,
+) -> list[InterpretationCluster]:
+    """Group passages by similarity to a stable cluster representative."""
+    clusters: list[InterpretationCluster] = []
+    for source in sources:
+        best_cluster: InterpretationCluster | None = None
+        best_score = 0.0
+        for cluster in clusters:
+            score = _semantic_similarity(source.text, cluster.representative)
+            if score >= threshold and score > best_score:
+                best_cluster = cluster
+                best_score = score
+        if best_cluster is None:
+            clusters.append(
+                InterpretationCluster(
+                    id=f"cluster-{len(clusters) + 1}",
+                    label=f"Interpretive grouping {len(clusters) + 1}",
+                    source_keys=[source.key],
+                    representative=_comparison_sentence(source.text),
+                    similarity_threshold=threshold,
+                )
+            )
+        else:
+            best_cluster.source_keys.append(source.key)
+    return clusters
+
+
+def _build_comparison_consensus(
+    clusters: list[InterpretationCluster],
+    sources_by_key: dict[str, ComparisonSource],
+) -> list[ComparisonConsensus]:
+    """Treat a high-support cluster as consensus without overstating certainty."""
+    total = len(sources_by_key)
+    if not total:
+        return []
+    minimum_support = max(2, int(total * 0.75 + 0.999))
+    consensus: list[ComparisonConsensus] = []
+    for cluster in clusters:
+        if len(cluster.source_keys) < minimum_support:
+            continue
+        consensus.append(
+            ComparisonConsensus(
+                statement=cluster.representative,
+                source_keys=list(cluster.source_keys),
+                support_ratio=round(len(cluster.source_keys) / total, 4),
+            )
+        )
+    return consensus
+
+
+def _build_comparison_divergences(
+    clusters: list[InterpretationCluster],
+) -> list[ComparisonDivergence]:
+    """Expose competing clusters as distinct attributed positions."""
+    if len(clusters) < 2:
+        return []
+    ordered = sorted(clusters, key=lambda cluster: len(cluster.source_keys), reverse=True)
+    return [
+        ComparisonDivergence(
+            topic="Interpretive emphasis",
+            description="The retrieved works cluster around distinct readings of the verse.",
+            positions=[
+                ComparisonPosition(statement=cluster.representative, source_keys=list(cluster.source_keys))
+                for cluster in ordered
+            ],
+        )
+    ]
+
+
+def _build_comparison_insights(
+    clusters: list[InterpretationCluster],
+) -> list[ComparisonInsight]:
+    """Mark singleton clusters as distinctive observations, not consensus."""
+    return [
+        ComparisonInsight(statement=cluster.representative, source_keys=list(cluster.source_keys))
+        for cluster in clusters
+        if len(cluster.source_keys) == 1
+    ]
+
+
+def _comparison_evolution(sources: list[ComparisonSource]) -> str:
+    """Summarize the chronological distribution without asserting causation."""
+    by_era: dict[str, list[str]] = {}
+    for source in sorted(sources, key=lambda item: item.death_year_ah or 9999):
+        by_era.setdefault(source.era, []).append(source.name)
+    parts = [f"{era}: {len(names)} work(s)" for era, names in by_era.items()]
+    return "Chronological coverage represented in the retrieved set: " + "; ".join(parts) + "."
+
+
+def _comparison_methodologies(sources: list[ComparisonSource]) -> str:
+    counts: dict[str, int] = {}
+    for source in sources:
+        for methodology in source.methodologies:
+            counts[methodology] = counts.get(methodology, 0) + 1
+    labels = ", ".join(f"{method} ({count})" for method, count in sorted(counts.items()))
+    return f"Methodologies represented: {labels or 'not classified'}."
+
+
+def _comparison_balance_note(sources: list[ComparisonSource], unavailable: list[TafsirUnavailable]) -> str:
+    perspectives = sorted({source.perspective for source in sources})
+    note = f"Retrieved perspectives: {', '.join(perspectives)}."
+    if unavailable:
+        note += f" {len(unavailable)} requested work(s) were unavailable and were not treated as evidence."
+    ranged = [f"{source.key}={source.verse_range}" for source in sources if source.verse_range]
+    if ranged:
+        note += " Passage boundaries: " + "; ".join(ranged) + "."
+    return note
+
+
+def _boundaries_for(keys: list[str], sources_by_key: dict[str, ComparisonSource], fallback: str) -> dict[str, str]:
+    """Map each cited source key to the ayah boundary its passage covers."""
+    return {key: (sources_by_key[key].verse_range or fallback) for key in dict.fromkeys(keys) if key in sources_by_key}
+
+
+def _fallback_comparison_synthesis(
+    sources: list[ComparisonSource],
+    unavailable: list[TafsirUnavailable],
+    consensus: list[ComparisonConsensus],
+    divergences: list[ComparisonDivergence],
+    insights: list[ComparisonInsight],
+) -> ComparisonSynthesis:
+    """Build a bounded synthesis when no model is configured or available."""
+    consensus_note = (
+        f"{len(consensus)} high-support interpretation grouping(s) were identified."
+        if consensus
+        else "No high-support grouping met the comparison threshold."
+    )
+    divergence_note = (
+        f"{len(divergences)} divergence grouping(s) remain visible as separate positions."
+        if divergences
+        else "The retrieved passages did not form multiple distinct groupings."
+    )
+    unique_note = (
+        f"{len(insights)} distinctive source observation(s) were retained separately."
+        if insights
+        else "No singleton interpretation grouping was identified."
+    )
+    return ComparisonSynthesis(
+        summary=f"Compared {len(sources)} retrieved tafsir works. {consensus_note} {divergence_note} {unique_note}",
+        evolution=_comparison_evolution(sources),
+        methodological_notes=_comparison_methodologies(sources),
+        balance_note=_comparison_balance_note(sources, unavailable),
+        cited_source_keys=[source.key for source in sources],
+    )
+
+
+def _comparison_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Return a Gemini-compatible schema for a simple Pydantic response."""
+    schema = model.model_json_schema()
+    definitions = schema.pop("$defs", {})
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            if "$ref" in value:
+                key = value["$ref"].split("/")[-1]
+                return normalize(copy.deepcopy(definitions[key]))
+            return {key: normalize(item) for key, item in value.items() if key != "title"}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return value
+
+    return normalize(schema)
+
+
+class ComparisonGenerator:
+    """Synthesis seam; tests can inject a recorded generator."""
+
+    def generate(self, prompt: str, schema: dict[str, Any]) -> str:
+        raise NotImplementedError
+
+
+class GeminiComparisonGenerator(ComparisonGenerator):
+    """Generate only the prose synthesis; evidence remains deterministic."""
+
+    def __init__(self, model_name: str = "gemini-2.5-flash") -> None:
+        self.model_name = model_name
+
+    def generate(self, prompt: str, schema: dict[str, Any]) -> str:
+        import google.generativeai as genai
+
+        model = genai.GenerativeModel(self.model_name)
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "response_mime_type": "application/json",
+                "response_schema": schema,
+            },
+        )
+        return response.text
+
+
+class FakeComparisonGenerator(ComparisonGenerator):
+    """Offline generator for tests and local demos."""
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.call_count = 0
+
+    def generate(self, prompt: str, schema: dict[str, Any]) -> str:
+        self.call_count += 1
+        return self.response
+
+
+def _comparison_prompt(
+    ayah: AyahTafsir,
+    sources: list[ComparisonSource],
+    consensus: list[ComparisonConsensus],
+    divergences: list[ComparisonDivergence],
+    insights: list[ComparisonInsight],
+) -> str:
+    evidence = "\n\n".join(
+        f"[{source.key}] {source.name} — {source.author}; era={source.era}; "
+        f"covers={source.verse_range or 'unstated'}; methodologies={','.join(source.methodologies)}; "
+        f"perspective={source.perspective}\n{source.text[:1600]}"
+        for source in sources
+    )
+    return f"""You are a careful comparative tafsir editor.
+Analyze only the retrieved evidence below. Do not introduce an interpretation
+from memory, claim that a view is universal, or erase a disagreement. Use the
+deterministic similarity results as supporting evidence, while also comparing
+cross-language meanings that token matching may miss. Every consensus claim,
+position, and unique insight must cite only source keys present in the evidence.
+Cite the passage boundary (for example 103:1-3) for every claim; never attribute
+a passage that covers a different ayah range without noting that boundary.
+Consensus requires support from at least two retrieved works. A divergence must
+contain at least two distinct attributed positions. Do not infer a sectarian
+perspective beyond the supplied metadata.
+Return only JSON matching the supplied schema.
+
+Ayah: {ayah.ayah} ({ayah.surah_name})
+Translation: {ayah.translation or "unavailable"}
+
+Retrieved evidence:
+{evidence}
+
+Consensus evidence:
+{json.dumps([item.model_dump() for item in consensus], ensure_ascii=False)}
+
+Divergence evidence:
+{json.dumps([item.model_dump() for item in divergences], ensure_ascii=False)}
+
+Unique observations:
+{json.dumps([item.model_dump() for item in insights], ensure_ascii=False)}
+"""
+
+
+def _validate_generated_analysis(
+    analysis: GeneratedComparisonAnalysis,
+    source_keys: set[str],
+) -> GeneratedComparisonAnalysis:
+    """Reject generated claims whose attribution is absent from retrieval."""
+
+    def validate_keys(keys: list[str], minimum: int) -> list[str]:
+        unique = list(dict.fromkeys(keys))
+        if len(unique) < minimum or not set(unique) <= source_keys:
+            raise ValueError("analysis cited an unknown or insufficient source set")
+        return unique
+
+    consensus = [
+        item.model_copy(
+            update={
+                "source_keys": validate_keys(item.source_keys, 2),
+                "source_boundaries": {},
+            }
+        )
+        for item in analysis.consensus
+    ]
+    for consensus_item in consensus:
+        consensus_item.support_ratio = round(len(set(consensus_item.source_keys)) / len(source_keys), 4)
+    divergences: list[ComparisonDivergence] = []
+    for divergence in analysis.divergences:
+        positions = [
+            position.model_copy(update={"source_keys": validate_keys(position.source_keys, 1), "source_boundaries": {}})
+            for position in divergence.positions
+        ]
+        if len({tuple(position.source_keys) for position in positions}) < 2:
+            raise ValueError("divergence positions must cite distinct source sets")
+        divergences.append(divergence.model_copy(update={"positions": positions}))
+    unique_insights = [
+        insight.model_copy(update={"source_keys": validate_keys(insight.source_keys, 1), "source_boundaries": {}})
+        for insight in analysis.unique_insights
+    ]
+    cited = validate_keys(analysis.synthesis.cited_source_keys, 1)
+    synthesis = analysis.synthesis.model_copy(update={"cited_source_keys": cited, "source_boundaries": {}})
+    return GeneratedComparisonAnalysis(
+        consensus=consensus,
+        divergences=divergences,
+        unique_insights=unique_insights,
+        synthesis=synthesis,
+    )
+
+
+async def _generate_comparison_analysis(
+    generator: ComparisonGenerator | None,
+    prompt: str,
+    fallback: GeneratedComparisonAnalysis,
+    source_keys: set[str],
+) -> GeneratedComparisonAnalysis:
+    """Use a model when available, but keep comparison evidence independently validated."""
+    if generator is None or not source_keys:
+        return fallback
+    try:
+        raw = await asyncio.to_thread(generator.generate, prompt, _comparison_schema(GeneratedComparisonAnalysis))
+        parsed = GeneratedComparisonAnalysis.model_validate_json(raw)
+        return _validate_generated_analysis(parsed, source_keys)
+    except Exception as exc:  # noqa: BLE001 - deterministic synthesis remains available
+        logger.warning("Tafsir comparison analysis failed; using deterministic evidence: %s", exc)
+        return fallback
+
+
+def _get_comparison_generator() -> ComparisonGenerator | None:
+    """Return the configured synthesis model, or None for offline operation."""
+    if not os.getenv("GEMINI_API_KEY"):
+        return None
+    return GeminiComparisonGenerator(os.getenv("MODEL_NAME", "gemini-2.5-flash"))
+
+
+async def build_tafsir_comparison(
+    request: TafsirComparisonRequest,
+    source: TafsirSource | None = None,
+    generator: ComparisonGenerator | None = None,
+) -> TafsirComparisonResponse:
+    """Retrieve, cluster, attribute, and synthesize interpretations for one ayah."""
+    refs = parse_reference(request.reference)
+    if len(refs) != 1:
+        raise InvalidReference("Tafsir comparison accepts exactly one ayah reference, not a range.")
+    ref = refs[0]
+    keys = resolve_comparison_tafsirs(request.tafsirs)
+    language = (request.language or DEFAULT_TRANSLATION_LANGUAGE).strip().casefold()
+    ayah = await assemble_ayah(
+        ref,
+        keys,
+        language,
+        allow_language_fallback=request.allow_language_fallback,
+        source=source,
+    )
+    sources = sorted(
+        [
+            ComparisonSource(
+                key=tafsir.key,
+                name=tafsir.name,
+                author=tafsir.author,
+                language=tafsir.language,
+                era=TAFSIR_REGISTRY[tafsir.key].era,
+                death_year_ah=TAFSIR_REGISTRY[tafsir.key].death_year_ah,
+                methodologies=list(TAFSIR_REGISTRY[tafsir.key].methodologies),
+                perspective=TAFSIR_REGISTRY[tafsir.key].perspective,
+                text=tafsir.text,
+                verse_range=tafsir.verse_range,
+            )
+            for tafsir in ayah.tafsirs
+        ],
+        key=lambda item: (item.death_year_ah is None, item.death_year_ah or 0, item.key),
+    )
+    sources_by_key = {item.key: item for item in sources}
+    boundaries = {item.key: (item.verse_range or ref.key) for item in sources}
+    clusters = _cluster_comparison_sources(sources, request.similarity_threshold)
+    consensus = _build_comparison_consensus(clusters, sources_by_key)
+    divergences = _build_comparison_divergences(clusters)
+    insights = _build_comparison_insights(clusters)
+    fallback = GeneratedComparisonAnalysis(
+        consensus=consensus,
+        divergences=divergences,
+        unique_insights=insights,
+        synthesis=_fallback_comparison_synthesis(sources, ayah.unavailable, consensus, divergences, insights),
+    )
+    analysis = await _generate_comparison_analysis(
+        generator,
+        _comparison_prompt(ayah, sources, consensus, divergences, insights),
+        fallback,
+        set(sources_by_key),
+    )
+
+    consensus = [
+        item.model_copy(update={"source_boundaries": _boundaries_for(item.source_keys, sources_by_key, ref.key)})
+        for item in analysis.consensus
+    ]
+    divergences = [
+        divergence.model_copy(
+            update={
+                "positions": [
+                    position.model_copy(
+                        update={"source_boundaries": _boundaries_for(position.source_keys, sources_by_key, ref.key)}
+                    )
+                    for position in divergence.positions
+                ]
+            }
+        )
+        for divergence in analysis.divergences
+    ]
+    insights = [
+        item.model_copy(update={"source_boundaries": _boundaries_for(item.source_keys, sources_by_key, ref.key)})
+        for item in analysis.unique_insights
+    ]
+    synthesis = analysis.synthesis.model_copy(
+        update={"source_boundaries": _boundaries_for(analysis.synthesis.cited_source_keys, sources_by_key, ref.key)}
+    )
+
+    return TafsirComparisonResponse(
+        reference=request.reference,
+        language=language,
+        ayah=ayah,
+        sources=sources,
+        unavailable=ayah.unavailable,
+        clusters=clusters,
+        consensus=consensus,
+        divergences=divergences,
+        unique_insights=insights,
+        synthesis=synthesis,
+        boundaries=boundaries,
+        uncertain=not consensus,
+        provenance=ComparisonProvenance(
+            ruleset_version=COMPARISON_RULESET_VERSION,
+            algorithm="deterministic_weighted_token_cosine",
+            similarity_threshold=request.similarity_threshold,
+            boundary_policy=COMPARISON_BOUNDARY_POLICY,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1783,6 +2564,10 @@ async def list_tafsir_sources() -> list[TafsirSourceInfo]:
             name=work.name,
             author=work.author,
             languages=work.languages,
+            era=work.era,
+            death_year_ah=work.death_year_ah,
+            methodologies=list(work.methodologies),
+            perspective=work.perspective,
         )
         for work in TAFSIR_REGISTRY.values()
     ]
@@ -1837,5 +2622,30 @@ async def get_tafsir_batch(request: TafsirBatchRequest) -> TafsirBatchResponse:
         "Batch tafsir lookup: %d results, %d errors",
         len(response.results),
         len(response.errors),
+    )
+    return response
+
+
+@router.post("/tafsir/compare", response_model=TafsirComparisonResponse)
+async def compare_tafsir(body: TafsirComparisonRequest) -> TafsirComparisonResponse:
+    """Compare one ayah across at least ten named tafsir works, citing source boundaries."""
+    try:
+        response = await build_tafsir_comparison(body)
+    except InvalidReference as exc:
+        raise APIException(
+            status_code=400,
+            detail=str(exc),
+            hint=(
+                f"Provide exactly one ayah reference and at least {MIN_COMPARISON_TAFSIRS} distinct "
+                "tafsir keys from GET /tafsir/sources."
+            ),
+        ) from exc
+
+    logger.info(
+        "Tafsir comparison %s (%s) -> %d works, %d clusters",
+        body.reference,
+        body.language,
+        len(response.sources),
+        len(response.clusters),
     )
     return response
