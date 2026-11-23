@@ -13,7 +13,7 @@
 # and update buildCommand/startCommand to use this image.
 # -----------------------------------------------
 
-FROM python:3.12-slim AS base
+FROM python:3.11.14-slim AS base
 
 # Prevent .pyc files and force unbuffered stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -25,11 +25,13 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc && \
     rm -rf /var/lib/apt/lists/*
 
-# --- Dependency layer (cached unless requirements.txt changes) ---
+# --- Dependency layer (cached unless the hash-locked manifest changes) ---
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock .
+COPY requirements-installer.lock .
+RUN pip install --no-cache-dir --require-hashes -r requirements-installer.lock && \
+    pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Remove build tools — nothing else compiles at runtime
 RUN apt-get purge -y --auto-remove gcc

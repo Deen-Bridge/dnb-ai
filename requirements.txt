@@ -1,4 +1,8 @@
-fastapi==0.115.12
+#
+# Editable runtime input manifest. Generate/install the exact, hash-verified
+# deployment dependency set with `make lock` / `requirements.lock`.
+#
+fastapi==0.165.0
 uvicorn==0.34.3
 pydantic-settings>=2.0.0
 google-generativeai==0.8.3
@@ -9,11 +13,11 @@ numpy==2.2.4
 redis>=5.0.0,<6.0.0
 httpx==0.28.1
 slowapi==0.1.9
-python-multipart==0.0.20
+python-multipart==0.0.31
 firebase-admin>=6.6.0,<8.0.0
-prometheus-fastapi-instrumentator>=7.0.0,<8.0.0
+prometheus-fastapi-instrumentator>=8.1.0,<9.0.0
 prometheus-client>=0.20.0
 hijridate>=2.6.0
 tzdata
-Pillow==11.2.1
+Pillow==13.0.0
 requests>=2.33.0,<3.0.0

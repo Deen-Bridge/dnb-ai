@@ -1,0 +1,2 @@
+# Isolated performance-test tooling; kept separate from pytest 9 development tools.
+locust==2.47.0

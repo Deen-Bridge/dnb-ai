@@ -47,6 +47,9 @@ venv_ci/
 
 # Logs
 *.log 
+build-provenance.json
+dependency-audit-*.json
+sbom-*.cdx.json
 # Scholar-review export (contains user questions)
 data/review/
 venv/

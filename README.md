@@ -133,7 +133,7 @@ Offline demo (no API key, model mocked): `pytest -q tests/test_learning.py`.
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.11.14 (see `.python-version`)
 - A [Google Gemini API key](https://ai.google.dev/)
 
 ### Setup
@@ -145,7 +145,8 @@ cd dnb-ai
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 
-pip install -r requirements.txt
+pip install --require-hashes -r requirements-installer.lock
+pip install --require-hashes -r requirements.lock
 
 # Copy environment template and add your API key
 cp .env.example .env
@@ -155,11 +156,21 @@ echo "GEMINI_API_KEY=your_api_key_here" > .env
 uvicorn main:app --reload
 ```
 
+For development tooling:
+
+```bash
+pip install --require-hashes -r requirements-dev.lock
+```
+
 The API runs at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
+
+Runtime and development installs use the committed hash-verified lockfiles. See
+[`docs/dependency-provenance.md`](docs/dependency-provenance.md) for lock refresh,
+vulnerability scanning, SBOM, rebuild comparison, and release provenance.
 
 ### Docker
 
-The included `Dockerfile` produces a production-ready image with Python 3.12,
+The included `Dockerfile` produces a production-ready image with Python 3.11.14,
 non-root user, cached dependency layer, and a health-check on `/ping`.
 
 ```bash
@@ -198,7 +209,7 @@ services:
 | `GEMINI_API_KEY` | Google Gemini API key | — |
 | `SERVICE_API_KEY` | Shared secret for API-key auth; required in production. Clients must send `X-API-Key` header. | — |
 | `AUTH_DISABLED` | Set to `true` to skip API-key auth (local development only) | `false` |
-| `MODEL_NAME` | Gemini model used by the application | gemini-2.5-flash |
+| `MODEL_NAME` | Gemini model used by experiment-backed chat | gemini-1.5-flash |
 | `TEMPERATURE` | Model temperature | 0.7 |
 | `TOP_P` | Nucleus sampling value | 0.8 |
 | `TOP_K` | Top-K sampling value | 40 |

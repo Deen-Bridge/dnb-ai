@@ -1,4 +1,4 @@
-.PHONY: dev run install lint test clean
+.PHONY: dev run install install-dev lock lint test clean
 
 dev:
 	python3 -m uvicorn main:app --reload
@@ -7,7 +7,18 @@ run:
 	python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 install:
-	pip install -r requirements.txt
+	pip install --require-hashes -r requirements-installer.lock
+	pip install --require-hashes -r requirements.lock
+
+install-dev: install
+	pip install --require-hashes -r requirements-dev.lock
+
+lock:
+	pip-compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file requirements-installer.lock requirements-installer.txt
+	pip-compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file requirements.lock requirements.txt
+	pip-compile --generate-hashes --resolver=backtracking --allow-unsafe --constraint requirements.lock --output-file requirements-dev.lock requirements-dev.txt
+	pip-compile --generate-hashes --resolver=backtracking --allow-unsafe --constraint requirements.lock --output-file requirements-perf.lock requirements-perf.txt
+	pip-compile --generate-hashes --resolver=backtracking --allow-unsafe --constraint requirements.lock --output-file requirements-alignment.lock requirements-alignment.txt
 
 lint:
 	flake8 main.py stellar.py safety tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py retrieval scripts/build_index.py --max-line-length=120 --ignore=E501,W503

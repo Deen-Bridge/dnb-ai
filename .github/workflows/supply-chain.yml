@@ -1,0 +1,161 @@
+name: Dependency Lock, Audit, and Provenance
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-provenance:
+    name: Hash-locked dependency audit and rebuild
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up pinned Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements-installer.lock
+            requirements.lock
+            requirements-dev.lock
+            requirements-perf.lock
+            requirements-alignment.lock
+
+      - name: Install hash-locked runtime, build tools, and development tools
+        run: |
+          python -m pip install --require-hashes -r requirements-installer.lock
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install --require-hashes -r requirements-dev.lock
+
+      - name: Rebuild and compare dependency manifests
+        run: |
+          python -m venv /tmp/rebuild-a
+          /tmp/rebuild-a/bin/python -m pip install --require-hashes -r requirements-installer.lock
+          /tmp/rebuild-a/bin/python -m pip install --require-hashes -r requirements.lock
+          /tmp/rebuild-a/bin/python scripts/build_provenance.py \
+            --lock requirements.lock --output /tmp/provenance-a.json
+
+          python -m venv /tmp/rebuild-b
+          /tmp/rebuild-b/bin/python -m pip install --require-hashes -r requirements-installer.lock
+          /tmp/rebuild-b/bin/python -m pip install --require-hashes -r requirements.lock
+          /tmp/rebuild-b/bin/python scripts/build_provenance.py \
+            --lock requirements.lock --output /tmp/provenance-b.json
+
+          cmp /tmp/provenance-a.json /tmp/provenance-b.json
+          cp /tmp/provenance-a.json build-provenance.json
+          sha256sum build-provenance.json requirements.lock model_provenance.json
+
+      - name: Audit all dependency sets
+        shell: bash
+        run: |
+          set +e
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements.lock \
+            --format json --output dependency-audit-runtime.json
+          runtime_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-installer.lock \
+            --format json --output dependency-audit-installer.json
+          installer_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-dev.lock \
+            --format json --output dependency-audit-development.json
+          development_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-perf.lock \
+            --format json --output dependency-audit-performance.json
+          performance_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-alignment.lock \
+            --format json --output dependency-audit-alignment.json
+          alignment_status=$?
+          echo "runtime_audit_exit_code=$runtime_status"
+          echo "installer_audit_exit_code=$installer_status"
+          echo "development_audit_exit_code=$development_status"
+          echo "performance_audit_exit_code=$performance_status"
+          echo "alignment_audit_exit_code=$alignment_status"
+          if [ "$runtime_status" -ne 0 ] || [ "$installer_status" -ne 0 ] || [ "$development_status" -ne 0 ] || [ "$performance_status" -ne 0 ] || [ "$alignment_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Generate CycloneDX SBOMs
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements.lock \
+            --format cyclonedx-json --output sbom-runtime.cdx.json
+          runtime_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-installer.lock \
+            --format cyclonedx-json --output sbom-installer.cdx.json
+          installer_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-dev.lock \
+            --format cyclonedx-json --output sbom-development.cdx.json
+          development_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-perf.lock \
+            --format cyclonedx-json --output sbom-performance.cdx.json
+          performance_status=$?
+          pip-audit --no-deps --disable-pip --require-hashes -r requirements-alignment.lock \
+            --format cyclonedx-json --output sbom-alignment.cdx.json
+          alignment_status=$?
+          echo "runtime_sbom_exit_code=$runtime_status"
+          echo "installer_sbom_exit_code=$installer_status"
+          echo "development_sbom_exit_code=$development_status"
+          echo "performance_sbom_exit_code=$performance_status"
+          echo "alignment_sbom_exit_code=$alignment_status"
+          if [ "$runtime_status" -ne 0 ] || [ "$installer_status" -ne 0 ] || [ "$development_status" -ne 0 ] || [ "$performance_status" -ne 0 ] || [ "$alignment_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Retain lock, audit, SBOM, and provenance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-evidence-${{ github.sha }}
+          path: |
+            requirements-installer.lock
+            requirements.lock
+            requirements-dev.lock
+            requirements-perf.lock
+            requirements-alignment.lock
+            model_provenance.json
+            build-provenance.json
+            dependency-audit-runtime.json
+            dependency-audit-installer.json
+            dependency-audit-development.json
+            dependency-audit-performance.json
+            dependency-audit-alignment.json
+            sbom-runtime.cdx.json
+            sbom-installer.cdx.json
+            sbom-development.cdx.json
+            sbom-performance.cdx.json
+            sbom-alignment.cdx.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  attest-release-provenance:
+    name: Attest release provenance
+    if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: dependency-provenance
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified provenance
+        uses: actions/download-artifact@v4
+        with:
+          name: supply-chain-evidence-${{ github.sha }}
+          path: evidence
+
+      - name: Publish build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: evidence/build-provenance.json

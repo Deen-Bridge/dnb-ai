@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0.0",
+  "provider_sdk": {
+    "provider": "google",
+    "package": "google-generativeai",
+    "version": "0.8.3"
+  },
+  "models": {
+    "experiment_default": {
+      "id": "gemini-1.5-flash",
+      "status": "legacy_compatibility"
+    },
+    "telemetry_generation": {
+      "id": "gemini-2.5-flash",
+      "status": "approved"
+    },
+    "evaluation_judge": {
+      "id": "gemini-2.5-flash",
+      "status": "approved_optional"
+    },
+    "audio_transcription": {
+      "id": "gemini-2.0-flash",
+      "status": "approved"
+    },
+    "memory_extraction": {
+      "id": "gemini-2.5-flash-preview-05-20",
+      "status": "legacy_preview"
+    },
+    "optional_cost_estimates": {
+      "id": "gemini-2.5-pro",
+      "status": "approved_optional"
+    }
+  },
+  "optional_artifacts": {
+    "phoneme_ctc": {
+      "provider": "huggingface_hub",
+      "enabled_by_default": false,
+      "model_id_environment_variable": "ALIGNMENT_MODEL_ID",
+      "revision_environment_variable": "ALIGNMENT_MODEL_REVISION",
+      "revision_policy": "A full 40-character commit SHA is required; remote code execution is disabled."
+    }
+  },
+  "baselines": {
+    "prompts": "prompts/",
+    "safety_policy": "safety/policy.yaml",
+    "citations_evaluation": "data/eval/citations_eval.jsonl",
+    "islamic_qa_evaluation": "data/eval/islamic_qa_benchmark.jsonl",
+    "islamic_qa_metadata": "data/eval/islamic_qa_benchmark_metadata.json",
+    "islamic_qa_release_report": "data/eval/results_islamic_qa_benchmark.json",
+    "benchmark_specification": "data/eval/BENCHMARK_SPEC.md",
+    "quran_reference_index": "data/quran/surah_index.json"
+  },
+  "provider_weight_note": "Gemini model weights are provider-managed and are not downloadable artifacts in this repository. The model identifier, provider SDK version, prompts, evaluation datasets, and policy baselines are recorded and hashed for each build."
+}

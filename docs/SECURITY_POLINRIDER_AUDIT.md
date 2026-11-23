@@ -8,6 +8,7 @@
 
 ## Findings
 - **Zero PolinRider indicators detected**: No `runOn: "folderOpen"` tasks, no obfuscated `eval(atob(...))` tails in config files, and no suspicious binary font payloads.
+- Runtime and development dependencies are installed from committed hash-verified lockfiles. CI audits both sets and retains JSON scan results, CycloneDX SBOMs, and deterministic build provenance for 90 days; release provenance is attested to the source commit.
 
 ## Audit Limits & Remediation Policy
-- Static non-executing inspection only; third-party PyPI wheels should remain pinned and verified in CI (`#522`).
+- Static non-executing inspection only; third-party PyPI wheels are pinned and hash-verified by `requirements.lock` and `requirements-dev.lock` in CI and deployment.

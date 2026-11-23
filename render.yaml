@@ -2,12 +2,16 @@ services:
   - type: web
     name: deenbridge-ai
     env: python  # To switch to Docker: replace with `runtime: docker` and remove buildCommand/startCommand
-    buildCommand: pip install -r requirements.txt
+    buildCommand: python -m pip install --require-hashes -r requirements-installer.lock && python -m pip install --require-hashes -r requirements.lock
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: GEMINI_API_KEY
         sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.14
+      - key: MODEL_NAME
+        value: gemini-1.5-flash
       - key: SERVICE_API_KEY
         sync: false
       - key: TRUST_PROXY_HEADERS

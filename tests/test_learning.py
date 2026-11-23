@@ -486,7 +486,7 @@ class TestGenerateLoop:
 
 class TestRoute:
     def test_route_is_registered(self):
-        paths = {route.path for route in app.routes}
+        paths = set(app.openapi()["paths"])
         assert "/learning-path" in paths
 
     def test_post_returns_200_and_valid_path(self, client_with_generator):

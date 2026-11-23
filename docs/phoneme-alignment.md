@@ -71,7 +71,10 @@ CTC peaks, and acoustic quality limit boundary precision.
 
 ## Optional audio recognition
 
-Install the regular dependencies and `pip install -r requirements-alignment.txt`.
+Install the regular hash-locked dependencies and the optional hash-locked model
+runtime with `pip install --require-hashes -r requirements-alignment.lock`.
+`requirements-alignment.txt` is only the editable input manifest; regenerate
+its lock with `make lock`.
 Configure `ALIGNMENT_MODEL_ID`, a full 40-character checkpoint commit SHA in
 `ALIGNMENT_MODEL_REVISION`, and `ALIGNMENT_MODEL_QIRAAT` (a comma-separated list
 of the readings that checkpoint actually supports). Model and tokenizer load

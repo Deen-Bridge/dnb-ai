@@ -33,7 +33,7 @@ Raise `DomainError` from `errors.py` for expected application failures, with an 
 
 ### Prerequisites
 
-1. Python 3.11 or higher
+1. Python 3.11.14 (the version pinned in `.python-version`)
 2. pip package manager
 3. Google AI API key (for Gemini)
 
@@ -48,11 +48,12 @@ cd dnb-ai
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the pinned installer and hash-verified runtime dependencies
+pip install --require-hashes -r requirements-installer.lock
+pip install --require-hashes -r requirements.lock
 
-# Install the lint/type/test tooling CI runs
-pip install -r requirements-dev.txt
+# Install the hash-verified lint/type/test tooling CI runs
+pip install --require-hashes -r requirements-dev.lock
 
 # Create .env file from template
 cp .env.example .env
@@ -62,6 +63,12 @@ cp .env.example .env
 # Run the server
 uvicorn main:app --reload
 ```
+
+Edit `requirements.txt` or `requirements-dev.txt` as input manifests, then run
+`make lock` and commit the regenerated lockfiles. Do not change CI or Render to
+install directly from an unlocked source manifest. See
+[`docs/dependency-provenance.md`](docs/dependency-provenance.md) for the full
+workflow.
 
 ## Branching Strategy
 
