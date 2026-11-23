@@ -185,6 +185,9 @@ jobs:
       - name: Run container deployment contract tests (#880)
         run: pytest -q tests/test_container_deployment.py
 
+      - name: Run health, readiness, and degradation tests (#870)
+        run: pytest -q tests/test_health_readiness.py
+
   build-and-scan-image:
     name: Build, Scan and Verify Hardened Container (#880)
     runs-on: ubuntu-latest

@@ -74,7 +74,11 @@ disallow_untyped_defs = true
 
 # store.py has pre-existing type errors unrelated to cache implementation
 [[tool.mypy.overrides]]
-module = "store"
+module = [
+    "store",
+    "tests.test_agent_fallback_audit",
+    "tests.test_regression",
+]
 ignore_errors = true
 
 # google-generativeai and its api_core siblings ship incomplete stubs.

@@ -98,11 +98,16 @@ def test_main_py_declares_liveness_and_readiness_probes() -> None:
                     and isinstance(decorator.func, ast.Attribute)
                     and decorator.func.attr in ("get", "post")
                 ):
-                    if decorator.args and isinstance(decorator.args[0], ast.Constant):
+                    if (
+                        decorator.args
+                        and isinstance(decorator.args[0], ast.Constant)
+                        and isinstance(decorator.args[0].value, str)
+                    ):
                         route_paths.add(decorator.args[0].value)
 
     assert "/ping" in route_paths, "/ping liveness probe must be declared in main.py"
-    assert "/health" in route_paths, "/health readiness probe must be declared in main.py"
+    assert "/health" in route_paths, "/health liveness probe must be declared in main.py"
+    assert "/ready" in route_paths, "/ready readiness probe must be declared in main.py"
 
 
 def test_ci_workflow_builds_and_scans_same_docker_image() -> None:

@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "")
+DEFAULT_LOCAL_QUEUE_MAX_SIZE = 1000
 
 ITEM_KEY = "review:item:{item_id}"
 PENDING_INDEX = "review:pending"
@@ -114,12 +115,16 @@ class ReviewItem(BaseModel):
 class ReviewStore:
     """Persists review items. Redis-backed when configured, in-memory otherwise."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_local_size: int | None = None) -> None:
         # Typed Any: only ever touched behind the _use_redis flag below.
         self._redis: Any = None
         self._local: dict[str, ReviewItem] = {}
         self._use_redis = False
         self._degraded = False
+        self.max_local_size = max_local_size or int(
+            os.getenv("REVIEW_QUEUE_LOCAL_MAX_SIZE", str(DEFAULT_LOCAL_QUEUE_MAX_SIZE))
+        )
+        self.overflow_drops = 0
 
         if REDIS_URL and _redis_available:
             try:
@@ -160,9 +165,9 @@ class ReviewStore:
                     await pipe.execute()
             except Exception as exc:  # noqa: BLE001 - degrade, never drop
                 self._mark_degraded("add", exc)
-                self._local[item.id] = item
+                self._buffer_local(item)
         else:
-            self._local[item.id] = item
+            self._buffer_local(item)
         logger.info(
             "Queued answer %s for scholar review (confidence=%.2f)",
             item.id,
@@ -265,9 +270,9 @@ class ReviewStore:
                     await pipe.execute()
             except Exception as exc:  # noqa: BLE001 - a recorded verdict is not lost
                 self._mark_degraded("record_verdict", exc)
-                self._local[item.id] = item
+                self._buffer_local(item)
         else:
-            self._local[item.id] = item
+            self._buffer_local(item)
 
         logger.info("Review %s recorded: %s", item.id, verdict.value)
         return item
@@ -285,6 +290,8 @@ class ReviewStore:
                     "reviewed": reviewed,
                     "durable": True,
                     "degraded": False,
+                    "overflow_drops": self.overflow_drops,
+                    "max_local_size": self.max_local_size,
                 }
         counts: dict[str, int] = {}
         for item in self._local.values():
@@ -295,10 +302,13 @@ class ReviewStore:
             "by_status": counts,
             "durable": False,
             "degraded": self._degraded,
+            "overflow_drops": self.overflow_drops,
+            "max_local_size": self.max_local_size,
         }
 
     async def clear(self) -> None:
         """Drop everything. Used by tests; never called by the service."""
+        self.overflow_drops = 0
         if self._use_redis:  # pragma: no cover - not exercised offline
             ids = await self._redis.zrange(PENDING_INDEX, 0, -1)
             ids += await self._redis.zrange(REVIEWED_INDEX, 0, -1)
@@ -309,6 +319,35 @@ class ReviewStore:
             self._local.clear()
 
     # -- internals ----------------------------------------------------------
+
+    def _buffer_local(self, item: ReviewItem) -> None:
+        """Buffer an item in memory, enforcing strict size limits and explicit overflow handling."""
+        if len(self._local) >= self.max_local_size and item.id not in self._local:
+            self.overflow_drops += 1
+            try:
+                from readiness import mark_degraded, readiness_registry
+
+                readiness_registry.record_review_queue_overflow()
+                mark_degraded("review-queue-overflow")
+            except ImportError:
+                pass
+            # Bounded memory: evict the oldest pending/reviewed item
+            oldest_id = min(self._local.keys(), key=lambda k: self._local[k].created_at)
+            del self._local[oldest_id]
+            logger.warning(
+                "ReviewStore local buffer capacity (%d) reached; dropped oldest item %s",
+                self.max_local_size,
+                oldest_id,
+            )
+        self._local[item.id] = item
+        if self._degraded:
+            try:
+                from readiness import mark_degraded, readiness_registry
+
+                readiness_registry.record_redis_fallback(True)
+                mark_degraded("redis-unavailable")
+            except ImportError:
+                pass
 
     def _mark_degraded(self, operation: str, exc: Exception) -> None:
         """Record that Redis failed, logging the first failure loudly.
@@ -329,6 +368,13 @@ class ReviewStore:
             self._degraded = True
         else:
             logger.warning("Review queue Redis %r failed again: %s", operation, exc)
+        try:
+            from readiness import mark_degraded, readiness_registry
+
+            readiness_registry.record_redis_fallback(True)
+            mark_degraded("redis-unavailable")
+        except ImportError:
+            pass
 
     @staticmethod
     def _deserialize(raw: str | None) -> ReviewItem | None:

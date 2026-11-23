@@ -151,6 +151,27 @@ class Settings(BaseSettings):
     transcript_whisper_model: str = Field(default="base")
     transcript_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
 
+    # Production Health & Readiness Settings (AI-094 / Issue #870)
+    require_redis: bool = Field(
+        default=False,
+        description="Mandate Redis availability; when true, Redis outage marks the service not_ready (503) instead of degraded (200)",
+    )
+    probe_cache_ttl_seconds: float = Field(
+        default=5.0,
+        ge=0.1,
+        description="TTL in seconds for cached dependency readiness probe results",
+    )
+    probe_timeout_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        description="Hard deadline in seconds for executing a single dependency probe",
+    )
+    review_queue_local_max_size: int = Field(
+        default=1000,
+        ge=10,
+        description="Maximum item capacity of the in-memory fallback review queue when Redis is down",
+    )
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):

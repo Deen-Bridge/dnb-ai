@@ -168,11 +168,24 @@ def embed_text(text: str) -> np.ndarray:
             model="models/text-embedding-004",
             content=text,
         )
+        try:
+            from readiness import readiness_registry
+
+            readiness_registry.record_embedding_success()
+        except ImportError:
+            pass
         return np.array(result["embedding"], dtype=np.float32)
-    except Exception:
+    except Exception as exc:
         # Deterministic local fallback so the semantic cache still functions
         # offline and in tests (identical prompts yield identical vectors) when
         # no embedding model/API key is available.
+        try:
+            from readiness import mark_degraded, readiness_registry
+
+            readiness_registry.record_embedding_fallback(exc)
+            mark_degraded("local-embedding")
+        except ImportError:
+            pass
         return _local_embedding(text)
 
 

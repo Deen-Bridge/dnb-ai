@@ -57,8 +57,9 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `DELETE` | `/chat/{chat_id}` | Delete a chat session |
 | `GET` | `/memory/{user_id}` | Retrieve a stored user profile (transparency) |
 | `DELETE` | `/memory/{user_id}` | Completely erase a stored user profile |
-| `GET` | `/ping` | Trivial liveness check (always returns 200) |
-| `GET` | `/health` | Structured health check - status, version and dependency checks. Returns 200 if all checks pass, 503 otherwise |
+| `GET` | `/ping` | Trivial container liveness check (always returns 200) |
+| `GET` | `/health` | Process liveness check - constant-time, zero external network calls; returns 200 whenever process is alive |
+| `GET` | `/ready` | Traffic readiness probe - dependency criticality checks (200 ready/degraded, 503 not_ready) |
 | `GET` | `/stellar/info` | Stellar network and passphrase, USDC issuer, and supported AI features |
 | `POST` | `/stellar/usdc/convert` | Convert USDC to stroops or stroops to USDC |
 | `POST` | `/stellar/fee-bump/explain` | Decode and explain a fee-bump transaction envelope (offline; never signs or submits) |
@@ -298,6 +299,35 @@ services:
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+| `REQUIRE_REDIS` | Require Redis for shared multi-instance state; outage reports `not_ready` (503) | `false` |
+| `PROBE_CACHE_TTL_SECONDS` | Cache TTL in seconds for readiness dependency probes | `5.0` |
+| `PROBE_TIMEOUT_SECONDS` | Hard timeout in seconds for executing a single readiness probe | `1.0` |
+| `REVIEW_QUEUE_LOCAL_MAX_SIZE` | Maximum capacity of in-memory fallback review queue when Redis is down | `1000` |
+
+### Production Health, Readiness & Dependency Degradation
+
+See [docs/HEALTH_AND_READINESS.md](docs/HEALTH_AND_READINESS.md) for complete specifications, reason codes, and architecture decisions.
+
+The service decouples process vitality from traffic readiness to ensure truthful health signals and prevent cascading restart loops:
+
+- **Liveness (`GET /health`)**: Constant-time check verifying that the Python process and event loop can answer HTTP requests. Makes **zero** external network calls (no Redis, no model providers) and returns HTTP 200 during downstream provider or cache outages.
+- **Readiness (`GET /ready`)**: Evaluates whether the instance can serve production traffic based on explicit dependency criticality. Returns HTTP 200 for `ready` and `degraded` (functional with fallbacks active) and HTTP 503 for `not_ready` (critical configuration or dependency outage). Probes are bounded by timeouts, cached with single-flight concurrency deduplication, and **never spend paid generation tokens**.
+
+#### Dependency Criticality Summary
+
+| Dependency | Criticality | Outage Behavior | Readiness Impact | HTTP Status |
+|:---|:---|:---|:---|:---|
+| **Configuration** (`GEMINI_API_KEY`, `SERVICE_API_KEY`) | **REQUIRED** | Production fails fast at boot; outside production reports `config_missing` | `not_ready` | **503** |
+| **Primary LLM** (Gemini) | **REQUIRED** | Passive health tracking; falls back to secondary provider if available | `degraded` (failover active)<br>`not_ready` (all down) | **200** (degraded)<br>**503** (all down) |
+| **Redis** | **REQUIRED** (`REQUIRE_REDIS=true` or multi-instance) | Outage breaks multi-instance rate limits and state sharing | `not_ready` (`redis_required_unreachable`) | **503** |
+| **Redis** | **OPTIONAL** (`REQUIRE_REDIS=false`, single-instance) | Gracefully falls back to in-memory buffers (bounded by `REVIEW_QUEUE_LOCAL_MAX_SIZE`) | `degraded` (`redis_degraded_in_memory`) | **200** |
+| **Embedding Provider** (`text-embedding-004`) | **OPTIONAL** | Semantic cache falls back to deterministic local SHA-256 embeddings | `degraded` (`embedding_degraded_local`) | **200** |
+
+#### Signal Usage & Orchestration Recommendation
+
+- **Render `healthCheckPath` stays on `/health` (Liveness)**: Render restarts containers when `healthCheckPath` fails. Because restarts cannot fix external provider outages or Redis network blips, pointing Render to a readiness check would trigger destructive restart loops that tear down working fallback paths.
+- **Load Balancers, Gateways & Incident Alerting use `/ready` (Readiness)**: Load balancers (e.g. Cloudflare, AWS ALB, NGINX) should route traffic based on `/ready`. Alert with **Warning (P3)** on HTTP 200 with `"status": "degraded"`, and alert with **Critical (P1)** on HTTP 503 (`"status": "not_ready"`).
+- **Additive `X-Degraded` Header**: Requests served via fallback paths (e.g. local embeddings or in-memory queues) emit `X-Degraded: <reasons>`.
 
 ### Multilingual support (language field)
 

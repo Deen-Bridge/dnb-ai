@@ -110,6 +110,13 @@ from model_router import router as model_routing_router
 from page_analysis import router as page_analysis_router
 from query_optimizer import router as query_optimizer_router
 from quran_recitation import router as quran_recitation_router
+from readiness import (
+    ReadinessResponse,
+    _current_degraded_reasons,
+    get_current_degraded_reasons,
+    readiness_registry,
+    validate_startup_configuration,
+)
 from reasoning_chains import router as reasoning_router
 from reformulation import router as reformulation_router
 from research_orchestration import router as research_orchestration_router
@@ -382,6 +389,8 @@ if not AUTH_DISABLED and not SERVICE_API_KEY:
             "SERVICE_API_KEY must be set in production. Set AUTH_DISABLED=true to run without authentication locally."
         )
     logger.warning("SERVICE_API_KEY is not set; authenticated endpoints will reject all requests.")
+
+validate_startup_configuration()
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -661,9 +670,7 @@ class AdhkarProvenance(BaseModel):
     data_version: str = Field(..., description="Semantic version of the bundled adhkar data file.")
     schema_version: int = Field(..., description="Integer schema revision of the data file format.")
     source: str = Field(..., description="Human-readable description of the upstream source(s).")
-    data_last_updated: str = Field(
-        ..., description="ISO-8601 date the corpus content was last reviewed or changed."
-    )
+    data_last_updated: str = Field(..., description="ISO-8601 date the corpus content was last reviewed or changed.")
     loaded_at: str = Field(
         ...,
         description="UTC ISO-8601 timestamp at which the corpus was loaded into memory.",
@@ -749,6 +756,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def degraded_header_middleware(request: Request, call_next: Any) -> Response:
+    """Additive response header marking fallback/degraded paths."""
+    token = _current_degraded_reasons.set([])
+    try:
+        response: Response = await call_next(request)
+        reasons = get_current_degraded_reasons()
+        if reasons:
+            response.headers["X-Degraded"] = ", ".join(sorted(set(reasons)))
+        return response
+    finally:
+        _current_degraded_reasons.reset(token)
 
 
 # Response Models
@@ -1326,6 +1347,7 @@ async def send_message_with_retry(
                 message,
                 **kwargs,
             )
+            readiness_registry.record_llm_outcome(True)
             return response
         except (TimeoutError, ServiceUnavailable, DeadlineExceeded) as exc:
             if hasattr(chat_session, "history") and chat_session.history is not None:
@@ -1334,6 +1356,7 @@ async def send_message_with_retry(
 
             attempt += 1
             if attempt > max_retries:
+                readiness_registry.record_llm_outcome(False)
                 logger.warning(
                     "Gemini send_message_async failed after %d retries: %s",
                     max_retries,
@@ -3377,35 +3400,31 @@ async def delete_memory(
     return {"message": "Memory not found"}
 
 
-def get_health_status(deep: bool = False) -> tuple[dict, int]:
-    key_configured = bool(GEMINI_API_KEY)
-    checks = {"gemini_api_key_configured": "ok" if key_configured else "fail"}
+def get_health_status(deep: bool = False) -> tuple[dict[str, Any], int]:
+    key_configured = bool(GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here")
+    checks = {
+        "process": "ok",
+        "gemini_api_key_configured": "ok" if key_configured else "fail",
+    }
     if deep:
         checks["gemini_api_reachable"] = "skipped"
-    if key_configured:
-        return {"status": "ok", "version": app.version, "checks": checks}, 200
-    return {
-        "status": "unhealthy",
-        "version": app.version,
-        "checks": checks,
-        "failing_check": "gemini_api_key_configured",
-        "hint": "Configure the GEMINI_API_KEY environment variable with a valid Google Gemini API key.",
-    }, 503
+    return {"status": "ok", "version": app.version, "checks": checks}, 200
 
 
 @app.get(
     "/health",
     response_model=HealthResponse,
-    summary="Readiness probe",
+    summary="Process liveness probe",
     description=(
-        "Checks that `GEMINI_API_KEY` is configured. Returns 200 with `checks` when healthy, "
-        "or 503 with `failing_check` and a `hint` when it is not. `deep=true` reserves room "
-        "for upstream reachability checks (currently reported as 'skipped')."
+        "Constant-time liveness probe verifying process and event-loop vitality. "
+        "Performs NO network calls to external providers, Redis, or databases, guaranteeing "
+        "liveness does not fail during downstream provider or cache outages. "
+        "Returns 200 whenever the process can receive and respond to HTTP requests."
     ),
     tags=["observability"],
     responses={
         200: {
-            "description": "Service ready.",
+            "description": "Process is alive and event loop is responsive.",
             "content": {
                 "application/json": {
                     "example": {
@@ -3416,29 +3435,46 @@ def get_health_status(deep: bool = False) -> tuple[dict, int]:
                 }
             },
         },
-        503: {
-            "description": "Service not ready - see `failing_check` and `hint`.",
-            "model": HealthResponse,
-            "content": {
-                "application/json": {
-                    "example": {
-                        "status": "unhealthy",
-                        "version": "0.1.0",
-                        "checks": {"gemini_api_key_configured": "fail"},
-                        "failing_check": "gemini_api_key_configured",
-                        "hint": "Configure the GEMINI_API_KEY environment variable with a valid Google Gemini API key.",
-                    }
-                }
-            },
-        },
         422: _validation_error_response(),
     },
 )
 async def health(
-    deep: bool = Query(False, description="Ask for dependency reachability checks (currently skipped)."),
+    deep: bool = Query(
+        False,
+        description="Legacy parameter; reachability checks are reported as 'skipped' to maintain constant-time liveness.",
+    ),
 ) -> JSONResponse:
     body, code = get_health_status(deep=deep)
     return JSONResponse(content=body, status_code=code)
+
+
+@app.get(
+    "/ready",
+    response_model=ReadinessResponse,
+    summary="Traffic readiness probe",
+    description=(
+        "Evaluates whether this instance is ready to serve production traffic based on "
+        "explicit dependency criticality (configuration, primary LLM, Redis, embedding). "
+        "Returns 200 for 'ready' and 'degraded' (functional with active fallbacks), "
+        "and 503 for 'not_ready' (critical dependency or configuration failing). "
+        "Probes are bounded with timeouts, cached with single-flight protection, and never "
+        "call paid generation endpoints."
+    ),
+    tags=["observability"],
+    responses={
+        200: {
+            "description": "Instance is ready or operating in degraded mode with active fallbacks.",
+            "model": ReadinessResponse,
+        },
+        503: {
+            "description": "Instance is not ready to serve production traffic.",
+            "model": ReadinessResponse,
+        },
+    },
+)
+async def ready() -> JSONResponse:
+    payload, code = await readiness_registry.get_readiness()
+    return JSONResponse(content=payload.model_dump(), status_code=code)
 
 
 @app.get(
