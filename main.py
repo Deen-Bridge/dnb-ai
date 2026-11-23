@@ -71,6 +71,7 @@ from confidence import (
 )
 from config import get_settings
 from errors import APIException
+from faraid import router as faraid_router
 from feedback import (
     COMMENT_MAX_CHARS,
     FEEDBACK_TAXONOMY,
@@ -569,6 +570,8 @@ def _server_error_response(detail: str, hint: str) -> dict[str, Any]:
 # Stellar integration: read-only wallet and payment lookups plus deterministic
 # USDC arithmetic on the network the rest of Deen Bridge settles on.
 app.include_router(stellar_router)
+# Offline faraid (Islamic inheritance) calculator with exact fractions (#98).
+app.include_router(faraid_router)
 # Offline fee-bump envelope explainer: decodes, never signs or submits.
 app.include_router(stellar_fee_bump_router)
 # Offline Soroban contract event topic decoder: reads supplied XDR, never fetches.
