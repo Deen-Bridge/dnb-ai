@@ -127,21 +127,21 @@ class TestReleaseGateThresholds:
     """Release CI fails when required thresholds or reviewer sign-off are missing."""
 
     def test_passing_report_clears_gate(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(PASSING_REPORT)
         assert result["passed"] is True
         assert result["failures"] == []
 
     def test_gate_fails_on_low_composite_score(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(FAILING_REPORT_LOW_SCORE)
         assert result["passed"] is False
         assert any("composite_score" in f.lower() for f in result["failures"])
 
     def test_gate_fails_on_low_quran_diacritical_accuracy(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "metrics": {**PASSING_REPORT["metrics"], "quran_diacritical_accuracy": 0.97}}
         result = evaluate_release_gate(report)
@@ -149,35 +149,35 @@ class TestReleaseGateThresholds:
         assert any("quran" in f.lower() or "diacritical" in f.lower() for f in result["failures"])
 
     def test_gate_fails_without_scholar_sign_off(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(FAILING_REPORT_NO_SIGN_OFF)
         assert result["passed"] is False
         assert any("scholar" in f.lower() or "sign" in f.lower() for f in result["failures"])
 
     def test_gate_fails_on_missing_scholar_id(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "scholar_sign_off": True, "scholar_id": None}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_fails_on_low_fluency(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "metrics": {**PASSING_REPORT["metrics"], "fluency_score": 4.1}}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_fails_on_high_grammatical_error_rate(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "metrics": {**PASSING_REPORT["metrics"], "grammatical_error_rate": 0.06}}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_fails_on_low_arabic_comprehension(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {
             **PASSING_REPORT,
@@ -187,7 +187,7 @@ class TestReleaseGateThresholds:
         assert result["passed"] is False
 
     def test_gate_fails_on_missing_confidence_intervals(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "confidence_intervals": {}}
         result = evaluate_release_gate(report)
@@ -204,7 +204,7 @@ class TestHeldOutDataIsolation:
     """Held-out data is not used for prompt/model tuning."""
 
     def test_gate_requires_held_out_evaluation_type(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(FAILING_REPORT_NOT_HELD_OUT)
         assert result["passed"] is False
@@ -214,14 +214,14 @@ class TestHeldOutDataIsolation:
         )
 
     def test_gate_accepts_held_out_evaluation_type(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(PASSING_REPORT)
         assert PASSING_REPORT["evaluation_type"] == "held_out"
         assert result["passed"] is True
 
     def test_validation_set_type_also_rejected(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "evaluation_type": "validation"}
         result = evaluate_release_gate(report)
@@ -237,49 +237,49 @@ class TestVersionedArtifacts:
     """Reports record model, prompt, dataset, tokenizer, tool, and environment versions."""
 
     def test_gate_requires_model_id(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "model_id": None}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_requires_prompt_policy_version(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "prompt_policy_version": None}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_requires_dataset_version(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "dataset_version": None}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_requires_tokenizer_id(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "tokenizer_id": None}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_requires_tool_versions(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "tool_versions": {}}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_gate_requires_environment_info(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "environment": {}}
         result = evaluate_release_gate(report)
         assert result["passed"] is False
 
     def test_all_versions_present_passes(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(PASSING_REPORT)
         assert result["passed"] is True
@@ -294,7 +294,7 @@ class TestAdjudication:
     """Sacred-text mismatches and high-rating disagreements receive adjudication."""
 
     def test_unadjudicated_sacred_text_mismatch_blocks_release(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(FAILING_REPORT_SACRED_TEXT_MISMATCH)
         assert result["passed"] is False
@@ -303,13 +303,13 @@ class TestAdjudication:
         )
 
     def test_adjudicated_mismatch_does_not_block(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(REPORT_WITH_ADJUDICATED_MISMATCH)
         assert result["passed"] is True
 
     def test_unadjudicated_high_rating_disagreement_blocks(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {
             **PASSING_REPORT,
@@ -328,7 +328,7 @@ class TestAdjudication:
         )
 
     def test_adjudicated_disagreement_does_not_block(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {
             **PASSING_REPORT,
@@ -355,7 +355,7 @@ class TestRollbackCriteria:
     """Rollback criteria are defined for regressions."""
 
     def test_rollback_criteria_required_in_report(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {**PASSING_REPORT, "rollback_criteria": {}}
         result = evaluate_release_gate(report)
@@ -363,7 +363,7 @@ class TestRollbackCriteria:
         assert any("rollback" in f.lower() for f in result["failures"])
 
     def test_rollback_criteria_must_include_composite_drop_threshold(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {
             **PASSING_REPORT,
@@ -377,7 +377,7 @@ class TestRollbackCriteria:
         assert result["passed"] is False
 
     def test_rollback_criteria_must_include_quran_minimum(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         report = {
             **PASSING_REPORT,
@@ -391,13 +391,13 @@ class TestRollbackCriteria:
         assert result["passed"] is False
 
     def test_valid_rollback_criteria_passes(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(PASSING_REPORT)
         assert result["passed"] is True
 
     def test_gate_generates_rollback_recommendation_on_failure(self) -> None:
-        from scripts.benchmark_release_gate import evaluate_release_gate  # type: ignore[import]
+        from scripts.benchmark_release_gate import evaluate_release_gate
 
         result = evaluate_release_gate(FAILING_REPORT_LOW_SCORE)
         assert result["passed"] is False

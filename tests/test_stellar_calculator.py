@@ -182,4 +182,4 @@ class TestStellarNetworkGuardPreProviderAccess:
         with pytest.raises(ValueError, match="non-negative integer"):
             format_stroops_to_decimal(-1)
         with pytest.raises(ValueError, match="non-negative integer"):
-            format_stroops_to_decimal(True)  # type: ignore[arg-type]
+            format_stroops_to_decimal(True)

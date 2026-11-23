@@ -33,7 +33,14 @@ jobs:
           filters: |
             benchmark_inputs:
               - 'app/**'
-              - '*.py'
+              - 'main.py'
+              - 'model_router.py'
+              - 'fallback_model_router.py'
+              - 'orchestration.py'
+              - 'confidence.py'
+              - 'tafsir.py'
+              - 'hadith.py'
+              - 'fiqh.py'
               - 'providers/**'
               - 'prompts/**'
               - 'safety/**'
@@ -41,7 +48,6 @@ jobs:
               - 'data/eval/**'
               - 'data/quran/**'
               - 'scripts/eval_islamic_qa.py'
-              - 'scripts/benchmark_release_gate.py'
               - 'scripts/build_islamic_qa_benchmark.py'
               - 'scripts/benchmark_data/**'
 

@@ -71,7 +71,10 @@ def _git_commit() -> str:
 def _installed_distributions() -> list[dict[str, str]]:
     installed = []
     for distribution in metadata.distributions():
-        name = distribution.metadata.get("Name")
+        try:
+            name = distribution.metadata["Name"]
+        except KeyError:
+            continue
         if name:
             installed.append({"name": name.lower().replace("_", "-"), "version": distribution.version})
     return sorted(installed, key=lambda item: (item["name"], item["version"]))
