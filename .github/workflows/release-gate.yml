@@ -1,0 +1,43 @@
+name: Benchmark & Scholar Review Release Gate
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      eval_dir:
+        description: "Path to evaluation results directory"
+        required: false
+        default: "data/eval"
+      review_dir:
+        description: "Path to scholar review files directory"
+        required: false
+        default: "data/eval/reviews"
+
+jobs:
+  benchmark-gate:
+    name: Enforce held-out benchmark and scholar review gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run benchmark release gate verification
+        run: |
+          python scripts/verify_benchmark_gate.py \
+            --eval-dir "${{ github.event.inputs.eval_dir || 'data/eval' }}" \
+            --review-dir "${{ github.event.inputs.review_dir || 'data/eval/reviews' }}"
+
+      - name: Gate summary
+        if: failure()
+        run: |
+          echo "::error::Release gate FAILED. The following are required before release:"
+          echo "::error::1. Held-out benchmark results (not training-set evaluation)"
+          echo "::error::2. Confidence intervals in benchmark output"
+          echo "::error::3. Arabic benchmark results"
+          echo "::error::4. Scholar review sign-off file in data/eval/reviews/"
+          echo "::error::See data/eval/BENCHMARK_SPEC.md and data/eval/ARABIC_BENCHMARK_SPEC.md for requirements."
