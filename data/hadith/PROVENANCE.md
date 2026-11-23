@@ -131,6 +131,16 @@ sourced from standard rijāl references (Ibn Hajar's Taqrib al-Tahdhib,
 al-Dhahabi's Siyar and Mizan al-I'tidal). It is advisory and deliberately not
 exhaustive; see the file's own provenance header for details.
 
+The file is versioned (`version`, `owner`, `last_updated`, `provenance`,
+`disclaimer`) and every isnad analysis response reports that provenance
+(`dataset`, `version`, `source`, `narrator_count`, `disclaimer`) so outputs are
+grounded in a specific dataset revision. Names are matched after Unicode
+normalization that folds Arabic script and English transliterations; exact
+name/alias hits are high confidence, while an embedded-name fallback is reported
+as a lower-confidence `partial` match. Unknown narrators, partial matches, and
+missing generation labels set the response's `uncertain` flag. See
+`docs/NARRATOR_ISNAD_PROVENANCE.md` for the full contract and rollback notes.
+
 ## Update process
 
 Re-run the build script whenever the upstream data changes or a new tag is
