@@ -21,9 +21,7 @@ USDC_PRECISION = Decimal("0.0000001")
 _SECRET_KEY_RE = re.compile(r"\bS[A-Z2-7]{55}\b")
 _PUBLIC_KEY_RE = re.compile(r"^G[A-Z2-7]{55}$")
 _TX_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-_SEED_PHRASE_RE = re.compile(
-    r"\b(mnemonic|seed\s+phrase|12\s+words|24\s+words|private\s+key)\b", re.IGNORECASE
-)
+_SEED_PHRASE_RE = re.compile(r"\b(mnemonic|seed\s+phrase|12\s+words|24\s+words|private\s+key)\b", re.IGNORECASE)
 _INJECTION_RE = re.compile(
     r"(ignore\s+(all\s+)?(previous|prior)\s+instructions|system\s*prompt|send\s+funds\s+to)",
     re.IGNORECASE,
@@ -80,9 +78,7 @@ def format_stroops_to_decimal(stroops: int) -> str:
     """Convert integer stroops to a 7-decimal Stellar amount string."""
     if isinstance(stroops, bool) or not isinstance(stroops, int) or stroops < 0:
         raise ValueError("stroops must be a non-negative integer")
-    val = (Decimal(stroops) / STROOPS_PER_UNIT).quantize(
-        Decimal("0.0000001"), rounding=ROUND_HALF_UP
-    )
+    val = (Decimal(stroops) / STROOPS_PER_UNIT).quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP)
     return f"{val:.7f}"
 
 
@@ -97,9 +93,7 @@ def validate_public_key_format(public_key: str) -> str:
     """Validate 56-character Stellar G-address format or raise ValueError."""
     cleaned = (public_key or "").strip()
     if not _PUBLIC_KEY_RE.match(cleaned):
-        raise ValueError(
-            "Invalid Stellar public key format. Expected 56 characters starting with G."
-        )
+        raise ValueError("Invalid Stellar public key format. Expected 56 characters starting with G.")
     return cleaned
 
 
@@ -184,20 +178,14 @@ def guard_stellar_provider_access(
 
     clean_issuer = None if is_native else (issuer or "").strip()
     canonical_expected = CANONICAL_ASSET_ISSUERS.get(net_name, {}).get(norm_code)
-    is_canonical = is_allowed and (
-        (is_native and clean_issuer is None) or (clean_issuer == canonical_expected)
-    )
+    is_canonical = is_allowed and ((is_native and clean_issuer is None) or (clean_issuer == canonical_expected))
 
     norm_hash = (tx_hash or "").strip().lower()
     hash_ok = bool(_TX_HASH_RE.match(norm_hash))
     if not hash_ok:
         warnings.append("invalid_transaction_hash")
 
-    ledger_ok = (
-        isinstance(ledger_sequence, int)
-        and not isinstance(ledger_sequence, bool)
-        and ledger_sequence > 0
-    )
+    ledger_ok = isinstance(ledger_sequence, int) and not isinstance(ledger_sequence, bool) and ledger_sequence > 0
     if not ledger_ok:
         warnings.append("invalid_ledger_sequence")
 
@@ -213,11 +201,7 @@ def guard_stellar_provider_access(
         warnings.append("testnet_environment_not_real_funds")
 
     valid = (
-        is_allowed
-        and hash_ok
-        and ledger_ok
-        and amount_ok
-        and ("untrusted_metadata_injection_blocked" not in warnings)
+        is_allowed and hash_ok and ledger_ok and amount_ok and ("untrusted_metadata_injection_blocked" not in warnings)
     )
 
     details: dict[str, Any] = {

@@ -7,9 +7,9 @@ import pytest
 from multimodal_budget import (
     DEFAULT_MODALITY_BUDGETS,
     ModalityBudgetConfig,
-    MultimodalBudgetError,
     ModalityType,
     MultimodalBudgetEnforcer,
+    MultimodalBudgetError,
     sanitize_multimodal_extracted_content,
 )
 

@@ -15,12 +15,42 @@ on:
         required: false
         default: "data/eval/results_islamic_qa_benchmark.json"
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   benchmark-gate:
     name: Benchmark Release Gate (AI-102)
     runs-on: ubuntu-latest
 
     steps:
+      - name: Detect benchmark-affecting changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            benchmark_inputs:
+              - 'app/**'
+              - 'main.py'
+              - 'model_router.py'
+              - 'fallback_model_router.py'
+              - 'orchestration.py'
+              - 'confidence.py'
+              - 'tafsir.py'
+              - 'hadith.py'
+              - 'fiqh.py'
+              - 'providers/**'
+              - 'prompts/**'
+              - 'safety/**'
+              - 'retrieval/**'
+              - 'data/eval/**'
+              - 'data/quran/**'
+              - 'scripts/eval_islamic_qa.py'
+              - 'scripts/build_islamic_qa_benchmark.py'
+              - 'scripts/benchmark_data/**'
+
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -62,7 +92,9 @@ jobs:
           fi
 
       - name: Run release gate evaluation
-        if: steps.check_report.outputs.report_exists == 'true'
+        if: >-
+          steps.check_report.outputs.report_exists == 'true' &&
+          (github.event_name != 'pull_request' || steps.changes.outputs.benchmark_inputs == 'true')
         run: |
           python scripts/benchmark_release_gate.py \
             "${{ steps.check_report.outputs.report_path }}"
@@ -70,7 +102,10 @@ jobs:
           PYTHONPATH: "."
 
       - name: Upload gate result as artifact
-        if: always() && steps.check_report.outputs.report_exists == 'true'
+        if: >-
+          always() &&
+          steps.check_report.outputs.report_exists == 'true' &&
+          (github.event_name != 'pull_request' || steps.changes.outputs.benchmark_inputs == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-gate-result
@@ -84,9 +119,13 @@ jobs:
           script: |
             const fs = require('fs');
             const reportPath = '${{ steps.check_report.outputs.report_path }}';
+            const gateApplicable = '${{ steps.changes.outputs.benchmark_inputs }}' === 'true';
             let summary = '### Benchmark Release Gate (AI-102)\n\n';
 
-            if ('${{ steps.check_report.outputs.report_exists }}' !== 'true') {
+            if (!gateApplicable) {
+              summary += '> **Not applicable** — this PR does not change benchmark-affecting inputs. ';
+              summary += 'The checked-in calibration report is not treated as release evidence.\n';
+            } else if ('${{ steps.check_report.outputs.report_exists }}' !== 'true') {
               summary += '> **Skipped** — no benchmark report present. ';
               summary += 'If this PR changes model, prompt, or evaluation logic, ';
               summary += 'run `python scripts/eval_islamic_qa.py` and commit the report.\n';
