@@ -501,6 +501,22 @@ async def review_stats(x_review_token: str | None = Header(None)) -> dict[str, A
     return await get_review_store().stats()
 
 
+@router.post("/review/reconcile")
+async def reconcile_spool(x_review_token: str | None = Header(None)) -> dict[str, Any]:
+    """Reconcile locally spooled items into Redis without duplicates."""
+    require_reviewer(x_review_token)
+    store = get_review_store()
+    reconciled = await store.reconcile_spool()
+    stats = await store.stats()
+    return {
+        "status": "ok",
+        "reconciled": reconciled,
+        "remaining_spool_size": stats.get("spool", {}).get("size", 0),
+        "durable": stats.get("durable", False),
+        "degraded": stats.get("degraded", False),
+    }
+
+
 @router.get("/review/{item_id}", response_model=ReviewItem)
 async def get_item(item_id: str, x_review_token: str | None = Header(None)) -> ReviewItem:
     require_reviewer(x_review_token)

@@ -41,9 +41,10 @@ def run(coro):
 
 
 @pytest.fixture(autouse=True)
-def store(monkeypatch):
+def store(monkeypatch, tmp_path):
     """A fresh in-memory store and a configured reviewer token per test."""
-    fresh = ReviewStore()
+    spool_dir = tmp_path / "review_spool"
+    fresh = ReviewStore(spool_dir=spool_dir)
     fresh._use_redis = False
     fresh._local = {}
     monkeypatch.setattr(review_store, "_store", fresh)

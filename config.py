@@ -151,6 +151,35 @@ class Settings(BaseSettings):
     transcript_whisper_model: str = Field(default="base")
     transcript_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
 
+    # Scholar Review Durability & Spool Settings (AI-096 / Issue #872)
+    review_spool_dir: str = Field(
+        default="data/review/spool",
+        description="Filesystem directory for durable local review spool when Redis is unavailable",
+    )
+    review_spool_enabled: bool = Field(
+        default=True,
+        description="Whether durable local disk spooling is enabled during Redis outages",
+    )
+    review_spool_max_size: int = Field(
+        default=10000,
+        ge=1,
+        description="Maximum item capacity of the durable local review spool before policy enforcement",
+    )
+    review_degraded_policy: str = Field(
+        default="spool_or_reject",
+        description="Degraded policy when review spool is full: 'spool_or_reject' (backpressure) or 'spool_or_drop' (eviction)",
+    )
+    review_alert_depth_threshold: int = Field(
+        default=500,
+        ge=1,
+        description="Queue depth threshold in degraded spool that triggers high-depth alerts",
+    )
+    review_alert_age_threshold_seconds: float = Field(
+        default=3600.0,
+        ge=1.0,
+        description="Maximum age in seconds for oldest spooled item before triggering high-age alert",
+    )
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value):

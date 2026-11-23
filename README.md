@@ -78,6 +78,7 @@ All chat endpoints require an `X-API-Key` header (see [Authentication & Rate Lim
 | `GET` | `/confidence/policy` | Active confidence thresholds and review-queue depth |
 | `GET` | `/review/pending` | Answers awaiting a scholar's verdict (reviewer token) |
 | `GET` | `/review/reviewed` | Answers that already carry a verdict (reviewer token) |
+| `POST` | `/review/reconcile` | Reconcile locally spooled items into Redis without duplicates (reviewer token) |
 | `GET` | `/review/{id}` | A single review item (reviewer token) |
 | `POST` | `/review/{id}/verdict` | Record approve / correct / reject (reviewer token) |
 | `POST` | `/feedback` | Rate a specific answer and flag failure categories |
@@ -298,6 +299,12 @@ services:
 | `TAFSIR_MAX_AYAT` | Maximum ayat per `/tafsir` request | `10` |
 | `TAFSIR_CHAT_EXCERPT_CHARS` | Tafsir characters per work handed to the model in `/chat` | `2500` |
 | `TAFSIR_CHAT_TIMEOUT` | Wall-clock budget for tafsir retrieval inside a `/chat` turn | `20` (seconds) |
+| `REVIEW_SPOOL_DIR` | Filesystem directory for durable local review spool during Redis outages | `data/review/spool` |
+| `REVIEW_SPOOL_ENABLED` | Enable crash-safe local disk spooling during Redis outages | `true` |
+| `REVIEW_SPOOL_MAX_SIZE` | Maximum capacity of degraded review spool before policy enforcement | `10000` |
+| `REVIEW_DEGRADED_POLICY` | Spool capacity breach policy (`spool_or_reject` or `spool_or_drop`) | `spool_or_reject` |
+| `REVIEW_ALERT_DEPTH_THRESHOLD` | Spool depth threshold triggering high-depth warnings | `500` |
+| `REVIEW_ALERT_AGE_THRESHOLD_SECONDS` | Max age in seconds of oldest spooled item before alert fires | `3600` (1h) |
 
 ### Multilingual support (language field)
 
@@ -391,11 +398,22 @@ curl -X POST localhost:8000/review/$ID/verdict \
   -d '{"verdict": "correct", "corrected_answer": "…", "reviewer": "Shaykh …"}'
 ```
 
-If Redis is configured but becomes unreachable, the queue keeps accepting items
-into an in-process fallback and reports `degraded: true` from `/review/stats`
-rather than failing chat turns — the loss of durability is made visible instead
-of silent. Verdicts are claimed atomically, so two concurrent reviewers cannot
-both record one and silently overwrite each other.
+If Redis is configured but becomes unreachable, the queue persists items to a
+crash-safe local disk spool (`REVIEW_SPOOL_DIR`, default `data/review/spool`) using
+atomic writes (`fsync` + `os.replace`), ensuring that process crashes, restarts,
+or replica replacements **cannot discard questions awaiting scholar review**. The
+store reports `degraded: true` from `/review/stats` rather than failing chat turns.
+When Redis recovers, spooled items are automatically reconciled into Redis with
+strict idempotency (zero duplicates).
+
+Degraded mode capacity is strictly bounded by `REVIEW_SPOOL_MAX_SIZE` (default
+`10000`). Under the default `spool_or_reject` policy, exceeding capacity rejects new
+items and sets `assessment.queued = false` so users are not falsely told their
+question reached a scholar. Operational alerts fire on degraded mode, spool depth,
+spool age, and dropped/rejected items. See [docs/SCHOLAR_REVIEW_DURABILITY.md](docs/SCHOLAR_REVIEW_DURABILITY.md)
+for the architecture specification, Prometheus alert rules, and incident runbook.
+Verdicts are claimed atomically, so two concurrent reviewers cannot both record one
+and silently overwrite each other.
 
 The reviewer endpoints are **closed by default** — without `SCHOLAR_REVIEW_TOKEN`
 they return 503 rather than exposing users' pending questions.

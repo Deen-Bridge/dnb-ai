@@ -74,6 +74,9 @@ jobs:
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
 
+      - name: Run scholar-review durability tests (#872)
+        run: pytest -q tests/test_review_durability.py
+
       - name: Run historical context tests
         run: pytest -q tests/test_history.py
 
