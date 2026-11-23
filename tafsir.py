@@ -1,5 +1,7 @@
 """Tafsir layer — grounded, attributed ayah explanations.
 
+Data versioning: tafsir text is retrieved from versioned sources; see
+``TAFSIR_DATA_VERSION`` and ``build_provenance`` below for provenance fields.
 Why this exists
 ---------------
 Asked "what does Surah al-'Asr mean?", a bare language model produces a
@@ -112,6 +114,8 @@ DISCLAIMER = (
     "does not carry; consult a qualified scholar before acting on an "
     "interpretation."
 )
+
+TAFSIR_DATA_VERSION = os.getenv("TAFSIR_DATA_VERSION", "2024.1")
 
 # ---------------------------------------------------------------------------
 # Ayah relationship graph
@@ -1018,6 +1022,26 @@ class TafsirText(BaseModel):
         None,
         description=("Ayah range this passage covers when the tafsir treats several ayat together, e.g. '103:1-3'"),
     )
+    source_slug: str | None = Field(
+        None,
+        description="Dataset slug the passage was retrieved from (provenance)",
+    )
+    data_version: str = Field(
+        TAFSIR_DATA_VERSION,
+        description="Version of the retrieval dataset used for this passage",
+    )
+    uncertainty: str = Field(
+        "Retrieved verbatim; interpretive reading is the work's own and may be contested.",
+        description="Stated uncertainty for consumers of this passage",
+    )
+
+
+def build_provenance(work: "TafsirWork", language: str, verse_range: str | None) -> dict[str, Any]:
+    """Provenance fields attached to every retrieved passage."""
+    return {
+        "source_slug": work.slug_for(language),
+        "data_version": TAFSIR_DATA_VERSION,
+    }
 
 
 class TafsirUnavailable(BaseModel):
@@ -1260,6 +1284,8 @@ def parse_tafsir_payload(work: TafsirWork, language: str, payload: dict[str, Any
         language=source_language,
         text=text,
         verse_range=verse_range,
+        source_slug=work.slug_for(language),
+        data_version=TAFSIR_DATA_VERSION,
     )
 
 

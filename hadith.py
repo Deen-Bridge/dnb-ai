@@ -1,5 +1,8 @@
 """Hadith authenticity grading — parsing, normalization, and policy enforcement.
 
+Dataset version: see ``DATASET_VERSION`` below; every ``GradeRecord`` and
+``HadithReference`` carries the version it was graded against for provenance.
+
 Why this exists
 ----------------
 Presenting a da'if (weak) or mawdu' (fabricated) narration as if it were
@@ -54,6 +57,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 DATA_DIR = Path(__file__).resolve().parent / "data" / "hadith"
+
+# Version of the bundled grading dataset. Bump when data/hadith/* is rebuilt.
+# Surfaced on every grading result so answers are traceable to a dataset build.
+DATASET_VERSION = "fawazahmed0-hadith-api@1"
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +315,7 @@ class GradeRecord:
     grade: Strength
     chain_type: ChainType
     graders: list[dict[str, str]] = field(default_factory=list)
+    dataset_version: str = DATASET_VERSION
 
 
 class GradingSource:
@@ -363,6 +371,7 @@ class BundledGradingSource(GradingSource):
             grade=Strength(record["grade"]),
             chain_type=ChainType(record["chain"]),
             graders=record.get("graders", []),
+            dataset_version=payload_version(self._data_dir, collection),
         )
 
 
@@ -388,6 +397,8 @@ class HadithReference(BaseModel):
     verified: bool
     flagged: bool
     note: str | None = None
+    dataset_version: str | None = None
+    uncertainty: str | None = None
 
 
 _CAVEAT_KEYWORDS = (
@@ -439,6 +450,8 @@ def annotate(text: str, source: GradingSource | None = None) -> list[HadithRefer
                     verified=False,
                     flagged=False,
                     note="grading unverified",
+                    dataset_version=DATASET_VERSION,
+                    uncertainty="no bundled grading record; authenticity unknown",
                 )
             )
             continue
@@ -467,6 +480,10 @@ def annotate(text: str, source: GradingSource | None = None) -> list[HadithRefer
                 verified=True,
                 flagged=flagged,
                 note=note,
+                dataset_version=record.dataset_version,
+                uncertainty=None if len(record.graders) <= 1 else (
+                    "multiple graders; headline grade is the weakest assigned"
+                ),
             )
         )
     return results

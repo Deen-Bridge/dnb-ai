@@ -172,6 +172,11 @@ class SearchResponse(BaseModel):
     query: str
     themes: list[dict[str, Any]] = Field(default_factory=list)
     total: int
+    dataset_version: str = Field(..., description="Version of the bundled theme mapping data")
+    provenance: str = Field(
+        "Bundled curated theme-verse mappings; no live model output.",
+        description="Where the grounding data comes from",
+    )
 
 
 def _verse_hit(mapping: VerseThemeMapping) -> VerseHit:
@@ -202,6 +207,8 @@ def _theme_summary(theme: Any, verse_count: int = 0) -> ThemeSummary:
 def _resolve_retriever() -> ThematicRetriever:
     """Return the shared retriever, failing loudly if mappings are missing."""
     retriever = get_thematic_retriever()
+    if retriever is None:
+        raise APIException(status_code=503, detail="Concordance data is unavailable.")
     return retriever
 
 
@@ -290,6 +297,7 @@ async def search_topics(
     themes.sort(key=lambda t: -_verse_count(retriever, t.id))
 
     results: list[dict[str, Any]] = []
+    dataset_version = getattr(retriever, "dataset_version", "unknown")
     for theme in themes:
         entry: dict[str, Any] = _theme_summary(theme, _verse_count(retriever, theme.id)).model_dump()
         if include_verses:
@@ -297,7 +305,12 @@ async def search_topics(
             entry["verses"] = [_verse_hit(m).model_dump() for m in mappings]
         results.append(entry)
 
-    return SearchResponse(query=q, themes=results, total=len(results))
+    return SearchResponse(
+        query=q,
+        themes=results,
+        total=len(results),
+        dataset_version=dataset_version,
+    )
 
 
 @router.get("/topics/{theme_id}", response_model=ThemeBrowseResponse)

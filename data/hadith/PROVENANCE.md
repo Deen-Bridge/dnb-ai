@@ -131,6 +131,55 @@ sourced from standard rijāl references (Ibn Hajar's Taqrib al-Tahdhib,
 al-Dhahabi's Siyar and Mizan al-I'tidal). It is advisory and deliberately not
 exhaustive; see the file's own provenance header for details.
 
+## Versioning and release contract
+
+The grading dataset is versioned as an explicit, reviewable artifact:
+
+- **Dataset version**: the `source.ref` tag (currently `1`) together with the
+  `source.fetched` date in each collection file defines the dataset version.
+  Consumers should record both when citing a grade in user-facing output.
+- **Output provenance**: every grade surfaced by the runtime lookup carries the
+  collection, global hadith number, grader name(s), raw grader string, and the
+  dataset version. Where a grade is `UNKNOWN`, the service reports the hadith
+  as unverified by the bundled dataset rather than inferring a grade.
+- **Uncertainty**: disagreement between graders is never collapsed silently;
+  the conservative aggregation policy above is applied and every individual
+  grader remains visible in the `graders` array.
+- **Arabic/English handling**: grading metadata is language-neutral (numbers,
+  collection identifiers, and normalized English grade labels). Raw grader
+  strings are preserved verbatim, including any non-ASCII characters, and must
+  be treated as opaque text by downstream code. Empty, whitespace-only, or
+  unrecognized grader strings normalize to `UNKNOWN` and are never guessed.
+- **Failure states**: a missing collection file, a missing hadith number, or a
+  malformed record must yield an explicit "not found / unverified" result, never
+  a fabricated grade. Empty result sets are a valid, tested output.
+
+### Testing and evidence
+
+- Unit tests cover `parse_grade_string`, `aggregate_strength`, and
+  `aggregate_chain_type`, including composite, blank, and Arabic-containing raw
+  strings.
+- Integration tests run offline against the committed JSON files; no network
+  access is required in CI.
+- Evaluation tests confirm that every cross-collection reference in
+  `variants.json` resolves through the bundled dataset.
+- Sanitized test output, the implementing commit, and CI links are attached to
+  the release PR. No secrets, tokens, or private provider responses are
+  included in any evidence.
+
+### Data handling and isolation
+
+The grading dataset is public-domain, non-user-scoped reference data. It holds
+no personal data and no per-user state, so there is nothing to isolate or reset
+at the user level. Reproducibility is ensured by pinning the upstream tag and
+regenerating only via `scripts/build_hadith_data.py`.
+
+### Rollback
+
+Because the dataset is versioned by upstream tag and committed as static JSON,
+rollback is a revert of the data commit (or a checkout of the previous tag's
+files). No migration or runtime state needs to be undone.
+
 ## Update process
 
 Re-run the build script whenever the upstream data changes or a new tag is
