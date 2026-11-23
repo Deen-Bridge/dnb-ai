@@ -219,3 +219,101 @@ class TestVerseThemes:
     async def test_invalid_surah(self, client):
         resp = await client.get("/concordance/verse/999/1")
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Surah-scoped relevance filtering
+# ---------------------------------------------------------------------------
+
+
+class TestBrowseSurahFilter:
+    async def test_browse_filter_by_surah(self, client):
+        resp = await client.get("/concordance/topics/worship-salah", params={"surah": 2})
+        assert resp.status_code == 200
+        verses = resp.json()["verses"]
+        assert verses
+        assert all(verse["surah"] == 2 for verse in verses)
+
+    async def test_browse_filter_by_surah_with_no_matches(self, client):
+        resp = await client.get("/concordance/topics/worship-salah", params={"surah": 114})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["verses"] == []
+        assert data["total_verses"] > 0  # the theme total is unchanged
+
+    async def test_browse_filter_by_surah_and_context(self, client):
+        resp = await client.get(
+            "/concordance/topics/history",
+            params={"surah": 2, "context_type": "primary"},
+        )
+        assert resp.status_code == 200
+        for verse in resp.json()["verses"]:
+            assert verse["surah"] == 2
+            assert verse["context_type"] == "primary"
+
+    @pytest.mark.parametrize("surah", [0, 115, -1])
+    async def test_browse_rejects_invalid_surah_filter(self, client, surah):
+        resp = await client.get("/concordance/topics/worship-salah", params={"surah": surah})
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Versioned provenance and explainable matches
+# ---------------------------------------------------------------------------
+
+
+def _assert_provenance(payload: dict) -> None:
+    provenance = payload["provenance"]
+    assert provenance["dataset_version"] and provenance["dataset_version"] != "unversioned"
+    assert provenance["source"]
+    assert provenance["mapping_count"] > 0
+    assert provenance["uncertainty_note"]
+
+
+class TestProvenanceAndExplainability:
+    async def test_hierarchy_exposes_provenance(self, client):
+        resp = await client.get("/concordance/topics")
+        assert resp.status_code == 200
+        _assert_provenance(resp.json())
+
+    async def test_search_exposes_provenance_and_explanations(self, client):
+        resp = await client.get("/concordance/search", params={"q": "prayer"})
+        assert resp.status_code == 200
+        data = resp.json()
+        _assert_provenance(data)
+        verse = next(v for theme in data["themes"] for v in theme.get("verses", []))
+        assert verse["theme_id"]
+        assert verse["relevance_label"] in {"high", "moderate", "low"}
+        assert "relevance" in verse["explanation"]
+
+    async def test_browse_exposes_provenance_and_explanations(self, client):
+        resp = await client.get("/concordance/topics/worship-salah")
+        assert resp.status_code == 200
+        data = resp.json()
+        _assert_provenance(data)
+        verse = data["verses"][0]
+        assert verse["theme_id"] == "worship-salah"
+        assert verse["relevance_label"] in {"high", "moderate", "low"}
+        assert "worship-salah" in verse["explanation"]
+        assert str(verse["relevance_score"]) in verse["explanation"] or "relevance" in verse["explanation"]
+
+    async def test_multi_topic_exposes_provenance_and_explanations(self, client):
+        resp = await client.post(
+            "/concordance/query",
+            json={"topics": ["worship-salah", "ethics-patience"], "operator": "OR", "limit": 5},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        _assert_provenance(data)
+        assert data["verses"]
+        assert all(verse["explanation"] and verse["theme_id"] for verse in data["verses"])
+
+    async def test_frequency_related_and_verse_expose_provenance(self, client):
+        for path in (
+            "/concordance/topics/worship-salah/frequency",
+            "/concordance/topics/worship-salah/related",
+            "/concordance/verse/2/255",
+        ):
+            resp = await client.get(path)
+            assert resp.status_code == 200, path
+            _assert_provenance(resp.json())
