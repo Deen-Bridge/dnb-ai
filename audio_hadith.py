@@ -46,7 +46,13 @@ router = APIRouter(prefix="/audio-hadith", tags=["audio-hadith"])
 MATCH_THRESHOLD = 0.45
 # Video-lecture transcript limits and supported container formats.
 MAX_LECTURE_LENGTH = 200_000
+MAX_LECTURE_DURATION_SECONDS = 1800
 SUPPORTED_VIDEO_FORMATS = ("mp4", "mov", "avi", "webm")
+# Lecture transcripts are computed per request and returned to the caller only.
+# Nothing in this module writes transcripts to disk, a database or a cache, so
+# the effective retention is "none". Any future persistence must add a bounded
+# TTL here and update docs/MULTIMODAL_UPLOAD_LIMITS.md in the same change.
+LECTURE_TRANSCRIPT_RETENTION = "none"
 # A confident, near-verbatim match.
 STRONG_MATCH_THRESHOLD = 0.75
 MAX_TRANSCRIPT_LENGTH = 20_000
@@ -769,9 +775,15 @@ class LectureRequest(BaseModel):
         description="Video file reference or pre-segmented transcript text.",
     )
     language: str = Field("en", description="ISO code of the lecture language.")
-    consent_to_process: bool = Field(True, description="Explicit user consent to process uploaded media.")
+    consent_to_process: bool = Field(
+        False,
+        description="Explicit user consent to process uploaded media. Default-deny: must be true.",
+    )
     duration_seconds: float | None = Field(
-        None, gt=0, le=1800, description="Optional clip duration in seconds (max 1800s / 30 mins)."
+        None,
+        gt=0,
+        le=MAX_LECTURE_DURATION_SECONDS,
+        description="Optional clip duration in seconds (max 1800s / 30 mins).",
     )
 
 
@@ -791,16 +803,32 @@ def extract_lecture_transcript(
     video_ref: str,
     language: str = "en",
     transcriber: VideoTranscriber | None = None,
-    consent_to_process: bool = True,
+    consent_to_process: bool = False,
     duration_seconds: float | None = None,
 ) -> LectureResponse:
-    """Run the full video-lecture transcript pipeline."""
+    """Run the full video-lecture transcript pipeline.
+
+    Contract:
+    - Consent: default-deny. ``consent_to_process`` must be True, otherwise 400.
+    - Input limits: ``video_ref`` at most ``MAX_LECTURE_LENGTH`` characters (413);
+      ``duration_seconds`` at most ``MAX_LECTURE_DURATION_SECONDS`` (422).
+    - Formats: a reference with a file extension must be one of
+      ``SUPPORTED_VIDEO_FORMATS`` (422). Plain transcript text has no extension
+      and is accepted as pre-segmented text.
+    - Retention: ``LECTURE_TRANSCRIPT_RETENTION`` ("none"). The result is returned
+      to the caller and not stored.
+    """
     if not consent_to_process:
         raise HTTPException(
             status_code=400,
             detail="Processing requires explicit user consent (consent_to_process=true).",
         )
-    if duration_seconds is not None and duration_seconds > 1800:
+    if len(video_ref) > MAX_LECTURE_LENGTH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Lecture input exceeds maximum allowed length of {MAX_LECTURE_LENGTH} characters.",
+        )
+    if duration_seconds is not None and duration_seconds > MAX_LECTURE_DURATION_SECONDS:
         raise HTTPException(
             status_code=422,
             detail="Video duration exceeds maximum allowed limit of 1800 seconds (30 minutes).",
