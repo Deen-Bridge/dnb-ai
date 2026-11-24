@@ -5,6 +5,8 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from prompts.versioning import is_eval_compatible
+
 ROOT = Path(__file__).resolve().parent
 EVAL_DIR = ROOT / "data" / "eval"
 DEFAULT_DATASET = EVAL_DIR / "islamic_qa_benchmark.jsonl"
@@ -47,6 +49,8 @@ class RegressionRunner:
         rollback_plan: str | None = None,
         model_id: str | None = None,
         prompt_version: str | None = None,
+        prompt_name: str | None = None,
+        prompt_fingerprint: str | None = None,
     ) -> None:
         """Save a baseline, keeping the prior one so it can be rolled back.
 
@@ -55,7 +59,9 @@ class RegressionRunner:
         """
         data = dict(results)
         if any((owner, version, rollback_plan)):
-            missing = [k for k, v in (("owner", owner), ("version", version), ("rollback_plan", rollback_plan)) if not v]
+            missing = [
+                k for k, v in (("owner", owner), ("version", version), ("rollback_plan", rollback_plan)) if not v
+            ]
             if missing:
                 raise ValueError(f"baseline metadata missing: {', '.join(missing)}")
             data["metadata"] = {
@@ -63,7 +69,9 @@ class RegressionRunner:
                 "version": version,
                 "rollback_plan": rollback_plan,
                 "model_id": model_id,
+                "prompt_name": prompt_name,
                 "prompt_version": prompt_version,
+                "prompt_fingerprint": prompt_fingerprint,
             }
         self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
         if self.baseline_path.exists():
@@ -148,7 +156,16 @@ class RegressionRunner:
         tolerance: float = 0.02,
         domain_tolerance: float | None = None,
         pass_rate_tolerance: float | None = None,
+        prompt_name: str | None = None,
+        prompt_version: str | None = None,
     ) -> dict[str, Any]:
+        """Compare a run with the baseline.
+
+        When ``prompt_version`` is given, the baseline must have been recorded
+        for the same template at the same major version. Otherwise the scores
+        are not comparable: ``compatible`` is False and the baseline has to be
+        regenerated rather than reported as a pass or a regression.
+        """
         baseline = self.load_baseline()
         if not baseline:
             return {
@@ -185,6 +202,14 @@ class RegressionRunner:
                 degraded = True
                 reasons.append(f"pass_rate {curr_pr} < baseline {base_pr} - {pass_rate_tolerance}")
 
+        incompatibilities = self._prompt_incompatibilities(baseline, prompt_name, prompt_version)
+        if incompatibilities:
+            alert = "INCOMPATIBLE BASELINE: " + "; ".join(incompatibilities)
+        elif degraded:
+            alert = "REGRESSION DETECTED: Performance dropped below baseline tolerance. " + "; ".join(reasons)
+        else:
+            alert = "OK"
+
         return {
             "has_baseline": True,
             "baseline_score": base_score,
@@ -194,9 +219,34 @@ class RegressionRunner:
             "tolerance": tolerance,
             "domain_differences": domain_diffs,
             "reasons": reasons,
-            "alert": (
-                "REGRESSION DETECTED: Performance dropped below baseline tolerance. " + "; ".join(reasons)
-                if degraded
-                else "OK"
-            ),
+            "compatible": not incompatibilities,
+            "incompatibilities": incompatibilities,
+            "alert": alert,
         }
+
+    @staticmethod
+    def _prompt_incompatibilities(
+        baseline: dict[str, Any], prompt_name: str | None, prompt_version: str | None
+    ) -> list[str]:
+        if prompt_version is None:
+            return []
+        meta = baseline.get("metadata") or {}
+        problems = []
+        base_name = meta.get("prompt_name")
+        if prompt_name and base_name and base_name != prompt_name:
+            problems.append(f"baseline is for prompt '{base_name}', not '{prompt_name}'")
+        base_version = meta.get("prompt_version")
+        if not base_version:
+            problems.append("baseline does not record metadata.prompt_version")
+            return problems
+        try:
+            compatible = is_eval_compatible(str(base_version), prompt_version)
+        except ValueError as exc:
+            problems.append(f"cannot compare prompt versions: {exc}")
+            return problems
+        if not compatible:
+            problems.append(
+                f"baseline was recorded with prompt {base_version}; current prompt {prompt_version} "
+                "is a new major version, so regenerate and review the baseline"
+            )
+        return problems

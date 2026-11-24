@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "owner": "AI quality maintainers",
+  "templates": {
+    "islamic_context": {
+      "version": "1.0.0",
+      "fingerprint": "sha256:4cbd11e556397ca377f61a9e3f5b9a238bca37c5aae22de5a69493575dc0ab90",
+      "changelog": "Initial version extracted from main.py; parameterized for madhhab, language, knowledge level, intent, and retrieved context."
+    }
+  }
+}
