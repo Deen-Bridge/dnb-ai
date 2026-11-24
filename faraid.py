@@ -272,6 +272,15 @@ def distribute(estate: Decimal, heirs: list[str]) -> FaraidResult:
         raise ValueError("Estate must be positive")
     if not heirs:
         raise ValueError("At least one heir required")
+    duplicates = sorted({heir for heir in heirs if heirs.count(heir) > 1})
+    if duplicates:
+        # Shares are keyed by heir type, so a repeated type would be merged into
+        # one impossible share (two daughters produced 9/8 of the estate). Fail
+        # closed until counts per heir type are modelled (#848).
+        raise ValueError(
+            "Each heir type may be listed once; more than one heir of the same type is not supported yet: "
+            + ", ".join(duplicates)
+        )
 
     steps: list[str] = []
     adjustments: list[str] = []
@@ -323,6 +332,10 @@ def distribute(estate: Decimal, heirs: list[str]) -> FaraidResult:
     # Add blocked heirs with zero
     for heir in blocked_by:
         final_shares[heir] = Fraction(0)
+
+    # Never return more than the estate or a negative share (#848).
+    if sum(final_shares.values()) > 1 or any(share < 0 for share in final_shares.values()):
+        raise ValueError("This combination of heirs is not supported by the calculator.")
 
     return FaraidResult(shares=final_shares, steps=steps, adjustments=adjustments)
 
