@@ -239,6 +239,22 @@ _ALIAS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+
+def find_collection_mentions(text: str) -> list[tuple[str, str, tuple[int, int]]]:
+    """Every collection alias named in *text*, as (canonical key, matched text, span).
+
+    Longest alias wins at each position, so "Sahih Muslim" is one mention, not
+    a "Muslim" mention inside it. This only recognizes a collection name; it
+    says nothing about a hadith number, the narration, or its grade.
+    """
+    mentions: list[tuple[str, str, tuple[int, int]]] = []
+    for match in _ALIAS_PATTERN.finditer(text or ""):
+        key = _COLLECTION_ALIASES.get(match.group(1).lower())
+        if key is not None:
+            mentions.append((key, match.group(1), match.span(1)))
+    return mentions
+
+
 _NUMBER_AFTER_PATTERN = re.compile(
     r"^[^0-9]{0,40}?(?:book\s*(?P<book>\d+)\s*[,:]?\s*)?"
     r"(?:hadith|#|no\.?|number)?\s*[:#]?\s*(?P<number>\d+)",

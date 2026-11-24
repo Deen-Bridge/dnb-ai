@@ -10,6 +10,8 @@ This module enforces explicit upload contracts across all media endpoints:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import re
 import time
@@ -34,6 +36,29 @@ MAX_AUDIO_DURATION_SECONDS = 3600.0  # 60 minutes
 MAX_PAGE_BLOCKS = 5000
 MAX_PAGE_DIMENSION = 20000.0
 MAX_TRANSCRIPT_CHARS = 200000
+
+# Page-analysis text ceilings (#854). A dense manuscript page carries a few
+# thousand characters; these ceilings leave wide headroom while bounding the
+# regex work done per request.
+MAX_PAGE_BLOCK_TEXT_CHARS = 20_000
+MAX_PAGE_TEXT_CHARS = 200_000
+
+# Formats the manuscript OCR pipeline accepts (#854). The shared image sniffer
+# also recognizes PDF, but a PDF is a multi-page document container, not a page
+# image, so OCR routes reject it with 415 instead of passing it downstream.
+OCR_IMAGE_FORMATS: frozenset[str] = frozenset({"png", "jpeg", "tiff", "webp"})
+
+# Largest base64 string that can decode to MAX_IMAGE_BYTES (4 output chars per
+# 3 input bytes, padded). Checked before decoding so an oversized string never
+# triggers the decode allocation.
+MAX_IMAGE_BASE64_CHARS = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
+
+# Line-wrapped base64 (76 chars + CRLF, as `base64` and MIME tools emit) is
+# accepted, so the raw pre-decode ceiling leaves room for that whitespace.
+_MAX_BASE64_WHITESPACE = 2 * (MAX_IMAGE_BASE64_CHARS // 76) + 64
+
+# The only data-URL prefixes accepted on base64 image fields.
+_DATA_URL_PREFIX = re.compile(r"^data:image/(?:png|jpeg|jpg|tiff|webp);base64,", re.IGNORECASE)
 
 MAX_CONCURRENT_ACTIVE_JOBS = 20
 MAX_TOTAL_RETAINED_JOBS = 200
@@ -230,12 +255,56 @@ def validate_audio_upload(
     return mime_map.get(detected_format, "audio/mpeg"), detected_format
 
 
+def decode_base64_image(value: str) -> bytes:
+    """Strictly decode a base64 image field, bounding its size before decoding.
+
+    Accepts plain base64, optionally line-wrapped, or a ``data:image/<png|jpeg|
+    tiff|webp>;base64,`` data URL. Raises HTTPException 413 when the encoded
+    string could not fit MAX_IMAGE_BYTES and 422 for a disallowed data-URL
+    prefix or malformed base64. The decoded bytes still need
+    ``validate_image_upload`` for emptiness, size, and format signature.
+    """
+    if len(value) > MAX_IMAGE_BASE64_CHARS + _MAX_BASE64_WHITESPACE + 64:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image payload exceeds maximum allowed size of {MAX_IMAGE_BYTES // (1024 * 1024)}MB.",
+        )
+
+    if value[:5].lower() == "data:":
+        prefix = _DATA_URL_PREFIX.match(value)
+        if prefix is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Unsupported data URL. Only data:image/<png|jpeg|tiff|webp>;base64, is accepted.",
+            )
+        value = value[prefix.end() :]
+
+    compact = "".join(value.split())
+    if len(compact) > MAX_IMAGE_BASE64_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image payload exceeds maximum allowed size of {MAX_IMAGE_BYTES // (1024 * 1024)}MB.",
+        )
+
+    try:
+        return base64.b64decode(compact, validate=True)
+    except (binascii.Error, ValueError) as err:
+        raise HTTPException(status_code=422, detail="Invalid base64 encoding.") from err
+
+
 def validate_image_upload(
     payload: bytes,
     filename: str | None = None,
     consent: bool = True,
+    allowed_formats: frozenset[str] | None = None,
 ) -> tuple[str, str]:
-    """Validate an image upload for consent, size, and magic-byte format signature."""
+    """Validate an image upload for consent, size, and magic-byte format signature.
+
+    ``allowed_formats`` narrows the accepted signatures for a route whose
+    pipeline cannot consume every sniffed format (OCR passes OCR_IMAGE_FORMATS).
+    The format is always taken from the content signature; ``filename`` and any
+    declared MIME type are never trusted.
+    """
     if not consent:
         raise HTTPException(
             status_code=400,
@@ -256,6 +325,13 @@ def validate_image_upload(
         raise HTTPException(
             status_code=415,
             detail="Unsupported image format or invalid header. Supported formats: PNG, JPEG, TIFF, WebP, PDF.",
+        )
+
+    if allowed_formats is not None and detected_format not in allowed_formats:
+        supported = ", ".join(fmt.upper() if fmt != "webp" else "WebP" for fmt in sorted(allowed_formats))
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported image format '{detected_format}' for this endpoint. Supported formats: {supported}.",
         )
 
     mime_map = {

@@ -25,8 +25,8 @@ Prior to this implementation, multimodal upload endpoints lacked uniform contain
 | **Video Analysis** (`/video-analysis/analyze`) | 100 MB | 1,800s (30 mins) | MP4 (`ftyp`), MOV, AVI (`RIFF..AVI`), WebM (`1A 45 DF A3`) | 1 hour (3,600s) |
 | **Audio Hadith** (`/audio-hadith/lecture-transcript`) | 25 MB / 200k chars | 1,800s (30 mins) | MP3, WAV, OGG, M4A | Ephemeral / in-memory |
 | **Qur'an Recitation** (`/quran-recitation/analyze`) | 20k chars transcript | 3,600s (60 mins) | Normalized text / ASR timings | Ephemeral / in-memory |
-| **Manuscript OCR** (`/arabic-ocr/process-file`) | 10 MB | 10,000 x 10,000 px | PNG (`\x89PNG`), JPEG (`\xff\xd8\xff`), TIFF, WebP, PDF | Ephemeral / in-memory |
-| **Page Layout** (`/page-analysis/analyze`) | 5 MB | 5,000 blocks / 20k units | Structural JSON validation | Ephemeral / in-memory |
+| **Manuscript OCR** (`/arabic-ocr/process`, `/process-file`, `/detect-style`, `/preprocess`) | 10 MB decoded; base64 length bounded before decoding | No pixel-dimension check (images are not decoded yet) | PNG (`\x89PNG`), JPEG (`\xff\xd8\xff`), TIFF, WebP; PDF rejected with 415 | Not stored; see `PAGE_ANALYSIS_CONTRACT.md` |
+| **Page Layout** (`/page-analysis/analyze`) | 20k chars per block, 200k chars per page | 5,000 blocks / 20k units | Structural JSON validation | Not stored; see `PAGE_ANALYSIS_CONTRACT.md` |
 | **Calligraphy** (`/calligraphy/classify`) | 10 MB / 8 traits | Bounded signals [0.0, 1.0] | Normalized feature vector | Ephemeral / in-memory |
 
 ---
@@ -34,8 +34,8 @@ Prior to this implementation, multimodal upload endpoints lacked uniform contain
 ## 3. Privacy, Consent, and Retention Guarantees
 
 1. **Affirmative User Consent**:
-   - Every media endpoint requires user consent (`consent_to_process=true`).
-   - Requests with `consent_to_process=false` are rejected immediately with HTTP 400.
+   - Every media endpoint accepts `consent_to_process`; requests with `consent_to_process=false` are rejected immediately with HTTP 400.
+   - The manuscript OCR and page-layout routes also reject an omitted field with 400 (#854). The other media routes still treat an omitted field as `true`.
 2. **Ephemeral In-Memory Retention**:
    - Analysis results are stored in a bounded in-memory registry (`BoundedJobManager`) capped at 200 total jobs and 20 concurrent active jobs.
    - Finished jobs are automatically evicted after 1 hour (3,600 seconds).
@@ -95,7 +95,7 @@ All modified and newly created files were scanned with local pattern checks and 
 ## 7. Deployment and Rollback Notes
 
 - **Deployment**:
-  - Fully backward compatible: `consent_to_process` defaults to `True` for existing clients.
+  - At the time of #853, `consent_to_process` defaulted to `True` for existing clients. #854 removed that default for the manuscript OCR and page-layout routes; see `PAGE_ANALYSIS_CONTRACT.md` for the client impact.
   - Default duration and size caps match production service specifications.
 - **Rollback**:
   - Safe to roll back at any time. No database schema migrations or state conversions required.
