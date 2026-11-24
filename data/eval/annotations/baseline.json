@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "owner": "AI quality & evaluation maintainers (Deen-Bridge/dnb-ai)",
+  "min_failed_cases": 5,
+  "min_annotation_coverage": 1.0,
+  "min_triaged_rate": 1.0,
+  "max_open_critical": 0,
+  "rollback": "Revert the commit that changed cases.jsonl, annotations.jsonl or this file; see docs/EVAL_ANNOTATION.md"
+}
