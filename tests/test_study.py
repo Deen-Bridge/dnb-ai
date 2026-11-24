@@ -630,6 +630,45 @@ class TestOptInAndResettablePersonalization:
         assert del_again.status_code == 200
         assert del_again.json()["existed"] is False
 
+    def test_blank_user_id_is_treated_as_anonymous(self):
+        """A whitespace-only ID must not become a shared storage key (#848)."""
+        req = StudyGenerateRequest(
+            source=TopicSource(topic="Salah"),
+            kind=ContentKind.quiz,
+            user_id="   ",
+            opt_in_personalization=True,
+        )
+        assert req.user_id is None
+        padded = StudyGenerateRequest(source=TopicSource(topic="Salah"), kind=ContentKind.quiz, user_id="  ab ")
+        assert padded.user_id == "ab"
+
+    def test_progress_routes_reject_blank_or_padded_user_ids(self):
+        from fastapi.testclient import TestClient
+
+        from main import app
+
+        client = TestClient(app)
+        for bad in ("%20", "%20%20", "%20learner", "learner%20"):
+            assert client.get(f"/study/users/{bad}/progress").status_code == 422
+            assert client.delete(f"/study/users/{bad}").status_code == 422
+
+    def test_reset_of_one_learner_leaves_another_intact(self):
+        from fastapi.testclient import TestClient
+
+        from main import app
+
+        client = TestClient(app)
+        body = {"source": {"topic": "Salah"}, "kind": "quiz", "count": 2, "seed": 3, "opt_in_personalization": True}
+        for learner in ("isolation-learner-a", "isolation-learner-b"):
+            assert client.post("/study/generate", json={**body, "user_id": learner}).status_code == 200
+
+        assert client.delete("/study/users/isolation-learner-a").json()["existed"] is True
+        assert client.get("/study/users/isolation-learner-a/progress").status_code == 404
+        kept = client.get("/study/users/isolation-learner-b/progress")
+        assert kept.status_code == 200
+        assert kept.json()["user_id"] == "isolation-learner-b"
+        client.delete("/study/users/isolation-learner-b")
+
 
 # ---------------------------------------------------------------------------
 # Arabic and Edge Cases Tests
