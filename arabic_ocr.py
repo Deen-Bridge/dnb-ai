@@ -42,9 +42,14 @@ from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
-from media_upload_limits import MAX_IMAGE_BYTES, validate_image_upload
+from media_upload_limits import (
+    MAX_IMAGE_BYTES,
+    OCR_IMAGE_FORMATS,
+    decode_base64_image,
+    validate_image_upload,
+)
 
 router = APIRouter(prefix="/arabic-ocr", tags=["arabic-ocr"])
 
@@ -832,10 +837,44 @@ async def process_manuscript_page(
 # ---------------------------------------------------------------------------
 
 
+# Upper bound on the optional OCR'd text sample sent to /detect-style.
+MAX_STYLE_TEXT_SAMPLE_CHARS = 20_000
+
+_CONSENT_DESCRIPTION = (
+    "Required and must be true. Omitted or false is rejected with 400 before the image is decoded or processed."
+)
+_IMAGE_BASE64_DESCRIPTION = (
+    "Base64-encoded PNG, JPEG, TIFF or WebP page image, at most 10 MB decoded. Plain base64 (line-wrapped "
+    "is fine) or a data:image/<png|jpeg|tiff|webp>;base64, data URL. The format is taken from the decoded "
+    "bytes' signature, never from the prefix."
+)
+
+
+def _require_consent(consent: bool | None) -> None:
+    """Reject anything but an explicit true. Omission is not consent."""
+    if consent is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Processing requires explicit user consent (consent_to_process=true).",
+        )
+
+
+def decode_page_image(image_base64: str, consent: bool | None) -> bytes:
+    """Consent, then bounded strict decode, then the shared size/signature check.
+
+    Every base64 OCR route goes through this, in this order, so a rejected
+    request never reaches preprocessing, style detection, or the OCR engine.
+    """
+    _require_consent(consent)
+    image_data = decode_base64_image(image_base64)
+    validate_image_upload(image_data, consent=True, allowed_formats=OCR_IMAGE_FORMATS)
+    return image_data
+
+
 class OCRRequest(BaseModel):
     """Request body for OCR endpoint (base64 image)."""
 
-    image_base64: str = Field(..., description="Base64-encoded image data.")
+    image_base64: str = Field(..., description=_IMAGE_BASE64_DESCRIPTION)
 
     preprocessing: PreprocessingConfig = Field(
         default_factory=PreprocessingConfig,
@@ -851,40 +890,27 @@ class OCRRequest(BaseModel):
         default=True,
         description="Whether to detect calligraphy style.",
     )
-    consent_to_process: bool = Field(
-        default=True,
-        description="Explicit user consent to process uploaded manuscript image.",
-    )
-
-    @field_validator("image_base64")
-    @classmethod
-    def validate_base64(cls, v: str) -> str:
-        """Validate base64 encoding."""
-        # Strip data URL prefix if present
-        if "," in v:
-            v = v.split(",", 1)[1]
-        try:
-            base64.b64decode(v)
-        except Exception as err:
-            raise ValueError("Invalid base64 encoding") from err
-        return v
+    consent_to_process: bool | None = Field(default=None, description=_CONSENT_DESCRIPTION)
 
 
 class StyleDetectionRequest(BaseModel):
     """Request for standalone calligraphy style detection."""
 
-    image_base64: str
+    image_base64: str = Field(..., description=_IMAGE_BASE64_DESCRIPTION)
     text_sample: str | None = Field(
         default=None,
-        description="Optional OCR'd text to aid detection.",
+        max_length=MAX_STYLE_TEXT_SAMPLE_CHARS,
+        description="Optional OCR'd text to aid detection (max 20,000 characters).",
     )
+    consent_to_process: bool | None = Field(default=None, description=_CONSENT_DESCRIPTION)
 
 
 class PreprocessingRequest(BaseModel):
     """Request for standalone image preprocessing."""
 
-    image_base64: str
+    image_base64: str = Field(..., description=_IMAGE_BASE64_DESCRIPTION)
     config: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    consent_to_process: bool | None = Field(default=None, description=_CONSENT_DESCRIPTION)
 
 
 class PreprocessingResponse(BaseModel):
@@ -909,15 +935,11 @@ async def process_page(request: OCRRequest) -> OCRResult:
     - Per-line and per-word confidence scores
     - Detected calligraphy style
     - Applied corrections and warnings
+
+    Rejections happen before any processing: 400 without consent, 413 when the
+    image is too large, 415 for an unsupported signature, 422 for malformed base64.
     """
-    if not request.consent_to_process:
-        raise HTTPException(
-            status_code=400,
-            detail="Processing requires explicit user consent (consent_to_process=true).",
-        )
-    # Decode image
-    image_data = base64.b64decode(request.image_base64)
-    validate_image_upload(image_data, consent=request.consent_to_process)
+    image_data = decode_page_image(request.image_base64, request.consent_to_process)
 
     result = await process_manuscript_page(
         image_data=image_data,
@@ -931,17 +953,20 @@ async def process_page(request: OCRRequest) -> OCRResult:
 
 @router.post("/process-file", response_model=OCRResult)
 async def process_file(
-    file: UploadFile = File(..., description="Image file (PNG, JPEG, TIFF)"),
+    file: UploadFile = File(..., description="Image file (PNG, JPEG, TIFF, WebP), at most 10 MB."),
     preprocessing_profile: PreprocessingProfile = Form(default=PreprocessingProfile.AGED),
     detect_calligraphy: bool = Form(default=True),
-    consent_to_process: bool = Form(default=True),
+    consent_to_process: bool | None = Form(default=None, description=_CONSENT_DESCRIPTION),
 ) -> OCRResult:
     """Process an uploaded manuscript image file.
 
     Alternative to /process that accepts multipart file upload instead of base64.
+    The format comes from the file's content signature, never its name or
+    declared content type. At most MAX_IMAGE_BYTES + 1 bytes are read.
     """
+    _require_consent(consent_to_process)
     contents = await file.read(MAX_IMAGE_BYTES + 1)
-    validate_image_upload(contents, file.filename, consent=consent_to_process)
+    validate_image_upload(contents, file.filename, consent=True, allowed_formats=OCR_IMAGE_FORMATS)
 
     config = PreprocessingConfig(profile=preprocessing_profile)
 
@@ -961,7 +986,7 @@ async def detect_style(request: StyleDetectionRequest) -> CalligraphyDetection:
     Can be used standalone before OCR to choose optimal processing settings,
     or to classify manuscripts for cataloging purposes.
     """
-    image_data = base64.b64decode(request.image_base64)
+    image_data = decode_page_image(request.image_base64, request.consent_to_process)
     return detect_calligraphy_style(image_data, request.text_sample)
 
 
@@ -974,7 +999,7 @@ async def preprocess(request: PreprocessingRequest) -> PreprocessingResponse:
     - Preparing images for manual review
     - Batch preprocessing before OCR
     """
-    image_data = base64.b64decode(request.image_base64)
+    image_data = decode_page_image(request.image_base64, request.consent_to_process)
     processed, operations = preprocess_manuscript_image(image_data, request.config)
 
     return PreprocessingResponse(
