@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -106,46 +107,114 @@ def load_variants() -> dict[str, dict[str, Any]]:
 
 
 @cache
-def load_rijal() -> dict[str, dict[str, Any]]:
-    """Curated narrator knowledge base keyed by narrator id."""
-    payload = _load_json(RIJAL_PATH)
-    return {narrator["id"]: narrator for narrator in payload.get("narrators", [])}
-
-
-def _normalize_narrator_name(name: str) -> str:
-    """Fold a narrator name for matching: case, punctuation, and bin/ibn forms."""
-    lowered = re.sub(r"[^a-z' ]", "", (name or "").lower())
-    lowered = lowered.replace(" bin ", " ibn ").replace(" b. ", " ibn ")
-    return re.sub(r"\s+", " ", lowered).strip()
+def load_rijal_meta() -> dict[str, Any]:
+    """Full rijal payload: version, provenance, and the narrator records."""
+    return _load_json(RIJAL_PATH)
 
 
 @cache
-def _rijal_lookup() -> dict[str, str]:
-    """Normalized name/alias -> narrator id, longest forms first."""
-    index: dict[str, str] = {}
+def load_rijal() -> dict[str, dict[str, Any]]:
+    """Curated narrator knowledge base keyed by narrator id."""
+    return {narrator["id"]: narrator for narrator in load_rijal_meta().get("narrators", [])}
+
+
+def rijal_provenance() -> RijalProvenance:
+    """Versioned provenance snapshot for the bundled rijal reference."""
+    meta = load_rijal_meta()
+    return RijalProvenance(
+        dataset="data/rijal/narrators.json",
+        version=int(meta.get("version") or 0),
+        source=str(meta.get("provenance") or "unknown"),
+        narrator_count=len(meta.get("narrators") or []),
+        disclaimer=str(meta.get("disclaimer") or DISCLAIMER),
+    )
+
+
+_ARABIC_LETTER_FOLD = (
+    ("أ", "ا"),
+    ("إ", "ا"),
+    ("آ", "ا"),
+    ("ٱ", "ا"),
+    ("ى", "ي"),
+    ("ة", "ه"),
+)
+
+_MATCH_CONFIDENCE = {"name": 1.0, "alias": 0.9, "partial": 0.6}
+
+
+def _normalize_narrator_name(name: str) -> str:
+    """Fold a narrator name for matching across Arabic and English spellings.
+
+    Unicode is normalized and combining marks (Arabic tashkeel and Latin
+    transliteration accents) are dropped; alef/ya/ta-marbuta variants collapse
+    to one letter; apostrophes and hyphenation are removed; and the common
+    ``bin``/``b.`` forms fold to ``ibn``. This lets the same narrator match
+    whether the input is Arabic script or any common English transliteration.
+    """
+    text = unicodedata.normalize("NFKD", name or "")
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = text.lower().replace("’", "'").replace("'", "")
+    text = text.replace("\u0640", "")
+    for variant, canon in _ARABIC_LETTER_FOLD:
+        text = text.replace(variant, canon)
+    text = re.sub(r"\bb\.\s*", "ibn ", text)
+    text = text.replace(" bin ", " ibn ")
+    text = re.sub(r"[^\w\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+@cache
+def _rijal_index() -> dict[str, tuple[str, str]]:
+    """Normalized name/alias -> (narrator id, match kind)."""
+    index: dict[str, tuple[str, str]] = {}
     for narrator_id, narrator in load_rijal().items():
-        for label in [narrator["name"], *narrator.get("aliases", [])]:
+        name_key = _normalize_narrator_name(narrator["name"])
+        if name_key:
+            index.setdefault(name_key, (narrator_id, "name"))
+        for label in narrator.get("aliases", []):
             key = _normalize_narrator_name(label)
             if key:
-                index.setdefault(key, narrator_id)
+                index.setdefault(key, (narrator_id, "alias"))
     return index
+
+
+def _contains_token_sequence(haystack: str, needle: str) -> bool:
+    """True when *needle* appears in *haystack* as a contiguous run of words."""
+    hay_tokens = haystack.split()
+    needle_tokens = needle.split()
+    if not needle_tokens or len(needle_tokens) > len(hay_tokens):
+        return False
+    width = len(needle_tokens)
+    return any(hay_tokens[i : i + width] == needle_tokens for i in range(len(hay_tokens) - width + 1))
+
+
+def _resolve_narrator(name: str) -> tuple[dict[str, Any], str, float] | None:
+    """Resolve a name to ``(narrator, match_kind, confidence)`` or ``None``.
+
+    Exact name and alias hits are high confidence. A name embedded in a longer
+    phrase is only accepted when a known form appears as a whole contiguous run
+    of words, and is surfaced as a lower-confidence ``partial`` match so callers
+    treat the identity as uncertain rather than silently trusting it.
+    """
+    key = _normalize_narrator_name(name)
+    if not key:
+        return None
+    index = _rijal_index()
+    hit = index.get(key)
+    if hit is not None:
+        narrator_id, kind = hit
+        return load_rijal()[narrator_id], kind, _MATCH_CONFIDENCE[kind]
+    for label in sorted(index, key=len, reverse=True):
+        if _contains_token_sequence(key, label):
+            narrator_id, _ = index[label]
+            return load_rijal()[narrator_id], "partial", _MATCH_CONFIDENCE["partial"]
+    return None
 
 
 def find_narrator(name: str) -> dict[str, Any] | None:
     """Resolve a narrator name against the rijal reference, or None."""
-    key = _normalize_narrator_name(name)
-    if not key:
-        return None
-    narrator_id = _rijal_lookup().get(key)
-    if narrator_id is None:
-        # Substring fallback: a name may arrive embedded in a longer phrase.
-        for index_key, candidate_id in _rijal_lookup().items():
-            if index_key and (index_key in key or key in index_key):
-                narrator_id = candidate_id
-                break
-    if narrator_id is None:
-        return None
-    return load_rijal()[narrator_id]
+    resolved = _resolve_narrator(name)
+    return resolved[0] if resolved is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +279,14 @@ class LookupResult(BaseModel):
     citation: str
 
 
+class RijalProvenance(BaseModel):
+    dataset: str
+    version: int
+    source: str
+    narrator_count: int
+    disclaimer: str
+
+
 class NarratorProfile(BaseModel):
     name: str
     matched: bool
@@ -217,6 +294,9 @@ class NarratorProfile(BaseModel):
     death_ah: int | None = None
     reliability: str | None = None
     note: str | None = None
+    source: str | None = None
+    match_method: str | None = None
+    match_confidence: float | None = None
 
 
 class ChainEntry(BaseModel):
@@ -229,7 +309,9 @@ class IsnadAnalysis(BaseModel):
     narrators: list[ChainEntry]
     continuous: bool | None
     flagged: bool
+    uncertain: bool
     notes: list[str]
+    provenance: RijalProvenance
     disclaimer: str = DISCLAIMER
 
 
@@ -395,22 +477,29 @@ _GENERATION_RANK = {
 def analyze_isnad(names: list[str]) -> IsnadAnalysis:
     """Analyze a chain of narrator names for continuity and reliability.
 
-    Narrators are matched against the curated rijal reference; names that do
-    not resolve are reported as unknown rather than silently accepted. The
-    generation order of adjacent *known* narrators is checked: an isnad runs
-    from the latest transmitter down to the oldest (the Companion who heard
-    from the Prophet), so a reversal or a multi-generation jump is flagged.
+    Narrators are matched against the curated, versioned rijal reference; names
+    that do not resolve are reported as unknown rather than silently accepted,
+    and a name matched only partially is surfaced as a low-confidence
+    (``partial``) match so its identity is treated as uncertain. The generation
+    order of adjacent *known* narrators is checked: an isnad runs from the
+    latest transmitter down to the oldest (the Companion who heard from the
+    Prophet), so a reversal or a multi-generation jump is flagged. Every result
+    carries the dataset provenance (version and source) it was derived from.
     """
+    provenance = rijal_provenance()
+    source_label = f"{provenance.dataset} v{provenance.version}"
     entries: list[ChainEntry] = []
     notes: list[str] = []
     flagged = False
+    uncertain = False
 
     for name in names:
-        narrator = find_narrator(name)
+        resolved = _resolve_narrator(name)
         warnings: list[str] = []
-        if narrator is None:
+        if resolved is None:
             warnings.append("Not found in the bundled rijal reference — treat as unverified.")
             flagged = True
+            uncertain = True
             entries.append(
                 ChainEntry(
                     name=name,
@@ -419,7 +508,16 @@ def analyze_isnad(names: list[str]) -> IsnadAnalysis:
                 )
             )
             continue
+        narrator, match_method, match_confidence = resolved
         reliability = narrator.get("reliability")
+        if match_method == "partial":
+            warnings.append(
+                "Matched by partial name only — the narrator's identity is uncertain; "
+                "confirm it against a full rijāl reference."
+            )
+            uncertain = True
+        if not narrator.get("generation"):
+            uncertain = True
         if reliability in ("daif", "matruk"):
             warnings.append(
                 f"Graded {reliability} by rijal critics — do not rely on this narrator for primary evidence."
@@ -437,6 +535,9 @@ def analyze_isnad(names: list[str]) -> IsnadAnalysis:
                     death_ah=narrator.get("death_ah"),
                     reliability=reliability,
                     note=narrator.get("note"),
+                    source=source_label,
+                    match_method=match_method,
+                    match_confidence=match_confidence,
                 ),
                 warnings=warnings,
             )
@@ -448,6 +549,7 @@ def analyze_isnad(names: list[str]) -> IsnadAnalysis:
         ranks = [_GENERATION_RANK.get(entry.profile.generation or "") for entry in known]
         if any(rank is None for rank in ranks):
             notes.append("Some known narrators lack a generation label; full continuity cannot be assessed.")
+            uncertain = True
         else:
             typed = [rank for rank in ranks if rank is not None]
             reversed_gap = [i for i in range(1, len(typed)) if typed[i] >= typed[i - 1]]
@@ -472,11 +574,24 @@ def analyze_isnad(names: list[str]) -> IsnadAnalysis:
 
     if not continuous and len(known) < 2 and any(not e.profile.matched for e in entries):
         notes.append("Unknown narrators prevent a continuity verdict.")
+        uncertain = True
+
+    if any(entry.profile.match_method == "partial" for entry in entries):
+        notes.append(
+            "One or more narrators matched only partially; verify their identity before relying on the verdict."
+        )
 
     if not flagged:
         notes.append("No reliability or continuity concerns found among the known narrators.")
 
-    return IsnadAnalysis(narrators=entries, continuous=continuous, flagged=flagged, notes=notes)
+    return IsnadAnalysis(
+        narrators=entries,
+        continuous=continuous,
+        flagged=flagged,
+        uncertain=uncertain,
+        notes=notes,
+        provenance=provenance,
+    )
 
 
 # ---------------------------------------------------------------------------

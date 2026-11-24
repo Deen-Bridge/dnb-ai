@@ -51,15 +51,31 @@ _MAX_LIMIT = 200
 # ---------------------------------------------------------------------------
 
 
+class ConcordanceProvenance(BaseModel):
+    """Version and provenance of the bundled theme-verse mapping data."""
+
+    dataset_version: str
+    schema_version: int | None = None
+    source: str
+    curation: str | None = None
+    content_sha256: str | None = None
+    mapping_count: int = 0
+    skipped_invalid: int = 0
+    uncertainty_note: str | None = None
+
+
 class VerseHit(BaseModel):
     """One mapped verse, with the theme evidence that matched it."""
 
     surah: int = Field(..., ge=1, le=114)
     ayah: int = Field(..., ge=1)
     reference: str = Field(..., description="surah:ayah reference, e.g. '2:255'")
+    theme_id: str = Field(..., description="The theme whose mapping matched this verse")
     relevance_score: float = Field(..., ge=0.0, le=1.0)
+    relevance_label: str = Field(..., description="Coarse relevance band: 'high', 'moderate', or 'low'")
     context_type: str = Field(..., description="'primary' or 'secondary'")
     annotation: str | None = None
+    explanation: str = Field(..., description="Why this verse matched, in plain language")
 
 
 class ThemeSummary(BaseModel):
@@ -90,6 +106,7 @@ class MultiTopicResult(BaseModel):
     verses: list[VerseHit]
     total: int
     themes: list[ThemeSummary] = Field(default_factory=list, description="Resolved theme metadata")
+    provenance: ConcordanceProvenance
 
 
 class FrequencyRow(BaseModel):
@@ -108,6 +125,7 @@ class FrequencyStats(BaseModel):
     total_verses: int
     surahs_covered: int
     by_surah: list[FrequencyRow]
+    provenance: ConcordanceProvenance
 
 
 class RelatedTopic(BaseModel):
@@ -126,6 +144,7 @@ class RelatedTopicsResponse(BaseModel):
 
     theme_id: str
     related: list[RelatedTopic]
+    provenance: ConcordanceProvenance
 
 
 class ThemeBrowseResponse(BaseModel):
@@ -136,6 +155,7 @@ class ThemeBrowseResponse(BaseModel):
     related: list[ThemeSummary] = Field(default_factory=list)
     verses: list[VerseHit] = Field(default_factory=list)
     total_verses: int
+    provenance: ConcordanceProvenance
 
 
 class VerseThemesResponse(BaseModel):
@@ -145,6 +165,7 @@ class VerseThemesResponse(BaseModel):
     ayah: int
     reference: str
     themes: list[dict[str, Any]] = Field(default_factory=list)
+    provenance: ConcordanceProvenance
 
 
 class HierarchyNode(BaseModel):
@@ -164,6 +185,7 @@ class HierarchyResponse(BaseModel):
     """The full hierarchical topic taxonomy."""
 
     roots: list[HierarchyNode]
+    provenance: ConcordanceProvenance
 
 
 class SearchResponse(BaseModel):
@@ -172,17 +194,37 @@ class SearchResponse(BaseModel):
     query: str
     themes: list[dict[str, Any]] = Field(default_factory=list)
     total: int
+    provenance: ConcordanceProvenance
+
+
+def _relevance_label(score: float) -> str:
+    """Coarse, human-readable relevance band for explainability."""
+    if score >= 0.8:
+        return "high"
+    if score >= 0.5:
+        return "moderate"
+    return "low"
 
 
 def _verse_hit(mapping: VerseThemeMapping) -> VerseHit:
-    """Convert a mapping to the API response shape."""
+    """Convert a mapping to the API response shape, with an explainable match reason."""
+    label = _relevance_label(mapping.relevance_score)
+    explanation = (
+        f"Verse {mapping.surah}:{mapping.ayah} is mapped to theme '{mapping.theme_id}' "
+        f"with {mapping.context_type} context and {label} relevance ({mapping.relevance_score:.2f})."
+    )
+    if mapping.annotation:
+        explanation += f" Note: {mapping.annotation}"
     return VerseHit(
         surah=mapping.surah,
         ayah=mapping.ayah,
         reference=f"{mapping.surah}:{mapping.ayah}",
+        theme_id=mapping.theme_id,
         relevance_score=mapping.relevance_score,
+        relevance_label=label,
         context_type=mapping.context_type,
         annotation=mapping.annotation,
+        explanation=explanation,
     )
 
 
@@ -203,6 +245,11 @@ def _resolve_retriever() -> ThematicRetriever:
     """Return the shared retriever, failing loudly if mappings are missing."""
     retriever = get_thematic_retriever()
     return retriever
+
+
+def _provenance(retriever: ThematicRetriever) -> ConcordanceProvenance:
+    """Version/provenance snapshot of the mapping data backing this response."""
+    return ConcordanceProvenance(**retriever.verse_store.dataset_info())
 
 
 def _require_theme(retriever: ThematicRetriever, theme_id: str) -> Any:
@@ -270,7 +317,7 @@ async def topic_hierarchy() -> HierarchyResponse:
         )
 
     roots = [node(theme) for theme in retriever.taxonomy.get_main_themes()]
-    return HierarchyResponse(roots=roots)
+    return HierarchyResponse(roots=roots, provenance=_provenance(retriever))
 
 
 @router.get("/search", response_model=SearchResponse)
@@ -297,7 +344,7 @@ async def search_topics(
             entry["verses"] = [_verse_hit(m).model_dump() for m in mappings]
         results.append(entry)
 
-    return SearchResponse(query=q, themes=results, total=len(results))
+    return SearchResponse(query=q, themes=results, total=len(results), provenance=_provenance(retriever))
 
 
 @router.get("/topics/{theme_id}", response_model=ThemeBrowseResponse)
@@ -307,11 +354,13 @@ async def browse_topic(
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     min_relevance: float = Query(0.0, ge=0.0, le=1.0),
     context_type: str | None = Query(None, description="'primary' or 'secondary'"),
+    surah: int | None = Query(None, ge=1, le=114, description="Restrict results to one surah"),
 ) -> ThemeBrowseResponse:
     """Browse one topic: its metadata, children, related topics, and verses.
 
-    ``min_relevance`` and ``context_type`` filter the verse list, giving the
-    topic-browsing search the filtering capability the issue calls for.
+    ``min_relevance``, ``context_type``, and ``surah`` filter the verse list,
+    giving the topic-browsing search the relevance filtering the issue calls
+    for. Every hit carries an ``explanation`` of why it matched.
     """
     retriever = _resolve_retriever()
     theme = _require_theme(retriever, theme_id)
@@ -319,7 +368,10 @@ async def browse_topic(
         theme_id,
         min_relevance=min_relevance,
         context_type=context_type,
-    )[:limit]
+    )
+    if surah is not None:
+        mappings = [mapping for mapping in mappings if mapping.surah == surah]
+    mappings = mappings[:limit]
     children = retriever.taxonomy.get_children(theme_id) if include_children else []
     related = retriever.taxonomy.get_related_themes(theme_id)
 
@@ -329,6 +381,7 @@ async def browse_topic(
         related=[_theme_summary(r, _verse_count(retriever, r.id)) for r in related],
         verses=[_verse_hit(m) for m in mappings],
         total_verses=_verse_count(retriever, theme_id),
+        provenance=_provenance(retriever),
     )
 
 
@@ -379,6 +432,7 @@ async def multi_topic_query(body: MultiTopicQueryRequest) -> MultiTopicResult:
         verses=verses,
         total=len(_dedupe_verses(combined)),
         themes=[_theme_summary(t, _verse_count(retriever, t.id)) for t in resolved],
+        provenance=_provenance(retriever),
     )
 
 
@@ -413,6 +467,7 @@ async def theme_frequency(theme_id: str) -> FrequencyStats:
         total_verses=len(mappings),
         surahs_covered=len(rows),
         by_surah=rows,
+        provenance=_provenance(retriever),
     )
 
 
@@ -448,7 +503,7 @@ async def related_topics(theme_id: str) -> RelatedTopicsResponse:
             )
         )
 
-    return RelatedTopicsResponse(theme_id=theme_id, related=related)
+    return RelatedTopicsResponse(theme_id=theme_id, related=related, provenance=_provenance(retriever))
 
 
 @router.get("/verse/{surah}/{ayah}", response_model=VerseThemesResponse)
@@ -475,4 +530,10 @@ async def verse_themes(surah: int, ayah: int) -> VerseThemesResponse:
             }
         )
     themes.sort(key=lambda t: -t["relevance_score"])
-    return VerseThemesResponse(surah=surah, ayah=ayah, reference=f"{surah}:{ayah}", themes=themes)
+    return VerseThemesResponse(
+        surah=surah,
+        ayah=ayah,
+        reference=f"{surah}:{ayah}",
+        themes=themes,
+        provenance=_provenance(retriever),
+    )
