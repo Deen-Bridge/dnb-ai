@@ -145,3 +145,6 @@ python scripts/eval_islamic_qa.py --live --url http://localhost:8000 --output da
 - **Evaluation Runner**: `scripts/eval_islamic_qa.py`
 - **Domain Modules**: `scripts/benchmark_data/*.py`
 - **Automated Tests**: `tests/test_islamic_qa_benchmark.py`
+- **Version & Provenance Manifest**: `data/eval/benchmark_manifest.json`. Run `python benchmark_manifest.py`
+  to verify it. Any change to the dataset, metadata or results file needs a version bump; see
+  `docs/BENCHMARK_DATA_VERSIONING.md`.

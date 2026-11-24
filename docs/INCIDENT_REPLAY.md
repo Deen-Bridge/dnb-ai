@@ -17,6 +17,8 @@ Output is a one-line JSON summary on stdout plus failures on stderr.
 
 ## Adding an incident
 Append a sanitized line to `incidents.jsonl`, raise `min_incidents` in `baseline.json`, and bump `version`.
+Both files are pinned in `data/eval/benchmark_manifest.json`. Bump their manifest `version` and run
+`python benchmark_manifest.py --update` (see `docs/BENCHMARK_DATA_VERSIONING.md`).
 
 ## Rollback
 Revert the commit that changed the fixture or baseline. The check is test-only and has no runtime or deployment impact.
