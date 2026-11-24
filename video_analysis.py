@@ -4,18 +4,45 @@ The pipeline is deliberately dependency-tolerant: ffmpeg is used when present
 for audio/frame extraction, while ASR and OCR adapters are optional. A request
 therefore produces useful metadata and a searchable result even on a worker
 that has not installed heavyweight model packages.
+
+Production contract (#858, PROD-AUDIT AI-082)
+---------------------------------------------
+* Everything this pipeline extracts (ASR transcript, frame OCR, and the
+  optional user-supplied ``transcript``) is untrusted data. Results carry a
+  ``content_trust`` block (see ``untrusted_content.py``); no extracted text is
+  sent to a model, used to pick a tool, or passed to a shell. The "summary" is
+  extractive (the first transcript segments verbatim) and references are
+  unverified pattern matches, and both are labelled as such.
+* Uploads are validated by ``media_upload_limits`` (#853): consent, size,
+  container signature and transcript length; jobs live in its
+  ``BoundedJobManager`` (active-job ceiling, one-hour retention, at most 200
+  stored, cancellable). A validated upload is written to a private temporary
+  file, so a queued job does not hold the payload in memory.
+* Processing is bounded: ffmpeg reads at most ``MAX_VIDEO_DURATION_SECONDS``
+  of media and ``VIDEO_MAX_FRAMES`` frames, each call under
+  ``VIDEO_FFMPEG_TIMEOUT_SECONDS``; at most ``VIDEO_MAX_CONCURRENT_JOBS`` jobs
+  decode at once; extracted text is cut at ``VIDEO_MAX_EXTRACTED_CHARS``.
+* The uploaded file and all extracted audio/frames are deleted when processing
+  ends, on success, failure or cancellation.
+* Failures surface as a stable ``error_code`` with a safe message. Exception
+  text, ffmpeg output, paths and media content are never returned or logged.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+import time
+import traceback
 import uuid
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -24,16 +51,68 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from media_upload_limits import (
     MAX_TRANSCRIPT_CHARS,
     MAX_VIDEO_BYTES,
+    MAX_VIDEO_DURATION_SECONDS,
     BoundedJobManager,
     validate_video_upload,
 )
+from untrusted_content import FLAG_TRUNCATED, ContentSource, describe_untrusted, truncate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/video-analysis", tags=["video-analysis"])
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring non-integer %s; using %d", name, default)
+        return default
+    return max(minimum, value)
+
+
+# Upload size, transcript length, media duration, job retention and the
+# active-job ceiling come from media_upload_limits (#853). The limits below
+# bound the processing work itself (#858).
+MAX_EXTRACTED_CHARS = _env_int("VIDEO_MAX_EXTRACTED_CHARS", 200_000)
+MAX_DURATION_SECONDS = int(MAX_VIDEO_DURATION_SECONDS)
+FRAME_INTERVAL_SECONDS = 30
+MAX_FRAMES = _env_int("VIDEO_MAX_FRAMES", MAX_DURATION_SECONDS // FRAME_INTERVAL_SECONDS)
+FFMPEG_TIMEOUT_SECONDS = _env_int("VIDEO_FFMPEG_TIMEOUT_SECONDS", 120)
+MAX_CONCURRENT_JOBS = _env_int("VIDEO_MAX_CONCURRENT_JOBS", 2)
+MAX_TOPICS = 500
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm"}
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
 job_manager = BoundedJobManager()
 _jobs: dict[str, dict[str, Any]] = job_manager._jobs
+_processing_slots = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+
+class VideoErrorCode(str, Enum):
+    """Stable, client-visible failure codes for analysis jobs."""
+
+    PROCESSING_TIMEOUT = "processing_timeout"
+    DECODE_FAILED = "decode_failed"
+    INTERNAL_ERROR = "internal_error"
+
+
+ERROR_MESSAGES: dict[VideoErrorCode, str] = {
+    VideoErrorCode.PROCESSING_TIMEOUT: "Media processing took too long and was stopped.",
+    VideoErrorCode.DECODE_FAILED: "The video could not be decoded and no transcript was supplied.",
+    VideoErrorCode.INTERNAL_ERROR: "Video analysis failed unexpectedly.",
+}
+
+
+class MediaTimeoutError(RuntimeError):
+    """An ffmpeg call exceeded its timeout."""
+
+
+class MediaDecodeError(RuntimeError):
+    """ffmpeg is installed but produced neither audio nor frames."""
 
 
 def extract_quran_references(text: str) -> list[str]:
@@ -49,8 +128,8 @@ def extract_hadith_references(text: str) -> list[str]:
 
 def detect_language(text: str) -> str:
     """Best-effort language detection for Arabic, Urdu, and English."""
-    if re.search(r"[\u0600-\u06FF]", text):
-        if re.search(r"[\u0679\u0688\u0691\u06BA\u06C1\u06D2]", text):
+    if re.search(r"[؀-ۿ]", text):
+        if re.search(r"[ٹڈڑںہے]", text):
             return "ur"
         return "ar"
     return "en"
@@ -82,23 +161,46 @@ def build_search_index(transcript: str, frames: list[dict[str, Any]]) -> dict[st
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=False, capture_output=True, text=True, timeout=120)
+    """Run ffmpeg with a fixed argv (never a shell) under a hard timeout."""
+    try:
+        return subprocess.run(command, check=False, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise MediaTimeoutError("ffmpeg timed out") from None
 
 
 def extract_media(video_path: Path, workdir: Path) -> tuple[Path | None, list[dict[str, Any]]]:
-    """Extract mono audio and one frame every 30 seconds when ffmpeg exists."""
+    """Extract mono audio and one frame every 30 seconds when ffmpeg exists.
+
+    At most ``MAX_DURATION_SECONDS`` of media and ``MAX_FRAMES`` frames are
+    processed. Raises :class:`MediaDecodeError` when ffmpeg is installed but
+    yields neither audio nor frames (corrupt or non-video input).
+    """
     if not shutil.which("ffmpeg"):
         return None, []
+    base = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path)]
+    limit = ["-t", str(MAX_DURATION_SECONDS)]
     audio: Path | None = workdir / "audio.wav"
-    audio_result = _run(["ffmpeg", "-y", "-i", str(video_path), "-vn", "-ac", "1", "-ar", "16000", str(audio)])
+    audio_result = _run([*base, *limit, "-vn", "-ac", "1", "-ar", "16000", str(audio)])
     if audio_result.returncode != 0:
         audio = None
     frames_dir = workdir / "frames"
     frames_dir.mkdir()
-    _run(["ffmpeg", "-y", "-i", str(video_path), "-vf", "fps=1/30", str(frames_dir / "frame-%04d.jpg")])
+    _run(
+        [
+            *base,
+            *limit,
+            "-vf",
+            f"fps=1/{FRAME_INTERVAL_SECONDS}",
+            "-frames:v",
+            str(MAX_FRAMES),
+            str(frames_dir / "frame-%04d.jpg"),
+        ]
+    )
     frames = []
-    for number, frame in enumerate(sorted(frames_dir.glob("*.jpg"))):
-        frames.append({"path": str(frame), "timestamp_seconds": number * 30, "text": ""})
+    for number, frame in enumerate(sorted(frames_dir.glob("*.jpg"))[:MAX_FRAMES]):
+        frames.append({"path": str(frame), "timestamp_seconds": number * FRAME_INTERVAL_SECONDS, "text": ""})
+    if audio is None and not frames:
+        raise MediaDecodeError("ffmpeg produced no audio or frames")
     return audio, frames
 
 
@@ -137,76 +239,150 @@ def ocr_frame(frame: Path) -> str:
 
 
 def analyze_video(video_path: Path, transcript: str = "") -> dict[str, Any]:
+    started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="dnb-video-") as directory:
-        audio, frames = extract_media(video_path, Path(directory))
+        user_supplied = bool(transcript.strip())
+        try:
+            audio, frames = extract_media(video_path, Path(directory))
+            media_decoded = True
+        except MediaDecodeError:
+            if not user_supplied:
+                raise
+            # A supplied transcript still makes the job useful; report the media as undecoded.
+            audio, frames, media_decoded = None, [], False
         timestamps: list[dict[str, Any]]
-        if transcript.strip():
+        if user_supplied:
             transcript, timestamps = transcript.strip(), []
         else:
             transcript, timestamps = transcribe_audio(audio)
         for frame in frames:
             frame["text"] = ocr_frame(Path(frame["path"]))
-        visual_text = " ".join(frame["text"] for frame in frames if frame["text"])
-        combined = " ".join(part for part in (transcript, visual_text) if part)
-        topics = segment_topics(combined, timestamps)
-        key_points = [
-            {"timestamp_seconds": item["start"], "text": item["text"]} for item in timestamps if item.get("text")
-        ][:20]
-        return {
-            "transcript": transcript,
-            "language": detect_language(combined),
-            "speakers": sorted({item["speaker"] for item in timestamps}),
-            "timestamps": timestamps,
-            "key_points": key_points,
-            "summary": " ".join(segment["text"] for segment in topics[:5]),
-            "key_takeaways": [segment["title"] for segment in topics[:5]],
-            "topics": topics,
-            "quran_references": extract_quran_references(combined),
-            "hadith_references": extract_hadith_references(combined),
-            "frames": [{k: v for k, v in frame.items() if k != "path"} for frame in frames],
-            "search_index": build_search_index(combined, frames),
-            "capabilities": {
-                "ffmpeg": audio is not None or bool(frames),
-                "asr": bool(transcript),
-                "ocr": bool(visual_text),
-            },
-        }
+
+    sources: list[ContentSource] = []
+    if transcript:
+        sources.append("user_transcript" if user_supplied else "asr")
+    visual_text = " ".join(frame["text"] for frame in frames if frame["text"])
+    if visual_text:
+        sources.append("ocr")
+
+    transcript, transcript_cut = truncate(transcript, MAX_EXTRACTED_CHARS)
+    visual_text, visual_cut = truncate(visual_text, max(0, MAX_EXTRACTED_CHARS - len(transcript)))
+    combined = " ".join(part for part in (transcript, visual_text) if part)
+    topics = segment_topics(combined, timestamps)[:MAX_TOPICS]
+    key_points = [
+        {"timestamp_seconds": item["start"], "text": item["text"]} for item in timestamps if item.get("text")
+    ][:20]
+    public_frames = [{k: v for k, v in frame.items() if k != "path"} for frame in frames]
+    return {
+        "transcript": transcript,
+        "language": detect_language(combined),
+        "speakers": sorted({item["speaker"] for item in timestamps}),
+        "timestamps": timestamps,
+        "key_points": key_points,
+        "summary": " ".join(segment["text"] for segment in topics[:5]),
+        "summary_method": "extractive",
+        "key_takeaways": [segment["title"] for segment in topics[:5]],
+        "topics": topics,
+        "quran_references": extract_quran_references(combined),
+        "hadith_references": extract_hadith_references(combined),
+        "reference_status": "unverified_pattern_matches",
+        "frames": public_frames,
+        "search_index": build_search_index(combined, frames),
+        "extraction_status": "content" if combined.strip() else "empty",
+        "content_trust": describe_untrusted(
+            [combined, *(frame["text"] for frame in public_frames)],
+            sources,
+            [FLAG_TRUNCATED] if (transcript_cut or visual_cut) else [],
+        ).model_dump(),
+        "capabilities": {
+            "ffmpeg": audio is not None or bool(frames),
+            "asr": bool(transcript),
+            "ocr": bool(visual_text),
+            "media_decoded": media_decoded,
+        },
+        "metrics": {
+            "frames_processed": len(frames),
+            "transcript_chars": len(transcript),
+            "ocr_chars": len(visual_text),
+            "processing_ms": int((time.perf_counter() - started) * 1000),
+            "provider_cost_usd": 0.0,
+        },
+    }
 
 
-async def _process(job_id: str, payload: bytes, suffix: str, transcript: str) -> None:
-    current_job = job_manager.get_job(job_id)
-    if not current_job or current_job.get("status") == "cancelled":
-        return
-    job_manager.update_job(job_id, status="processing")
+def _is_cancelled(job_id: str) -> bool:
+    job = job_manager.get_job(job_id)
+    return job is None or job.get("status") == "cancelled"
+
+
+async def _process(job_id: str, upload_path: Path, transcript: str) -> None:
+    """Run one job. The uploaded file is always deleted, whatever happens."""
+    error_code: VideoErrorCode | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as handle:
-            handle.write(payload)
-            handle.flush()
-            result = await asyncio.to_thread(analyze_video, Path(handle.name), transcript)
-        # Check if cancelled while processing
-        latest = job_manager.get_job(job_id)
-        if latest and latest.get("status") == "cancelled":
+        if _is_cancelled(job_id):
             return
-        job_manager.update_job(
+        async with _processing_slots:
+            if _is_cancelled(job_id):  # cancelled while waiting for a slot
+                return
+            job_manager.update_job(job_id, status="processing")
+            result = await asyncio.to_thread(analyze_video, upload_path, transcript)
+        if _is_cancelled(job_id):  # cancelled while processing
+            return
+        job_manager.update_job(job_id, status="completed", result=result, completed_at=datetime.now(UTC).isoformat())
+    except MediaTimeoutError:
+        error_code = VideoErrorCode.PROCESSING_TIMEOUT
+    except MediaDecodeError:
+        error_code = VideoErrorCode.DECODE_FAILED
+    except Exception as error:  # keep job failures observable without leaking internals
+        error_code = VideoErrorCode.INTERNAL_ERROR
+        # Type and stack frames only: an exception message may quote media content.
+        logger.error(
+            "Video analysis job %s failed unexpectedly: %s\n%s",
             job_id,
-            status="completed",
-            result=result,
-            completed_at=datetime.now(UTC).isoformat(),
+            type(error).__name__,
+            "".join(traceback.format_tb(error.__traceback__)),
         )
-    except Exception as error:  # sanitized generic error message
+    finally:
+        upload_path.unlink(missing_ok=True)
+    if error_code is not None:
         job_manager.update_job(
             job_id,
             status="failed",
-            error="Video analysis processing encountered an error.",
-            error_details=str(error),
+            error_code=error_code.value,
+            error=ERROR_MESSAGES[error_code],
+            completed_at=datetime.now(UTC).isoformat(),
         )
+    job = job_manager.get_job(job_id)
+    if job is not None:
+        logger.info(
+            "Video analysis job %s %s error_code=%s bytes=%s metrics=%s",
+            job_id,
+            job["status"],
+            job.get("error_code"),
+            job.get("input_bytes"),
+            json.dumps((job.get("result") or {}).get("metrics", {})),
+        )
+
+
+def _write_upload(payload: bytes, suffix: str) -> Path:
+    """Move a validated upload to a private temporary file, so a queued job
+    holds a path instead of the whole payload in memory."""
+    handle = tempfile.NamedTemporaryFile(prefix="dnb-upload-", suffix=suffix, delete=False)
+    path = Path(handle.name)
+    try:
+        with handle:
+            handle.write(payload)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path
 
 
 @router.post("/analyze", status_code=202)
 async def submit_video_analysis(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="MP4, MOV, AVI, or WebM video up to 100MB"),
-    transcript: str = Form(""),
+    transcript: str = Form("", description="Optional transcript; treated as untrusted data"),
     consent_to_process: bool = Form(default=True, description="Explicit user consent to process uploaded media."),
 ) -> dict[str, Any]:
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
@@ -220,11 +396,16 @@ async def submit_video_analysis(
         file.filename,
         consent=consent_to_process,
     )
-    suffix = f".{detected_format}"
+    upload_path = _write_upload(payload, f".{detected_format}")
     job_id = str(uuid.uuid4())
-    job_record = job_manager.register_job(job_id, file.filename)
+    try:
+        job_record = job_manager.register_job(job_id, file.filename)
+    except BaseException:
+        upload_path.unlink(missing_ok=True)
+        raise
     job_record["mime_type"] = mime_type
-    background_tasks.add_task(_process, job_id, payload, suffix, transcript)
+    job_record["input_bytes"] = len(payload)
+    background_tasks.add_task(_process, job_id, upload_path, transcript)
     return {"job_id": job_id, "status": "queued", "poll_url": f"/video-analysis/jobs/{job_id}"}
 
 

@@ -35,6 +35,16 @@ analyzer returns, for the page:
   (main text, footnotes, commentary, references), the "semantically structured
   digital text" the layout is turned into.
 
+Trust boundary (#858, PROD-AUDIT AI-082)
+----------------------------------------
+Block text comes from an OCR/layout engine run on a user's scan and is
+untrusted data. The analyzer only measures, orders and pattern-matches it; it
+never sends it to a model or a tool. Responses carry a ``content_trust`` block
+(see ``untrusted_content.py``) and label references as unverified pattern
+matches. Input is bounded: at most ``MAX_BLOCKS`` blocks,
+``MAX_BLOCK_TEXT_CHARS`` per block and ``MAX_PAGE_TEXT_CHARS`` per page, and
+geometry must be finite numbers.
+
 Reuse
 -----
 Reference extraction mirrors the conventions of ``citations.py`` - the same
@@ -46,11 +56,19 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from media_upload_limits import MAX_PAGE_BLOCKS, MAX_PAGE_DIMENSION
+from untrusted_content import UntrustedContentInfo, describe_untrusted
 
 router = APIRouter(prefix="/page-analysis", tags=["page-analysis"])
+
+MAX_BLOCKS = MAX_PAGE_BLOCKS  # 5000, shared with the upload limits from #853
+MAX_BLOCK_TEXT_CHARS = 10_000
+MAX_PAGE_TEXT_CHARS = 200_000
 
 
 class ElementType(str, Enum):
@@ -78,11 +96,13 @@ class PageBlock(BaseModel):
     it is absent.
     """
 
+    model_config = ConfigDict(allow_inf_nan=False)
+
     x: float = Field(..., ge=0, description="Left edge of the block's bounding box.")
     y: float = Field(..., ge=0, description="Top edge of the block's bounding box.")
     width: float = Field(..., ge=0)
     height: float = Field(..., ge=0)
-    text: str = ""
+    text: str = Field("", max_length=MAX_BLOCK_TEXT_CHARS, description="OCR text (untrusted data).")
     font_size: float | None = Field(None, gt=0)
 
     @property
@@ -102,11 +122,22 @@ class PageInput(BaseModel):
     serves is Arabic Islamic texts.
     """
 
-    width: float = Field(..., gt=0, le=20000, description="Page width in units (max 20000).")
-    height: float = Field(..., gt=0, le=20000, description="Page height in units (max 20000).")
-    blocks: list[PageBlock] = Field(default_factory=list, max_length=5000, description="Blocks on page (max 5000).")
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    width: float = Field(..., gt=0, le=MAX_PAGE_DIMENSION, description="Page width in units (max 20000).")
+    height: float = Field(..., gt=0, le=MAX_PAGE_DIMENSION, description="Page height in units (max 20000).")
+    blocks: list[PageBlock] = Field(
+        default_factory=list, max_length=MAX_BLOCKS, description="Blocks on page (max 5000)."
+    )
     rtl: bool = True
     consent_to_process: bool = Field(True, description="Explicit user consent to process.")
+
+    @model_validator(mode="after")
+    def bounded_text(self) -> PageInput:
+        total = sum(len(block.text) for block in self.blocks)
+        if total > MAX_PAGE_TEXT_CHARS:
+            raise ValueError(f"Page text totals {total} characters; the limit is {MAX_PAGE_TEXT_CHARS}.")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +194,15 @@ class PageAnalysisResponse(BaseModel):
         description="Block indices in reading order.",
     )
     references: list[ExtractedReference] = Field(default_factory=list)
+    reference_status: Literal["unverified_pattern_matches"] = Field(
+        "unverified_pattern_matches",
+        description="References are text-pattern matches on OCR output, not verified citations.",
+    )
     structure: StructuredPage
+    extraction_status: Literal["content", "empty"] = Field(
+        "content", description="'empty' when the page carried no readable text."
+    )
+    content_trust: UntrustedContentInfo
 
 
 class ElementTypeInfo(BaseModel):
@@ -404,6 +443,7 @@ def analyze_page(page: PageInput) -> PageAnalysisResponse:
 
     structure = build_structure(page, elements, reading_order)
 
+    texts = [block.text or "" for block in page.blocks]
     return PageAnalysisResponse(
         columns=columns,
         rtl=page.rtl,
@@ -411,6 +451,8 @@ def analyze_page(page: PageInput) -> PageAnalysisResponse:
         reading_order=reading_order,
         references=references,
         structure=structure,
+        extraction_status="content" if any(text.strip() for text in texts) else "empty",
+        content_trust=describe_untrusted(texts, ["page_blocks"]),
     )
 
 
