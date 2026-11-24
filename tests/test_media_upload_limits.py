@@ -395,14 +395,16 @@ class TestAPIEndpointsIntegration:
         assert resp_valid.status_code == 200
 
     def test_arabic_ocr_process_file_validation(self):
+        consent = {"consent_to_process": "true"}
+
         # Empty file
         files_empty = {"file": ("empty.png", io.BytesIO(b""), "image/png")}
-        resp_empty = self.client.post("/arabic-ocr/process-file", files=files_empty)
+        resp_empty = self.client.post("/arabic-ocr/process-file", files=files_empty, data=consent)
         assert resp_empty.status_code == 400
 
         # Fake file
         files_fake = {"file": ("fake.png", io.BytesIO(b"hello world text"), "image/png")}
-        resp_fake = self.client.post("/arabic-ocr/process-file", files=files_fake)
+        resp_fake = self.client.post("/arabic-ocr/process-file", files=files_fake, data=consent)
         assert resp_fake.status_code == 415
 
         # Missing consent

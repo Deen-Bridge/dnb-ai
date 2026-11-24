@@ -336,7 +336,7 @@ class TestAPIEndpoints:
         image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
         response = client.post(
             "/arabic-ocr/detect-style",
-            json={"image_base64": image_b64},
+            json={"image_base64": image_b64, "consent_to_process": True},
         )
         assert response.status_code == 200
         result = response.json()
@@ -348,7 +348,7 @@ class TestAPIEndpoints:
         image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
         response = client.post(
             "/arabic-ocr/preprocess",
-            json={"image_base64": image_b64},
+            json={"image_base64": image_b64, "consent_to_process": True},
         )
         assert response.status_code == 200
         result = response.json()
@@ -360,7 +360,7 @@ class TestAPIEndpoints:
         image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
         response = client.post(
             "/arabic-ocr/process",
-            json={"image_base64": image_b64},
+            json={"image_base64": image_b64, "consent_to_process": True},
         )
         assert response.status_code == 200
         result = response.json()
@@ -373,7 +373,7 @@ class TestAPIEndpoints:
         """Invalid base64 should return validation error."""
         response = client.post(
             "/arabic-ocr/process",
-            json={"image_base64": "not-valid-base64!!!"},
+            json={"image_base64": "not-valid-base64!!!", "consent_to_process": True},
         )
         assert response.status_code == 422  # Validation error
 
