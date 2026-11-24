@@ -185,6 +185,12 @@ jobs:
       - name: Run container deployment contract tests (#880)
         run: pytest -q tests/test_container_deployment.py
 
+      - name: Run failed-evaluation annotation tests (#828)
+        run: pytest -q tests/test_eval_annotation.py tests/test_regression.py
+
+      - name: Gate failed evaluations on annotations (#828)
+        run: python eval_annotation.py check
+
   build-and-scan-image:
     name: Build, Scan and Verify Hardened Container (#880)
     runs-on: ubuntu-latest

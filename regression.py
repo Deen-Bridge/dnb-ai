@@ -55,7 +55,9 @@ class RegressionRunner:
         """
         data = dict(results)
         if any((owner, version, rollback_plan)):
-            missing = [k for k, v in (("owner", owner), ("version", version), ("rollback_plan", rollback_plan)) if not v]
+            missing = [
+                k for k, v in (("owner", owner), ("version", version), ("rollback_plan", rollback_plan)) if not v
+            ]
             if missing:
                 raise ValueError(f"baseline metadata missing: {', '.join(missing)}")
             data["metadata"] = {
@@ -119,12 +121,18 @@ class RegressionRunner:
             domain = r.get("domain", "general")
             domain_scores.setdefault(domain, []).append(score)
 
+            # The scorer's diagnostics travel with each item so a failure can be
+            # pre-categorised for annotation (see eval_annotation.py).
             results_detail.append(
                 {
                     "id": r["id"],
                     "domain": domain,
                     "score": score,
                     "passed": passed,
+                    "must_include_precision": eval_res.get("must_include_precision"),
+                    "must_not_include_pass": eval_res.get("must_not_include_pass"),
+                    "key_point_recall": eval_res.get("key_point_recall"),
+                    "abstention_correct": eval_res.get("abstention_correct"),
                 }
             )
 
