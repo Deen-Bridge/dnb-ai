@@ -1,0 +1,59 @@
+{
+  "total_evaluated": 6,
+  "mean_composite_score": 1.0,
+  "pass_rate": 1.0,
+  "domain_scores": {
+    "aqeedah": 1.0,
+    "fiqh_ibadat": 1.0,
+    "ulum_al_quran": 1.0,
+    "seerah": 1.0,
+    "fiqh_munakahat_mirath": 1.0
+  },
+  "details": [
+    {
+      "id": "pc-001",
+      "domain": "aqeedah",
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "id": "pc-002",
+      "domain": "fiqh_ibadat",
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "id": "pc-003",
+      "domain": "fiqh_ibadat",
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "id": "pc-004",
+      "domain": "ulum_al_quran",
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "id": "pc-005",
+      "domain": "seerah",
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "id": "pc-006",
+      "domain": "fiqh_munakahat_mirath",
+      "score": 1.0,
+      "passed": true
+    }
+  ],
+  "metadata": {
+    "owner": "AI quality maintainers",
+    "version": "1.0.0",
+    "rollback_plan": "Revert the commit that changed prompts/ or data/eval/prompt_compat/ (or restore baseline.json.prev with RegressionRunner.rollback_baseline()), redeploy, then re-run python -m scripts.check_prompt_eval and confirm RESULT: PASS.",
+    "model_id": "replay-fixture",
+    "prompt_name": "islamic_context",
+    "prompt_version": "1.0.0",
+    "prompt_fingerprint": "sha256:4cbd11e556397ca377f61a9e3f5b9a238bca37c5aae22de5a69493575dc0ab90"
+  }
+}

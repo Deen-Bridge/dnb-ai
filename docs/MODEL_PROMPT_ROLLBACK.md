@@ -23,3 +23,5 @@ Baselines contain only aggregate scores and item ids — no prompts, user data, 
 
 ## CI
 `pytest tests/test_regression.py` runs offline with a deterministic fixture and stub model.
+Prompt-version locking and baseline compatibility (`python -m scripts.check_prompt_eval`) are
+described in [PROMPT_VERSIONING.md](PROMPT_VERSIONING.md).

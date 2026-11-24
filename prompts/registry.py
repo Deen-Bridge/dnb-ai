@@ -20,11 +20,34 @@ prompt or starting an experiment needs no code change.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import re
+import string
 from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+
+def parse_version(version: str) -> tuple[int, int, int]:
+    """Parse a ``MAJOR.MINOR.PATCH`` version string into a comparable tuple.
+
+    Pre-release and build suffixes are deliberately rejected: prompt versions
+    are recorded in evaluation baselines and must compare unambiguously.
+    """
+    match = _SEMVER_RE.match(version or "")
+    if match is None:
+        raise ValueError(f"Invalid prompt version {version!r}; expected MAJOR.MINOR.PATCH")
+    major, minor, patch = (int(part) for part in match.groups())
+    return major, minor, patch
+
+
+def template_placeholders(template: str) -> set[str]:
+    """Return the ``{placeholder}`` names referenced by a template string."""
+    return {field for _, field, _, _ in string.Formatter().parse(template) if field is not None}
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +75,33 @@ class PromptTemplate:
     changelog: str
     variables: frozenset  # allowed variable names for this template
     template: str  # the prompt text with {placeholders}
+
+    def __post_init__(self) -> None:
+        parse_version(self.version)
+        # A placeholder that is not declared would raise KeyError at render
+        # time; a declared variable that is never used silently drops input.
+        # Both are contract drift, so fail when the template is defined.
+        placeholders = template_placeholders(self.template)
+        if placeholders != set(self.variables):
+            raise ValueError(
+                f"Template '{self.name}' placeholders {sorted(placeholders)} "
+                f"do not match declared variables {sorted(self.variables)}"
+            )
+
+    @property
+    def fingerprint(self) -> str:
+        """Stable content hash of everything that changes what the model sees.
+
+        The version and changelog are excluded on purpose: the fingerprint is
+        what the version lock compares, so editing the text without bumping
+        the version is detectable.
+        """
+        canonical = json.dumps(
+            {"name": self.name, "variables": sorted(self.variables), "template": self.template},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def render(self, **kwargs: Any) -> str:
         """Render the template with the given variables.

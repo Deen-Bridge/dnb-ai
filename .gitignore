@@ -59,5 +59,9 @@ data/store.json
 feedback.db
 feedback.db-*
 
+# Local rollback copies written by RegressionRunner.save_baseline; the
+# committed baseline's history lives in git
+data/eval/**/*.json.prev
+
 # Committed virtual environments are machine-specific — never commit them
 venv_linux/
