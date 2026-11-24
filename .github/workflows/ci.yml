@@ -146,6 +146,12 @@ jobs:
       - name: Run Islamic QA Benchmark dataset tests
         run: pytest -q tests/test_islamic_qa_benchmark.py
 
+      - name: Verify benchmark data versions and provenance (#825)
+        run: python benchmark_manifest.py
+
+      - name: Run benchmark manifest tests (#825)
+        run: pytest -q tests/test_benchmark_manifest.py
+
       - name: Run intent classification tests
         run: pytest -q tests/test_intent.py
 

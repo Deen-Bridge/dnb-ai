@@ -18,6 +18,9 @@ Owner: AI quality maintainers (record the individual owner in baseline `metadata
    or `git revert` the baseline commit.
 3. Re-run the suite with a deterministic stub callable (no secrets needed) and confirm `OK`.
 
+A baseline committed under `data/eval/` must also be listed in `data/eval/benchmark_manifest.json`,
+or `python benchmark_manifest.py` fails it as unversioned (see `docs/BENCHMARK_DATA_VERSIONING.md`).
+
 ## Data handling
 Baselines contain only aggregate scores and item ids — no prompts, user data, keys or provider responses.
 
